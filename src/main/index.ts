@@ -20,6 +20,9 @@ let agentManager: AgentManager;
 
 function createWindow() {
   const windowOptions = settingsStore.createWindowOptions();
+  // Linux 窗口管理器不会总是读取打包元数据里的图标；运行时显式传入
+  // PNG 可以保证任务栏、窗口标题和未安装直接运行 AppImage 时都显示应用图标。
+  const iconPath = join(__dirname, "../../build/icon.png");
 
   mainWindow = new BrowserWindow({
     width: 1320,
@@ -27,6 +30,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 660,
     title: "",
+    icon: iconPath,
     frame: windowOptions.frame,
     titleBarStyle: windowOptions.titleBarStyle,
     trafficLightPosition: windowOptions.trafficLightPosition,
