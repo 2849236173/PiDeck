@@ -842,6 +842,13 @@ export function App() {
 						/>
 						<textarea
 							value={prompt}
+							className={
+								prompt.startsWith("!!")
+									? "bang-bang"
+									: prompt.startsWith("!")
+										? "bang"
+										: ""
+							}
 							onFocus={() => setSuggestionsOpen(true)}
 							onChange={(event) => {
 								setPrompt(event.target.value);
@@ -849,11 +856,32 @@ export function App() {
 							}}
 							onKeyDown={handleComposerKeyDown}
 							placeholder={
-								settings.sendShortcut === "enter-send"
-									? "输入消息，Enter 发送，Ctrl/Shift+Enter 换行。输入 / 或 @ 查看建议。"
-									: "输入消息，按设置的快捷键发送。输入 / 或 @ 查看建议。"
+								prompt.startsWith("!!")
+									? "!!命令 — 直接执行，不写入上下文"
+									: prompt.startsWith("!")
+										? "!命令 — 直接执行 shell 命令"
+										: settings.sendShortcut === "enter-send"
+											? "输入消息，Enter 发送。/ 命令，@ 文件，! shell"
+											: "输入消息，按设置的快捷键发送。/ 命令，@ 文件，! shell"
 							}
 						/>
+						{(prompt.startsWith("!") || prompt.startsWith("/")) && (
+							<div
+								className={`composer-mode-hint ${
+									prompt.startsWith("!!")
+										? "mode-bang-bang"
+										: prompt.startsWith("!")
+											? "mode-bang"
+											: "mode-slash"
+								}`}
+							>
+								{prompt.startsWith("!!")
+									? "⚡ 静默执行"
+									: prompt.startsWith("!")
+										? ">_ 执行命令"
+										: "⌘ 斜杠命令"}
+							</div>
+						)}
 						{suggestionsOpen && (
 							<PromptSuggestions
 								prompt={prompt}

@@ -1697,6 +1697,33 @@ body.is-composer-resizing .composer-resize-handle::after {
 .composer-toolbar button:disabled.compacting {
 	opacity: 0.7;
 }
+
+/* ---- 输入框命令模式指示 ---- */
+.composer-box textarea.bang {
+	border-left: 3px solid #f59e0b;
+}
+.composer-box textarea.bang-bang {
+	border-left: 3px solid #ef4444;
+}
+.composer-mode-hint {
+	font-size: 11px;
+	padding: 2px 8px 0;
+	line-height: 18px;
+	border-radius: 4px;
+	user-select: none;
+}
+.mode-bang {
+	color: #b45309;
+	background: #fef3c7;
+}
+.mode-bang-bang {
+	color: #b91c1c;
+	background: #fee2e2;
+}
+.mode-slash {
+	color: #6d28d9;
+	background: #f3e8ff;
+}
 .model-picker {
 	width: 640px;
 	max-height: 76vh;
