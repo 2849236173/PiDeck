@@ -4,6 +4,26 @@
 
 All notable changes to pi-desktop are documented here.
 
+## v0.4.0 - 2026-06-02
+
+### Added
+- Image support: paste images from clipboard (Ctrl+V) or drag and drop into chat composer.
+- Image preview in user messages with click-to-zoom fullscreen viewer.
+- History session image restoration: images from previous sessions now display correctly when reopening.
+- Session end notification: system notification when agent finishes responding (configurable in settings).
+- Large image auto-compression: images are resized to 2000px max edge to reduce context usage.
+- Error feedback when sending images to unsupported models.
+
+### Improved
+- Optimized image transmission by auto-converting PNG/WebP to JPEG for smaller payload size.
+- Send button now enabled for image-only messages without text.
+- History session loading now extracts and displays images from pi session files.
+
+### Fixed
+- Fixed history sessions showing thinking/reasoning content instead of actual responses.
+- Fixed image sending failure with no error feedback (now shows error in chat).
+- Fixed ANSI escape codes appearing in message summaries.
+
 ## v0.3.0 - 2026-06-02
 
 ### Added
