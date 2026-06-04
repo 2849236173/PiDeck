@@ -130,6 +130,7 @@ export function createPreviewApi(): PiDesktopApi {
 				releasesUrl: "https://github.com/ayuayue/pi-desktop/releases",
 			}),
 			openExternal: async () => undefined,
+			toggleDevTools: async () => false,
 		},
 		settings: {
 			get: async (): Promise<AppSettings> => ({
@@ -139,6 +140,8 @@ export function createPreviewApi(): PiDesktopApi {
 				piEnvironmentChecked: true,
 				closeToTray: true,
 				enableNotifications: true,
+				showThinking: true,
+				showDevTools: false,
 			}),
 			update: async (patch): Promise<AppSettings> => ({
 				useNativeTitleBar: true,
@@ -147,6 +150,8 @@ export function createPreviewApi(): PiDesktopApi {
 				piEnvironmentChecked: true,
 				closeToTray: true,
 				enableNotifications: true,
+				showThinking: true,
+				showDevTools: false,
 				...patch,
 			}),
 			onApplyWindow: noop,
@@ -232,6 +237,8 @@ export function createPreviewApi(): PiDesktopApi {
 				return () => undefined;
 			}) as any,
 			onLog: noop,
+			onThinking: noop,
+			onRpcLog: noop,
 			onRuntimeState: noop,
 		},
 	};

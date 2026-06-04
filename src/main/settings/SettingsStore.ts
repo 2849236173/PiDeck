@@ -10,6 +10,8 @@ const defaultSettings: AppSettings = {
   piEnvironmentChecked: false,
   closeToTray: true,
   enableNotifications: true,
+  showThinking: true,
+  showDevTools: false,
 };
 
 export class SettingsStore {

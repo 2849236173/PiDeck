@@ -270,6 +270,17 @@ function registerIpc() {
 	ipcMain.handle(ipcChannels.configSaveRaw, (_event, fileName, rawJson) =>
 		configManager.saveRawConfig(fileName, rawJson),
 	);
+
+	// 切换开发者控制台
+	ipcMain.handle(ipcChannels.appToggleDevTools, () => {
+		if (!mainWindow || mainWindow.isDestroyed()) return false;
+		if (mainWindow.webContents.isDevToolsOpened()) {
+			mainWindow.webContents.closeDevTools();
+			return false;
+		}
+		mainWindow.webContents.openDevTools({ mode: "detach" });
+		return true;
+	});
 }
 
 app.whenReady().then(async () => {

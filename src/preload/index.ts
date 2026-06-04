@@ -15,6 +15,7 @@ import type {
 	Project,
 	SendPromptInput,
 	SessionSummary,
+	ThinkingUpdate,
 } from "../shared/types";
 
 const api = {
@@ -71,6 +72,8 @@ const api = {
 		info: () => ipcRenderer.invoke(ipcChannels.appInfo) as Promise<AppInfo>,
 		openExternal: (url: string) =>
 			ipcRenderer.invoke(ipcChannels.appOpenExternal, url) as Promise<void>,
+		toggleDevTools: () =>
+			ipcRenderer.invoke(ipcChannels.appToggleDevTools) as Promise<boolean>,
 	},
 	settings: {
 		get: () =>
@@ -189,6 +192,12 @@ const api = {
 		) => subscribe(ipcChannels.agentsMessage, callback),
 		onLog: (callback: (payload: { agentId: string; text: string }) => void) =>
 			subscribe(ipcChannels.agentsLog, callback),
+		onThinking: (
+			callback: (payload: ThinkingUpdate) => void,
+		) => subscribe(ipcChannels.agentsThinking, callback),
+		onRpcLog: (
+			callback: (payload: { agentId: string; direction: string; summary: string; data: unknown }) => void,
+		) => subscribe(ipcChannels.agentsRpcLog, callback),
 		onRuntimeState: (
 			callback: (payload: {
 				agentId: string;

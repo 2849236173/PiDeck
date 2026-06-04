@@ -31,6 +31,8 @@ export class PiProcess extends EventEmitter {
 
     this.rpc.on("event", event => this.emit("event", event));
     this.rpc.on("protocol-error", line => this.emit("protocol-error", line));
+    // 转发 RPC 日志到 AgentManager，用于前端调试面板展示
+    this.rpc.on("log", entry => this.emit("rpc-log", entry));
 
     this.proc.stderr.on("data", chunk => {
       // stderr 不属于 RPC 协议，单独暴露给 UI 的日志面板，避免污染 JSONL stdout。

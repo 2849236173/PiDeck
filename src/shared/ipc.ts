@@ -36,6 +36,9 @@ export const ipcChannels = {
 	agentsMessage: "agents:message",
 	agentsLog: "agents:log",
 
+	/** 流式思考内容更新，agent 忙碌时实时推送当前思考文本 */
+	agentsThinking: "agents:thinking",
+
 	configGetModels: "config:get-models",
 	configGetAuth: "config:get-auth",
 	configGetSettings: "config:get-settings",
@@ -43,4 +46,10 @@ export const ipcChannels = {
 	configSaveAuth: "config:save-auth",
 	configSaveSettings: "config:save-settings",
 	configSaveRaw: "config:save-raw",
+
+	/** 切换开发者控制台 */
+	appToggleDevTools: "app:toggle-devtools",
+
+	/** RPC 日志，用于调试 */
+	agentsRpcLog: "agents:rpc-log",
 } as const;

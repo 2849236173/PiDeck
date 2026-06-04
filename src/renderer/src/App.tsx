@@ -19,6 +19,7 @@ import {
 	Play,
 	Check,
 	GitBranch,
+	Brain,
 } from "lucide-react";
 import { createPreviewApi } from "./previewApi";
 import { ConfigModal } from "./ConfigModal";
@@ -37,6 +38,7 @@ import type {
 	PiInstallStatus,
 	Project,
 	SessionSummary,
+	ThinkingUpdate,
 } from "../../shared/types";
 
 type DrawerPanel = "files" | "sessions";
@@ -73,6 +75,14 @@ export function App() {
 	const [attachedImages, setAttachedImages] = useState<ImageContent[]>([]);
 	const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>([]);
 	const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
+	/** 当前 agent 流式思考的实时文本，agent_end 时清空 */
+	const [streamingThinking, setStreamingThinking] = useState<
+		Record<string, string>
+	>({});
+	/** RPC 日志，用于调试 */
+	const [rpcLogs, setRpcLogs] = useState<
+		Array<{ id: string; agentId: string; direction: string; summary: string; time: number }>
+	>([]);
 	const [_logs, setLogs] = useState<string[]>([]); // 写入式调试日志，仅用于 onLog/onError 捕获
 	const [search, setSearch] = useState("");
 	const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -91,6 +101,9 @@ export function App() {
 	const [drawer, setDrawer] = useState<DrawerPanel | null>(null);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [configOpen, setConfigOpen] = useState(false);
+	const [debugOpen, setDebugOpen] = useState(false);
+	/** RPC 日志弹窗目标 agent */
+	const [rpcLogAgentId, setRpcLogAgentId] = useState<string | null>(null);
 	const [agentLoading, setAgentLoading] = useState<{ text: string } | null>(
 		null,
 	);
@@ -101,6 +114,8 @@ export function App() {
 		piEnvironmentChecked: false,
 		closeToTray: true,
 		enableNotifications: true,
+		showThinking: true,
+		showDevTools: false,
 	});
 	const [settingsNotice, setSettingsNotice] = useState("");
 	const [piStatus, setPiStatus] = useState<PiInstallStatus | null>(null);
@@ -137,6 +152,8 @@ export function App() {
 			(activeAgent.status === "running" || activeRuntimeState?.isStreaming) &&
 			activeMessages.at(-1)?.role !== "assistant",
 	);
+	/** 当前活跃 agent 的实时思考文本 */
+	const activeThinking = activeAgentId ? (streamingThinking[activeAgentId] ?? "") : "";
 	const outlineItems = useMemo(
 		() => buildOutline(activeMessages),
 		[activeMessages],
@@ -208,6 +225,27 @@ export function App() {
 				[payload.agentId]: payload.state,
 			})),
 		);
+		// 监听流式思考内容更新，用于在 agent 响应前展示推理过程
+		const offThinking = api.agents.onThinking((payload: ThinkingUpdate) =>
+			setStreamingThinking((current) => ({
+				...current,
+				[payload.agentId]: payload.thinking,
+			})),
+		);
+		// 监听 RPC 日志，保留最近 200 条用于调试
+		const offRpcLog = api.agents.onRpcLog((payload) =>
+			setRpcLogs((current) => [
+				...current.slice(-199),
+				{
+					id: crypto.randomUUID(),
+					agentId: payload.agentId,
+					direction: payload.direction,
+					summary: payload.summary,
+					data: payload.data,
+					time: Date.now(),
+				},
+			]),
+		);
 
 		return () => {
 			offProjects();
@@ -216,6 +254,8 @@ export function App() {
 			offLog();
 			offSettings();
 			offRuntimeState();
+			offThinking();
+			offRpcLog();
 		};
 	}, []);
 
@@ -1057,10 +1097,16 @@ export function App() {
 										key={item.message.id}
 										message={item.message}
 										onPreviewImage={setPreviewImage}
+										showThinking={settings.showThinking}
 									/>
 								),
 							)}
-							{isAwaitingAssistant && <ThinkingBubble />}
+							{isAwaitingAssistant && (
+								<ThinkingBubble
+									thinking={activeThinking}
+									showThinking={settings.showThinking}
+								/>
+							)}
 							{pendingPrompts.map((item) => (
 								<PendingBubble
 									key={item.id}
@@ -1301,10 +1347,21 @@ export function App() {
 						void exportAgentHtml(agentMenu.agent.id);
 						setAgentMenu(null);
 					}}
+					onShowLogs={() => {
+						setRpcLogAgentId(agentMenu.agent.id);
+						setAgentMenu(null);
+					}}
 					onCloseAgent={() => {
 						void closeAgent(agentMenu.agent.id);
 						setAgentMenu(null);
 					}}
+				/>
+			)}
+			{/* RPC 日志弹窗 */}
+			{rpcLogAgentId && (
+				<RpcLogModal
+					logs={rpcLogs.filter((l) => l.agentId === rpcLogAgentId)}
+					onClose={() => setRpcLogAgentId(null)}
 				/>
 			)}
 			{toast && <div className="toast">{toast}</div>}
@@ -1751,18 +1808,50 @@ function groupToolMessages(messages: ChatMessage[]): RenderMessage[] {
 	return result;
 }
 
-function ThinkingBubble() {
+function ThinkingBubble(props: {
+	thinking?: string;
+	showThinking?: boolean;
+}) {
+	const hasThinking = props.showThinking && props.thinking && props.thinking.length > 0;
+	const [expanded, setExpanded] = useState(false);
+	const previewLen = 200;
+	const needsTruncate = (props.thinking?.length ?? 0) > previewLen;
+	const displayText = expanded || !needsTruncate
+		? (props.thinking ?? "")
+		: (props.thinking ?? "").slice(0, previewLen) + "…";
+
 	return (
 		<article className="chat-message assistant thinking-message">
 			<div className="msg-avatar">P</div>
 			<div className="msg-content">
 				<div className="msg-name">
 					<span>pi</span>
-					<time>正在响应</time>
+					<time>{hasThinking ? "思考中" : "正在响应"}</time>
 				</div>
-				<div className="msg-bubble typing-bubble">
-					<span /> <span /> <span />
-				</div>
+				{hasThinking && (
+					<div className="thinking-block streaming">
+						<div className="thinking-header">
+							<Brain size={14} />
+							<span>思考过程</span>
+						</div>
+						<div className="thinking-content">
+							{displayText}
+						</div>
+						{needsTruncate && (
+							<button
+								className="thinking-toggle"
+								onClick={() => setExpanded((v) => !v)}
+							>
+								{expanded ? "收起" : "展开全部"}
+							</button>
+						)}
+					</div>
+				)}
+				{!hasThinking && (
+					<div className="msg-bubble typing-bubble">
+						<span /> <span /> <span />
+					</div>
+				)}
 			</div>
 		</article>
 	);
@@ -1896,11 +1985,20 @@ function stripAnsi(text: string): string {
 function ChatBubble(props: {
 	message: ChatMessage;
 	onPreviewImage: (image: ImageContent) => void;
+	showThinking?: boolean;
 }) {
 	const { message } = props;
 	const [expanded, setExpanded] = useState(false);
 	const isUser = message.role === "user";
 	const isTool = message.role === "tool";
+	const isAssistant = message.role === "assistant";
+	const hasThinking = isAssistant && props.showThinking && message.thinking && message.thinking.length > 0;
+	const [thinkingExpanded, setThinkingExpanded] = useState(false);
+	const thinkingPreviewLen = 200;
+	const thinkingNeedsTruncate = (message.thinking?.length ?? 0) > thinkingPreviewLen;
+	const thinkingDisplayText = thinkingExpanded || !thinkingNeedsTruncate
+		? (message.thinking ?? "")
+		: (message.thinking ?? "").slice(0, thinkingPreviewLen) + "…";
 	const label = message.role === "assistant" ? "pi" : message.role;
 	const detailText =
 		typeof message.meta?.detailText === "string"
@@ -1923,6 +2021,24 @@ function ChatBubble(props: {
 					<time>{formatTime(message.timestamp)}</time>
 				</div>
 				<div className={`msg-bubble ${isUser ? "" : "markdown-body"}`}>
+					{/* 思考内容展示：可折叠，默认收起长文本 */}
+					{hasThinking && (
+						<div className="thinking-block">
+							<div
+								className="thinking-header"
+								onClick={() => setThinkingExpanded((v) => !v)}
+							>
+								<Brain size={14} />
+								<span>思考过程</span>
+								<em>{thinkingExpanded ? "收起" : "展开"}</em>
+							</div>
+							{thinkingExpanded && (
+								<div className="thinking-content">
+									{thinkingDisplayText}
+								</div>
+							)}
+						</div>
+					)}
 					{/* 显示消息中附加的图片 */}
 					{message.images && message.images.length > 0 && (
 						<div className="message-images">
@@ -2036,6 +2152,63 @@ function summarizeMessage(text: string) {
 			.map((line) => line.trim())
 			.find(Boolean) ?? "";
 	return firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine;
+}
+
+function RpcLogModal(props: {
+	logs: Array<{ id: string; agentId: string; direction: string; summary: string; time: number; data?: unknown }>;
+	onClose: () => void;
+}) {
+	const panelRef = useRef<HTMLDivElement>(null);
+	const [expandedId, setExpandedId] = useState<string | null>(null);
+	const visibleLogs = props.logs.slice(-200);
+
+	useEffect(() => {
+		const el = panelRef.current;
+		if (el) el.scrollTop = el.scrollHeight;
+	}, [props.logs.length]);
+
+	return (
+		<div className="modal-backdrop" onClick={props.onClose}>
+			<div className="rpc-log-modal" onClick={(e) => e.stopPropagation()}>
+				<div className="modal-header">
+					<strong>RPC 日志 · {props.logs.length} 条</strong>
+					<div className="modal-header-actions">
+						<button onClick={props.onClose}>×</button>
+					</div>
+				</div>
+				<div className="rpc-log-list" ref={panelRef}>
+					{visibleLogs.map((log) => (
+						<div key={log.id} className="rpc-log-entry-wrap">
+							<div
+								className={`rpc-log-entry ${log.direction === "send" ? "log-send" : "log-recv"}`}
+								onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
+							>
+								<time>
+									{new Date(log.time).toLocaleTimeString(undefined, {
+										hour: "2-digit",
+										minute: "2-digit",
+										second: "2-digit",
+									})}
+								</time>
+								<span className="log-direction">
+									{log.direction === "send" ? "→" : "←"}
+								</span>
+								<span className="log-summary">{log.summary}</span>
+							</div>
+							{expandedId === log.id && log.data != null && (
+								<pre className="rpc-log-detail">
+									{JSON.stringify(log.data, null, 2)}
+								</pre>
+							)}
+						</div>
+					))}
+					{visibleLogs.length === 0 && (
+						<div className="rpc-log-empty">暂无日志，发送消息后会记录 RPC 通信</div>
+					)}
+				</div>
+			</div>
+		</div>
+	);
 }
 
 function ConversationOutline(props: {
@@ -2445,6 +2618,7 @@ function AgentContextMenu(props: {
 	onClose: () => void;
 	onActivate: () => void;
 	onExport: () => void;
+	onShowLogs: () => void;
 	onCloseAgent: () => void;
 }) {
 	return (
@@ -2456,6 +2630,7 @@ function AgentContextMenu(props: {
 			>
 				<button onClick={props.onActivate}>打开会话</button>
 				<button onClick={props.onExport}>导出 HTML</button>
+				<button onClick={props.onShowLogs}>RPC 日志</button>
 				<button onClick={props.onCloseAgent}>关闭 Agent</button>
 			</div>
 		</div>
@@ -2540,6 +2715,19 @@ function SettingsModal(props: {
 						/>{" "}
 						会话结束时发送系统通知
 					</label>
+					<label>
+						<input
+							type="checkbox"
+							checked={props.settings.showThinking}
+							onChange={(event) =>
+								props.onChange({ showThinking: event.target.checked })
+							}
+						/>{" "}
+						显示思考过程
+						<small className="setting-hint">
+							开启后可看到模型推理过程，帮助理解 agent 为什么“卡住”
+						</small>
+					</label>
 					<div className="setting-field">
 						<span>发送快捷键</span>
 						<select
@@ -2583,6 +2771,15 @@ function SettingsModal(props: {
 							<small>v{props.appInfo.version}</small>
 						</div>
 						<button onClick={props.onCheckUpdate}>检测更新</button>
+					</div>
+					<div className="setting-row">
+						<div>
+							<strong>开发者控制台</strong>
+							<small>打开 DevTools 查看控制台日志，排查问题</small>
+						</div>
+						<button onClick={() => void api.app.toggleDevTools()}>
+							打开/关闭
+						</button>
 					</div>
 					<p>{props.notice || "标题栏设置保存后需要重启应用生效。"}</p>
 				</div>

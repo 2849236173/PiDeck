@@ -4,6 +4,22 @@
 
 All notable changes to pi-desktop are documented here.
 
+## v0.4.3 - 2026-06-04
+
+### Added
+- Real-time thinking process display: shows model reasoning during streaming
+  with collapsible content block, so users know the model is working instead of
+  appearing stuck. Thinking content is persisted in messages for both current
+  and historical sessions.
+- RPC log panel: accessible via right-click context menu on agent tabs, shows
+  detailed request/response/event flow with expandable JSON data view.
+- DevTools toggle button in Settings for easier debugging.
+
+### Improved
+- Settings modal width increased from 420px to 640px for better readability.
+- ANSI escape codes stripped from thinking content (terminal color sequences
+  like `\x1b[38;2;...m` are now cleaned).
+
 ## v0.4.2 - 2026-06-04
 
 ### Added

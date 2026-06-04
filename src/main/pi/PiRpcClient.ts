@@ -61,6 +61,8 @@ export class PiRpcClient extends EventEmitter {
   }
 
   private write(payload: Record<string, unknown>) {
+    // 记录发出的 RPC 命令，方便调试
+    this.emit("log", { direction: "send", data: payload });
     // pi RPC 使用严格 JSONL 协议；每条命令必须以 LF 结尾，不能依赖 readline 之类的宽松分行。
     this.stdin.write(`${JSON.stringify(payload)}\n`);
   }
@@ -101,6 +103,9 @@ export class PiRpcClient extends EventEmitter {
       this.emit("protocol-error", line);
       return;
     }
+
+    // 记录收到的 RPC 消息，方便调试
+    this.emit("log", { direction: "recv", data: message });
 
     if (this.isResponse(message) && message.id && this.pending.has(message.id)) {
       const pending = this.pending.get(message.id)!;

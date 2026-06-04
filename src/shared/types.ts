@@ -29,6 +29,8 @@ export type ChatMessage = {
 	timestamp: number;
 	meta?: Record<string, unknown>;
 	images?: ImageContent[]; // 用户消息中附加的图片
+	/** 思考内容：来自 thinking 内容块，用于展示模型推理过程 */
+	thinking?: string;
 };
 
 export type FileTreeNode = {
@@ -93,6 +95,10 @@ export type AppSettings = {
 	closeToTray: boolean;
 	/** 会话结束时发送系统通知 */
 	enableNotifications: boolean;
+	/** 是否在会话中显示模型思考过程，默认开启 */
+	showThinking: boolean;
+	/** 是否开启开发者控制台（DevTools） */
+	showDevTools: boolean;
 };
 
 export type PiInstallStatus = {
@@ -136,6 +142,13 @@ export type SendPromptInput = {
 	message: string;
 	images?: ImageContent[]; // 可选的图片列表
 	streamingBehavior?: "steer" | "followUp";
+};
+
+/** 实时思考内容更新，用于流式展示模型推理过程 */
+export type ThinkingUpdate = {
+	agentId: string;
+	/** 累积的思考文本 */
+	thinking: string;
 };
 
 /** 前端本地排队的消息，agent 忙碌时暂存，空闲后自动发送 */

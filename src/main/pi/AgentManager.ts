@@ -9,6 +9,7 @@ import type {
 	ImageContent,
 	Project,
 	SendPromptInput,
+	ThinkingUpdate,
 } from "../../shared/types";
 import { ipcChannels } from "../../shared/ipc";
 import { PiProcess } from "./PiProcess";
@@ -17,6 +18,8 @@ import type { SettingsStore } from "../settings/SettingsStore";
 export class AgentManager {
 	private readonly agents = new Map<string, AgentRuntime>();
 	private readonly messages = new Map<string, ChatMessage[]>();
+	/** 当前流式思考的累积文本，用于实时推送给前端展示 */
+	private readonly streamingThinking = new Map<string, string>();
 
 	constructor(
 		private readonly getProject: (id: string) => Project | undefined,
@@ -85,6 +88,35 @@ export class AgentManager {
 				text: `Protocol error: ${line}`,
 			}),
 		);
+		// 转发 RPC 日志到前端，用于调试面板展示请求/响应/事件
+		process.on("rpc-log", (entry: { direction: string; data: unknown }) => {
+			const data = entry.data as Record<string, any>;
+			let summary: string;
+			if (entry.direction === "send") {
+				// 发送的命令：显示类型和关键参数
+				const type = data.type ?? "?";
+				if (type === "prompt") summary = `→ prompt: ${(data.message ?? "").slice(0, 60)}`;
+				else if (type === "set_model") summary = `→ set_model: ${data.provider}/${data.modelId}`;
+				else if (type === "set_thinking_level") summary = `→ set_thinking: ${data.level}`;
+				else if (type === "bash") summary = `→ bash: ${(data.command ?? "").slice(0, 60)}`;
+				else summary = `→ ${type}`;
+			} else {
+				// 收到的响应/事件
+				const type = data.type ?? "?";
+				if (type === "response") summary = `← ${data.command ?? "?"} ${data.success ? "✓" : "✗"}${data.error ? ` ${data.error}` : ""}`;
+				else if (type === "message_update") {
+					const evt = data.assistantMessageEvent?.type ?? "?";
+					summary = `← message_update.${evt}`;
+				}
+				else summary = `← ${type}`;
+			}
+			this.emit(ipcChannels.agentsRpcLog, {
+				agentId: id,
+				direction: entry.direction,
+				summary,
+				data,
+			});
+		});
 		process.on("exit", () => {
 			tab.status = "closed";
 			this.emitState();
@@ -475,6 +507,9 @@ export class AgentManager {
 
 		if (typed.type === "agent_end" && runtime) {
 			runtime.tab.status = "idle";
+			// 清理流式思考状态
+			this.streamingThinking.delete(agentId);
+			this.emitThinking(agentId, "");
 			this.emitState();
 			// 同步刷新 runtimeState，将 isStreaming 重置为 false；
 			// 否则前端 isAgentBusy 依赖的 isStreaming 仍为过期的 true，导致排队 flush 无法触发。
@@ -500,6 +535,33 @@ export class AgentManager {
 				agentId,
 				String(typed.assistantMessageEvent.delta ?? ""),
 			);
+		}
+
+		// 捕获思考内容流，通过 IPC 实时推送给前端，避免用户感觉模型“卡住”
+		if (
+			typed.type === "message_update" &&
+			typed.assistantMessageEvent?.type === "thinking_delta"
+		) {
+			const prev = this.streamingThinking.get(agentId) ?? "";
+			const delta = String(typed.assistantMessageEvent.delta ?? "");
+			this.streamingThinking.set(agentId, prev + delta);
+			this.emitThinking(agentId, this.stripAnsi(prev + delta));
+		}
+		// thinking_end 时保留思考文本，等 text_delta 创建 assistant 消息时再附加
+		// 因为 thinking_end 在 text_delta 之前触发，此时还没有 assistant 消息
+		if (
+			typed.type === "message_update" &&
+			typed.assistantMessageEvent?.type === "thinking_end"
+		) {
+			const finalThinking = String(
+				typed.assistantMessageEvent.content ??
+					this.streamingThinking.get(agentId) ??
+					"",
+			);
+			if (finalThinking) {
+				this.streamingThinking.set(agentId, finalThinking);
+			}
+			// 不立即清除，等 appendAssistantDelta 附加到消息后再清除
 		}
 
 		if (typed.type === "tool_execution_start") {
@@ -559,13 +621,21 @@ export class AgentManager {
 		if (last?.role === "assistant") {
 			last.text += delta;
 		} else {
-			list.push({
+			// 创建新 assistant 消息时，如果有待附加的思考内容，一并写入
+			const pendingThinking = this.streamingThinking.get(agentId);
+			const newMsg: ChatMessage = {
 				id: randomUUID(),
 				agentId,
 				role: "assistant",
 				text: delta,
 				timestamp: Date.now(),
-			});
+			};
+			if (pendingThinking) {
+				newMsg.thinking = this.stripAnsi(pendingThinking);
+				this.streamingThinking.delete(agentId);
+				this.emitThinking(agentId, "");
+			}
+			list.push(newMsg);
 		}
 
 		this.messages.set(agentId, list);
@@ -616,7 +686,8 @@ export class AgentManager {
 						},
 					];
 				}
-				if (typed.role === "assistant")
+				if (typed.role === "assistant") {
+					const thinking = this.extractThinking(typed.content);
 					return [
 						{
 							id: `${agentId}-history-${index}`,
@@ -624,8 +695,10 @@ export class AgentManager {
 							role: "assistant" as const,
 							text: this.extractText(typed.content),
 							timestamp: typed.timestamp ?? Date.now(),
+							...(thinking ? { thinking } : {}),
 						},
 					];
+				}
 				if (typed.role === "toolResult")
 					return [
 						{
@@ -713,6 +786,21 @@ export class AgentManager {
 		});
 	}
 
+	/** 从历史消息 content 数组中提取 thinking 内容块的文本，清理 ANSI 转义码 */
+	private extractThinking(content: unknown): string {
+		if (!Array.isArray(content)) return "";
+		const raw = content
+			.map((item) => {
+				if (!item || typeof item !== "object") return "";
+				const typed = item as any;
+				if (typed.type !== "thinking") return "";
+				return String(typed.thinking ?? typed.text ?? "");
+			})
+			.filter(Boolean)
+			.join("\n");
+		return this.stripAnsi(raw);
+	}
+
 	private requireRuntime(agentId: string) {
 		const runtime = this.agents.get(agentId);
 		if (!runtime) throw new Error(`Agent not found: ${agentId}`);
@@ -741,6 +829,16 @@ export class AgentManager {
 		} catch {
 			// 通知失败不影响主流程，静默处理
 		}
+	}
+
+	/** 清理 ANSI 转义码，模型思考内容中常见终端颜色序列 */
+	private stripAnsi(text: string): string {
+		return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+	}
+
+	private emitThinking(agentId: string, thinking: string) {
+		const update: ThinkingUpdate = { agentId, thinking };
+		this.emit(ipcChannels.agentsThinking, update);
 	}
 
 	private emitState() {
