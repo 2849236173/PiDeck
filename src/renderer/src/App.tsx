@@ -74,8 +74,8 @@ export function App() {
 	const [prompt, setPrompt] = useState("");
 	/** 键盘上下键切换的历史消息列表 */
 	const [messageHistory, setMessageHistory] = useState<string[]>([]);
-	/** 当前在历史中的索引，-1 表示新输入 */
-	const [historyIndex, setHistoryIndex] = useState(-1);
+	/** 当前在历史中的索引，-1 表示新输入；用 ref 确保键盘事件回调中读取到最新的值 */
+	const historyIndexRef = useRef(-1);
 	const [attachedImages, setAttachedImages] = useState<ImageContent[]>([]);
 	const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>([]);
 	const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
@@ -496,25 +496,37 @@ export function App() {
 			setSuggestionsOpen(false);
 		}
 		// 上下键切换历史消息：类似 CLI，将之前发送过的消息填入输入框
-		if (event.key === "ArrowUp" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+		if (
+			event.key === "ArrowUp" &&
+			!event.shiftKey &&
+			!event.ctrlKey &&
+			!event.metaKey
+		) {
 			event.preventDefault();
-			const nextIndex = Math.min(historyIndex + 1, messageHistory.length - 1);
-			if (nextIndex !== historyIndex && messageHistory[nextIndex]) {
+			const idx = historyIndexRef.current;
+			const nextIndex = Math.min(idx + 1, messageHistory.length - 1);
+			if (nextIndex !== idx && messageHistory[nextIndex]) {
 				setPrompt(messageHistory[nextIndex]);
-				setHistoryIndex(nextIndex);
+				historyIndexRef.current = nextIndex;
 			}
 			return;
 		}
-		if (event.key === "ArrowDown" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+		if (
+			event.key === "ArrowDown" &&
+			!event.shiftKey &&
+			!event.ctrlKey &&
+			!event.metaKey
+		) {
 			event.preventDefault();
-			if (historyIndex > 0) {
-				const nextIndex = historyIndex - 1;
+			const idx = historyIndexRef.current;
+			if (idx > 0) {
+				const nextIndex = idx - 1;
 				setPrompt(messageHistory[nextIndex]);
-				setHistoryIndex(nextIndex);
-			} else if (historyIndex === 0) {
+				historyIndexRef.current = nextIndex;
+			} else if (idx === 0) {
 				// 回到最顶上时清空输入框
 				setPrompt("");
-				setHistoryIndex(-1);
+				historyIndexRef.current = -1;
 			}
 			return;
 		}
@@ -579,7 +591,7 @@ export function App() {
 		// 发送成功后记录到历史，供上下键切换复用
 		if (message) {
 			setMessageHistory((current) => [message.trim(), ...current]);
-			setHistoryIndex(-1);
+			historyIndexRef.current = -1;
 		}
 	}
 
@@ -1998,7 +2010,6 @@ function ToolSummary(props: { message: ChatMessage }) {
 	);
 }
 
-
 function ImagePreviewModal(props: {
 	image: ImageContent;
 	onClose: () => void;
@@ -2134,9 +2145,7 @@ function ChatBubble(props: {
 								const text = message.text;
 								// 通过 InputEvent 设置输入框内容，复用 composer 现有的编辑流程
 								document
-									.querySelector<HTMLTextAreaElement>(
-										".composer-box textarea",
-									)
+									.querySelector<HTMLTextAreaElement>(".composer-box textarea")
 									?.focus();
 								// 触发自定义事件让 App 层处理编辑
 								window.dispatchEvent(
