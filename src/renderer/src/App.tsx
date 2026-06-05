@@ -2006,7 +2006,6 @@ function ResponseBubble(props: {
 		thinkingExpanded || !thinkingNeedsTruncate
 			? (group.thinking ?? "")
 			: (group.thinking ?? "").slice(0, thinkingPreviewLen) + "\u2026";
-	const visibleTools = expanded ? group.tools : group.tools.slice(0, 3);
 	const running = group.tools.some((m) => m.meta?.status === "running");
 	const failed = group.tools.some(
 		(m) => m.meta?.status === "error" || m.meta?.isError === true,
@@ -2073,17 +2072,13 @@ function ResponseBubble(props: {
 							<strong>{group.tools.length} 条</strong>
 							<em>{expanded ? "收起" : "展开"}</em>
 						</button>
-						<div className="tool-group-list">
-							{visibleTools.map((message) => (
-								<ToolSummary key={message.id} message={message} />
-							))}
-							{!expanded && group.tools.length > visibleTools.length && (
-								<div className="tool-more">
-									还有 {group.tools.length - visibleTools.length}{" "}
-									条工具调用，点击展开查看
-								</div>
-							)}
-						</div>
+						{expanded && (
+							<div className="tool-group-list">
+								{group.tools.map((message) => (
+									<ToolSummary key={message.id} message={message} />
+								))}
+							</div>
+						)}
 					</div>
 				)}
 			</div>
