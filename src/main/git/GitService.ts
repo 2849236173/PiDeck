@@ -7,39 +7,22 @@ const execFileAsync = promisify(execFile);
 export class GitService {
 	async getBranches(cwd: string): Promise<GitBranchInfo> {
 		try {
-			// 获取当前分支和所有本地分支
+			// 获取当前分支和所有本地分支（不包含远程分支）
 			const [{ stdout: currentRaw }, { stdout: localRaw }] = await Promise.all([
 				execFileAsync("git", ["branch", "--show-current"], { cwd }),
 				execFileAsync("git", ["branch", "--format=%(refname:short)"], { cwd }),
 			]);
 
 			const current = currentRaw.trim() || null;
-			const localBranches = localRaw
+			const branches = localRaw
 				.split(/\r?\n/)
 				.map((b) => b.trim())
 				.filter(Boolean);
 
-			// 获取远程分支（排除 HEAD 引用和纯远程名）
-			let remoteBranches: string[] = [];
-			try {
-				const { stdout: remoteRaw } = await execFileAsync(
-					"git",
-					["branch", "-r", "--format=%(refname:short)"],
-					{ cwd },
-				);
-				remoteBranches = remoteRaw
-					.split(/\r?\n/)
-					.map((b) => b.trim())
-					.filter((b) => b && b.includes("/") && !b.endsWith("/HEAD"));
-			} catch {
-				// 远程分支获取失败时忽略，不影响本地分支展示
-			}
-
-			// 合并本地和远程分支，去重，当前分支排在最前
-			const allBranches = [...new Set([...localBranches, ...remoteBranches])];
+			// 当前分支排在最前
 			const sorted = current
-				? [current, ...allBranches.filter((b) => b !== current)]
-				: allBranches;
+				? [current, ...branches.filter((b) => b !== current)]
+				: branches;
 
 			return { current, branches: sorted };
 		} catch {
