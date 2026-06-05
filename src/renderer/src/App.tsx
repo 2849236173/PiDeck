@@ -73,9 +73,7 @@ export function App() {
 	const [modelPickerOpen, setModelPickerOpen] = useState(false);
 	const [prompt, setPrompt] = useState("");
 	/** 当前进行的操作类型，用于按钮 loading 状态 */
-	const [loadingAction, setLoadingAction] = useState<
-		null | "restart"
-	>(null);
+	const [loadingAction, setLoadingAction] = useState<null | "restart">(null);
 	/** 键盘上下键切换的历史消息列表 */
 	const [messageHistory, setMessageHistory] = useState<string[]>([]);
 	/** 当前在历史中的索引，-1 表示新输入；用 ref 确保键盘事件回调中读取到最新的值 */
@@ -86,6 +84,12 @@ export function App() {
 	/** 当前 agent 流式思考的实时文本，agent_end 时清空 */
 	const [streamingThinking, setStreamingThinking] = useState<
 		Record<string, string>
+	>({});
+	/** 每个 agent 最后一次会话的开始时间（status 变为 running 时记录），用 ref 避免 effect 闭包陈旧 */
+	const sessionStartByAgentRef = useRef<Record<string, number>>({});
+	/** 每个 agent 最后一次会话的总时长（ms），仅在会话结束后更新 */
+	const [sessionDurationByAgent, setSessionDurationByAgent] = useState<
+		Record<string, number>
 	>({});
 	/** RPC 日志，用于调试 */
 	const [rpcLogs, setRpcLogs] = useState<
@@ -302,6 +306,24 @@ export function App() {
 			timeline.scrollTop = timeline.scrollHeight;
 		});
 	}, [activeAgentId, activeMessages.length]);
+
+	// 追踪 agent 会话开始/结束时间，计算会话时长
+	useEffect(() => {
+		for (const agent of agents) {
+			if (agent.id !== activeAgentId) continue;
+			if (agent.status === "running") {
+				sessionStartByAgentRef.current[agent.id] = Date.now();
+			} else if (agent.status === "idle") {
+				const start = sessionStartByAgentRef.current[agent.id];
+				if (start) {
+					setSessionDurationByAgent((d) => ({
+						...d,
+						[agent.id]: Date.now() - start,
+					}));
+				}
+			}
+		}
+	}, [agents, activeAgentId]);
 
 	// 监听用户发送消息的编辑事件，将消息填入输入框
 	useEffect(() => {
@@ -1065,7 +1087,7 @@ export function App() {
 								? `${activeAgent.status} · ${displayPath(activeProject?.path ?? activeAgent.cwd)}`
 								: "选择项目并创建 Agent"}
 						</span>
-						<SessionStatus state={activeRuntimeState} />
+						<SessionStatus state={activeRuntimeState} duration={activeAgentId ? sessionDurationByAgent[activeAgentId] : undefined} />
 					</div>
 					<div
 						className={`chat-header-actions${activeAgent?.status === "starting" ? " loading" : ""}`}
@@ -1089,12 +1111,12 @@ export function App() {
 								>
 									Stop
 								</button>
-									<button
-										disabled={
-											!activeAgentId ||
-											activeAgent?.status === "starting" ||
-											!!loadingAction
-										}
+								<button
+									disabled={
+										!activeAgentId ||
+										activeAgent?.status === "starting" ||
+										!!loadingAction
+									}
 									title="重启 Agent 进程，重新加载配置文件（provider、API key 等）"
 									onClick={async () => {
 										if (!activeAgentId) return;
@@ -1553,7 +1575,7 @@ function EnvironmentDialog(props: {
 	);
 }
 
-function SessionStatus(props: { state?: AgentRuntimeState }) {
+function SessionStatus(props: { state?: AgentRuntimeState; duration?: number }) {
 	if (!props.state) return null;
 	return (
 		<div className="session-status">
@@ -1561,6 +1583,11 @@ function SessionStatus(props: { state?: AgentRuntimeState }) {
 				{props.state.modelName ?? props.state.modelId ?? "model"}
 			</span>
 			<span>think: {props.state.thinkingLevel ?? "-"}</span>
+			{props.duration != null && (
+				<span title="本次会话耗时">
+					⏱ {formatDuration(props.duration)}
+				</span>
+			)}
 			{props.state.contextPercent != null && (
 				<span>
 					ctx:{" "}
@@ -2199,6 +2226,16 @@ function extractText(node: ReactNode): string {
 	if (isValidElement<{ children?: ReactNode }>(node))
 		return extractText(node.props.children);
 	return "";
+}
+
+/** 将毫秒数格式化为短可读形式，如 "3.2s" "1m23s" */
+function formatDuration(ms: number): string {
+	if (ms < 1000) return `${ms}ms`;
+	const seconds = Math.floor(ms / 1000);
+	if (seconds < 60) return `${seconds}.${Math.floor((ms % 1000) / 100)}s`;
+	const minutes = Math.floor(seconds / 60);
+	const remaining = seconds % 60;
+	return remaining > 0 ? `${minutes}m${remaining}s` : `${minutes}m`;
 }
 
 function formatTime(timestamp: number) {
