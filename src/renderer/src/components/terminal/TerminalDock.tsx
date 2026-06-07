@@ -72,6 +72,7 @@ export function TerminalDock(props: {
 	const [tabs, setTabs] = useState<TerminalTab[]>([]);
 	const [activeTabId, setActiveTabId] = useState("");
 	const [themeId, setThemeId] = useState<TerminalThemeId>("pi-soft");
+	const [confirmCloseAllOpen, setConfirmCloseAllOpen] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
 	const theme = TERMINAL_THEMES[themeId];
@@ -203,11 +204,10 @@ export function TerminalDock(props: {
 
 	async function closeAllTabs() {
 		if (tabs.length === 0) return;
-		const confirmed = window.confirm("关闭所有终端？正在运行的命令会被终止。");
-		if (!confirmed) return;
 		await Promise.all(tabs.map((tab) => props.terminal.close(tab.id)));
 		buffersRef.current = {};
 		setTabs([]);
+		setConfirmCloseAllOpen(false);
 		props.onClose();
 	}
 
@@ -307,7 +307,7 @@ export function TerminalDock(props: {
 					</button>
 					<button
 						className="terminal-icon-btn"
-						onClick={() => void closeAllTabs()}
+						onClick={() => setConfirmCloseAllOpen(true)}
 						title="关闭全部终端"
 						disabled={tabs.length === 0}
 					>
@@ -319,6 +319,25 @@ export function TerminalDock(props: {
 				<div className="terminal-pane-shell">
 					{loading && <div className="terminal-placeholder">正在启动终端…</div>}
 					<div ref={containerRef} className="terminal-xterm" />
+				</div>
+			)}
+			{confirmCloseAllOpen && (
+				<div className="terminal-confirm-backdrop">
+					<div className="terminal-confirm">
+						<strong>关闭全部终端？</strong>
+						<p>正在运行的命令会被终止，此操作不能撤销。</p>
+						<div className="terminal-confirm-actions">
+							<button onClick={() => setConfirmCloseAllOpen(false)}>
+								取消
+							</button>
+							<button
+								className="danger"
+								onClick={() => void closeAllTabs()}
+							>
+								关闭全部
+							</button>
+						</div>
+					</div>
 				</div>
 			)}
 		</section>

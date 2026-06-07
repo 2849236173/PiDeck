@@ -1112,6 +1112,63 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 	margin-top: 14px;
 	color: #8b95a5;
 }
+.terminal-confirm-backdrop {
+	position: absolute;
+	inset: 34px 0 0;
+	display: grid;
+	place-items: center;
+	padding: 18px;
+	background: rgba(15, 23, 42, 0.18);
+	backdrop-filter: blur(2px);
+	z-index: 6;
+}
+.terminal-confirm {
+	width: min(360px, 100%);
+	border: 1px solid var(--terminal-border);
+	border-radius: 8px;
+	background: var(--terminal-bg);
+	color: var(--terminal-fg);
+	box-shadow: 0 16px 38px rgba(15, 23, 42, 0.22);
+	padding: 16px;
+}
+.terminal-confirm strong {
+	display: block;
+	font-size: 14px;
+	margin-bottom: 6px;
+}
+.terminal-confirm p {
+	margin: 0;
+	color: var(--terminal-muted);
+	font-size: 12.5px;
+	line-height: 1.5;
+}
+.terminal-confirm-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 16px;
+}
+.terminal-confirm-actions button {
+	height: 30px;
+	border: 1px solid var(--terminal-border);
+	border-radius: 7px;
+	background: var(--terminal-panel);
+	color: var(--terminal-fg);
+	padding: 0 12px;
+	font-size: 12.5px;
+	cursor: pointer;
+}
+.terminal-confirm-actions button:hover {
+	background: var(--terminal-hover);
+}
+.terminal-confirm-actions button.danger {
+	background: #dc2626;
+	border-color: #dc2626;
+	color: #fff;
+}
+.terminal-confirm-actions button.danger:hover {
+	background: #b91c1c;
+}
 .history-loading {
 	position: absolute;
 	inset: 0;
