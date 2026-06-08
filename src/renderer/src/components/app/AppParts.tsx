@@ -984,59 +984,132 @@ export function RpcLogModal(props: {
 }) {
 	const panelRef = useRef<HTMLDivElement>(null);
 	const [expandedId, setExpandedId] = useState<string | null>(null);
-	const visibleLogs = props.logs.slice(-200);
+	const [directionFilter, setDirectionFilter] = useState<"all" | "send" | "recv">("all");
+	const [keyword, setKeyword] = useState("");
+	const normalizedKeyword = keyword.trim().toLowerCase();
+	const visibleLogs = props.logs
+		.filter((log) => directionFilter === "all" || log.direction === directionFilter)
+		.filter((log) => {
+			if (!normalizedKeyword) return true;
+			// 搜索同时覆盖摘要和完整 JSON，方便直接查 502、terminated、auto_retry 等排障关键词。
+			return formatRpcLogForCopy(log).toLowerCase().includes(normalizedKeyword);
+		})
+		.slice(-2000);
 
 	useEffect(() => {
 		const el = panelRef.current;
 		if (el) el.scrollTop = el.scrollHeight;
-	}, [props.logs.length]);
+	}, [props.logs.length, visibleLogs.length]);
+
+	const copyLogs = (logs: typeof visibleLogs) =>
+		navigator.clipboard.writeText(logs.map(formatRpcLogForCopy).join("\n"));
 
 	return (
 		<div className="modal-backdrop" onClick={props.onClose}>
 			<div className="rpc-log-modal" onClick={(e) => e.stopPropagation()}>
-				<div className="modal-header">
-					<strong>RPC 日志 · {props.logs.length} 条</strong>
-					<div className="modal-header-actions">
-						<button onClick={props.onClose}>×</button>
+				<div className="modal-header rpc-log-header">
+					<strong>
+						RPC 日志 · {visibleLogs.length}/{props.logs.length} 条
+					</strong>
+					<div className="modal-header-actions rpc-log-header-actions">
+						<button className="config-btn primary" onClick={() => copyLogs(props.logs)}>
+							复制全部
+						</button>
+						<button className="config-btn blue" onClick={() => copyLogs(visibleLogs)}>
+							复制可见
+						</button>
+						<button className="modal-close-btn" onClick={props.onClose}>×</button>
 					</div>
 				</div>
+				<div className="rpc-log-toolbar">
+					<div className="rpc-log-filter-tabs">
+						<button
+							className={directionFilter === "all" ? "active" : ""}
+							onClick={() => setDirectionFilter("all")}
+						>
+							全部
+						</button>
+						<button
+							className={directionFilter === "send" ? "active" : ""}
+							onClick={() => setDirectionFilter("send")}
+						>
+							发送 →
+						</button>
+						<button
+							className={directionFilter === "recv" ? "active" : ""}
+							onClick={() => setDirectionFilter("recv")}
+						>
+							接收 ←
+						</button>
+					</div>
+					<input
+						value={keyword}
+						onChange={(event) => setKeyword(event.target.value)}
+						placeholder="搜索 summary / JSON，例如 502、terminated、auto_retry"
+					/>
+				</div>
 				<div className="rpc-log-list" ref={panelRef}>
-					{visibleLogs.map((log) => (
-						<div key={log.id} className="rpc-log-entry-wrap">
-							<div
-								className={`rpc-log-entry ${log.direction === "send" ? "log-send" : "log-recv"}`}
-								onClick={() =>
-									setExpandedId(expandedId === log.id ? null : log.id)
-								}
-							>
-								<time>
-									{new Date(log.time).toLocaleTimeString(undefined, {
-										hour: "2-digit",
-										minute: "2-digit",
-										second: "2-digit",
-									})}
-								</time>
-								<span className="log-direction">
-									{log.direction === "send" ? "→" : "←"}
-								</span>
-								<span className="log-summary">{log.summary}</span>
+					{visibleLogs.map((log) => {
+						const jsonText = JSON.stringify(log.data ?? {}, null, 2);
+						return (
+							<div key={log.id} className="rpc-log-entry-wrap">
+								<div
+									className={`rpc-log-entry ${log.direction === "send" ? "log-send" : "log-recv"}`}
+									onClick={() =>
+										setExpandedId(expandedId === log.id ? null : log.id)
+									}
+								>
+									<time>
+										{new Date(log.time).toLocaleTimeString(undefined, {
+											hour: "2-digit",
+											minute: "2-digit",
+											second: "2-digit",
+										})}
+									</time>
+									<span className="log-direction">
+										{log.direction === "send" ? "→" : "←"}
+									</span>
+									<span className="log-summary">{log.summary}</span>
+									<div className="rpc-log-entry-actions" onClick={(event) => event.stopPropagation()}>
+										<button onClick={() => navigator.clipboard.writeText(formatRpcLogForCopy(log))}>
+											复制
+										</button>
+										<button onClick={() => navigator.clipboard.writeText(jsonText)}>
+											复制 JSON
+										</button>
+									</div>
+								</div>
+								{expandedId === log.id && log.data != null && (
+									<pre className="rpc-log-detail">{jsonText}</pre>
+								)}
 							</div>
-							{expandedId === log.id && log.data != null && (
-								<pre className="rpc-log-detail">
-									{JSON.stringify(log.data, null, 2)}
-								</pre>
-							)}
-						</div>
-					))}
+						);
+					})}
 					{visibleLogs.length === 0 && (
 						<div className="rpc-log-empty">
-							暂无日志，发送消息后会记录 RPC 通信
+							暂无匹配日志，发送消息后会记录 RPC 通信
 						</div>
 					)}
 				</div>
 			</div>
 		</div>
 	);
+}
+
+function formatRpcLogForCopy(log: {
+	agentId: string;
+	direction: string;
+	summary: string;
+	time: number;
+	data?: unknown;
+}) {
+	return JSON.stringify({
+		time: new Date(log.time).toISOString(),
+		agentId: log.agentId,
+		direction: log.direction,
+		summary: log.summary,
+		data: log.data,
+	});
 }
 
 export function ConversationOutline(props: {

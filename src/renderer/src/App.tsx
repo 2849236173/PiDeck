@@ -132,6 +132,7 @@ export function App() {
 			agentId: string;
 			direction: string;
 			summary: string;
+			data?: unknown;
 			time: number;
 		}>
 	>([]);
@@ -395,10 +396,11 @@ export function App() {
 				[payload.agentId]: payload.thinking,
 			})),
 		);
-		// 监听 RPC 日志，保留最近 200 条用于调试
+		// 监听 RPC 日志，保留最近 2000 条用于调试；message_update 高频事件很多，
+		// 200 条很容易在一次长响应中被刷掉，但仍设置上限避免 renderer 内存无限增长。
 		const offRpcLog = api.agents.onRpcLog((payload) =>
 			setRpcLogs((current) => [
-				...current.slice(-199),
+				...current.slice(-1999),
 				{
 					id: crypto.randomUUID(),
 					agentId: payload.agentId,
