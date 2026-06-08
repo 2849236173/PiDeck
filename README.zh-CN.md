@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.4.9-green)
+![Version](https://img.shields.io/badge/version-0.4.10-green)
 
 `pi-desktop` **不是** pi 的分支。它是一个轻量 Electron 外壳，通过启动多个 `pi --mode rpc` 进程，将项目管理、会话管理、对话界面、配置管理和工具编排整合到一个原生桌面应用中——所有 Agent 能力由 pi 原生提供。
 
@@ -23,7 +23,7 @@
 | **代理设置** | 独立管理 pi agent 子进程代理和桌面端代理，模型拉取与连接测试可走桌面端代理。 |
 | **斜线命令 & `!` Shell** | 内置斜线命令建议（`/compact`、`/session` 等），支持 `!command` / `!!command` 在聊天输入框直接执行 Shell 命令。 |
 | **内嵌终端 Dock** | 当前 Agent 绑定独立终端 tab，支持 PowerShell/cmd/sh fallback、多 tab、主题切换、拖拽高度、右键复制选区和关闭确认。 |
-| **会话管理** | 新建会话、项目历史弹框、恢复历史会话、重命名、导出 HTML、关闭 Agent——通过侧边栏或右键菜单即可完成。 |
+| **会话管理** | 新建会话、项目历史弹框、恢复历史会话、重命名、导出 HTML、关闭 Agent——通过项目历史按钮、侧边栏或右键菜单即可完成。 |
 | **Git 集成** | 实时显示当前分支，支持本地 + 远程分支选择器、分支数量徽章和分支切换。 |
 | **工具调用可视化** | 工具调用聚合卡片，摘要 + 可展开详情，运行中/完成/失败状态清晰标识。 |
 | **上下文感知输入** | `@` 文件引用建议、`!` Shell 执行、`/` 斜线命令——统一在同一个输入框中。 |

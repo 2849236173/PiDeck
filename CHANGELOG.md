@@ -4,6 +4,20 @@
 
 All notable changes to pi-desktop are documented here.
 
+## v0.4.10 - 2026-06-08
+
+### Added
+- Project history quick action: each project row now includes a dedicated history button, so historical sessions can be opened without relying on the context menu.
+
+### Fixed
+- Agent terminal isolation: switching projects or agents no longer reuses another agent's open terminal state.
+- Terminal initialization: opening the terminal no longer creates duplicate tabs automatically in development/runtime race conditions.
+- macOS app icon packaging: release builds now generate a real `.icns` file instead of a mislabeled PNG, improving Dock icon rendering.
+- Composer wrapping: the prompt input now wraps and scrolls more reliably for long content, and the window no longer shrinks below the layout's safe range.
+
+### Improved
+- Model defaults: newly added models now start with `contextWindow=1000000`, `maxTokens=128000`, and reasoning enabled by default.
+
 ## v0.4.9 - 2026-06-08
 
 ### Added

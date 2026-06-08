@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.4.9-green)
+![Version](https://img.shields.io/badge/version-0.4.10-green)
 
 `pi-desktop` is **not** a fork of pi. It is a lightweight Electron shell that orchestrates multiple `pi --mode rpc` processes, providing a native desktop UI for projects, sessions, conversations, configuration, and tool orchestration — all powered by pi's native agent capabilities.
 
@@ -16,12 +16,13 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.4.9** (2026-06-08)
+> **Latest: v0.4.10** (2026-06-08)
 
-### v0.4.9 Added
-- 🗂️ Session history modal: open project history from the project context menu and rename sessions inline.
-- 🖱️ Terminal right-click copy: copy selected terminal text with a lightweight confirmation hint.
-- 🧩 Codex import fix: imported sessions now include assistant usage metadata so conversations can continue safely.
+### v0.4.10 Updates
+- 🗂️ Project history quick action: each project row now includes a dedicated history button for opening historical sessions directly.
+- 🖥️ Terminal stability fixes: terminal visibility no longer leaks across agents/projects, and duplicate tabs are no longer auto-created during initialization.
+- 🍎 macOS icon fix: release builds now ship a real `.icns` app icon for better Dock rendering.
+- ✍️ Composer and model-default improvements: the window no longer shrinks into a broken layout range, and newly added models now start with better default context/token/reasoning values.
 
 [View Full Changelog →](CHANGELOG.md)
 
@@ -36,7 +37,7 @@
 | **Proxy Settings** | Manage pi agent process proxy and desktop proxy separately; model discovery and connection tests can use the desktop proxy. |
 | **Slash Commands & `!` Shell** | Built-in slash command suggestions (`/reload`, `/compact`, `/session`, …) and `!command` / `!!command` for inline shell execution directly in the chat composer. |
 | **Embedded Terminal Dock** | Agent-scoped terminal tabs with PowerShell/cmd/sh fallback, multiple tabs, theme switching, height resizing, right-click selection copy, and close-all confirmation. |
-| **Session Management** | Create new sessions, open project history modals, restore historical ones, rename sessions, export to HTML, and close agents — all from the sidebar or context menu. |
+| **Session Management** | Create new sessions, open project history modals, restore historical ones, rename sessions, export to HTML, and close agents — all from the project history button, sidebar, or context menu. |
 | **Git Integration** | Real-time branch display with local + remote branch selector, branch count badge, and switching support. |
 | **Tool Call Visualization** | Grouped tool-call cards with summary and expandable details, clear status indicators for running/completed/failed calls. |
 | **Context-Aware Input** | `@` file suggestions from project tree, `!` shell execution, `/` slash commands — all from a single composer. |
