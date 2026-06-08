@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const sharp = require('sharp');
+const { Icns, IcnsImage } = require('@fiahfy/icns');
 const pngToIcoModule = require('png-to-ico');
 const pngToIco = pngToIcoModule.default ?? pngToIcoModule;
 
@@ -9,12 +10,40 @@ const svg = fs.readFileSync(path.join(__dirname, '..', 'build', 'icon.svg'), 'ut
 const out = path.join(__dirname, '..', 'build');
 const iconsDir = path.join(out, 'icons');
 const pngSizes = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
+const icnsSources = [
+  [16, 'icp4'],
+  [32, 'icp5'],
+  [32, 'ic11'],
+  [64, 'icp6'],
+  [64, 'ic12'],
+  [128, 'ic07'],
+  [256, 'ic08'],
+  [256, 'ic13'],
+  [512, 'ic09'],
+  [512, 'ic14'],
+  [1024, 'ic10'],
+];
 
 async function renderPng(size, target) {
   await sharp(Buffer.from(svg))
     .resize(size, size)
     .png()
     .toFile(target);
+}
+
+async function writeIcns(target) {
+  const icns = new Icns();
+  for (const [size, osType] of icnsSources) {
+    const file = path.join(iconsDir, `${size}x${size}.png`);
+    const buffer = await fs.promises.readFile(file);
+    icns.append(IcnsImage.fromPNG(buffer, osType));
+  }
+  await fs.promises.writeFile(target, icns.data);
+
+  const header = await fs.promises.readFile(target, { encoding: null });
+  if (header.subarray(0, 4).toString('ascii') !== 'icns') {
+    throw new Error('generated icon.icns is invalid: missing icns file header');
+  }
 }
 
 async function main() {
@@ -31,14 +60,9 @@ async function main() {
   await fs.promises.copyFile(path.join(iconsDir, '512x512.png'), path.join(out, 'icon.png'));
   const ico = await pngToIco([16, 24, 32, 48, 64, 128, 256].map(size => path.join(iconsDir, `${size}x${size}.png`)));
   await fs.promises.writeFile(path.join(out, 'icon.ico'), ico);
+  await writeIcns(path.join(out, 'icon.icns'));
 
-  try {
-    await sharp(Buffer.from(svg)).resize(1024, 1024).toFile(path.join(out, 'icon.icns'));
-  } catch (error) {
-    console.warn('skipped build/icon.icns:', error instanceof Error ? error.message : error);
-  }
-
-  console.log('wrote build/icon.svg, build/icon.png, build/icon.ico and build/icons/*.png');
+  console.log('wrote build/icon.svg, build/icon.png, build/icon.ico, build/icon.icns and build/icons/*.png');
 }
 
 main().catch(error => {

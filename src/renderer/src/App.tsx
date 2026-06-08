@@ -75,6 +75,9 @@ import type {
 } from "../../shared/types";
 
 const api = window.piDesktop ?? createPreviewApi();
+const COMPOSER_MIN_HEIGHT = 132;
+const COMPOSER_DEFAULT_TERMINAL_HEIGHT = 220;
+const COMPOSER_MIN_TIMELINE_HEIGHT = 160;
 
 export function App() {
 	const [projects, setProjects] = useState<Project[]>([]);
@@ -204,7 +207,10 @@ export function App() {
 	const [environmentDialog, setEnvironmentDialog] = useState(false);
 	const [listWidth, setListWidth] = useState(260);
 	const [drawerWidth, setDrawerWidth] = useState(360);
-	const [composerHeight, setComposerHeight] = useState(132);
+	const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT);
+	const [composerAutoHeight, setComposerAutoHeight] = useState(
+		COMPOSER_MIN_HEIGHT,
+	);
 	const [terminalOpenByAgent, setTerminalOpenByAgent] = useState<
 		Record<string, boolean>
 	>({});
@@ -214,7 +220,12 @@ export function App() {
 	const [listCollapsed, setListCollapsed] = useState(false);
 	const [drawerCollapsed, setDrawerCollapsed] = useState(false);
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+	const chatPaneRef = useRef<HTMLElement | null>(null);
+	const chatHeaderRef = useRef<HTMLElement | null>(null);
+	const composerRef = useRef<HTMLElement | null>(null);
 	const timelineRef = useRef<HTMLElement | null>(null);
+	const composerBoxRef = useRef<HTMLDivElement | null>(null);
+	const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
 	const activeProject = projects.find(
 		(project) => project.id === activeProjectId,
@@ -246,6 +257,10 @@ export function App() {
 	const activeThinking = activeAgentId
 		? (streamingThinking[activeAgentId] ?? "")
 		: "";
+	const activeTerminalHeight = activeAgentId
+		? (terminalHeightByAgent[activeAgentId] ?? COMPOSER_DEFAULT_TERMINAL_HEIGHT)
+		: COMPOSER_DEFAULT_TERMINAL_HEIGHT;
+	const resolvedComposerHeight = Math.max(composerHeight, composerAutoHeight);
 	const composerMode =
 		prompt.startsWith("!!") ? "silent-shell" : prompt.startsWith("!") ? "shell" : null;
 	const composerStatusText =
@@ -410,6 +425,112 @@ export function App() {
 	useEffect(() => {
 		if (activeAgentId) void refreshRuntimeState(activeAgentId);
 	}, [activeAgentId]);
+
+	function getComposerMaxHeight() {
+		const chatPane = chatPaneRef.current;
+		const header = chatHeaderRef.current;
+		const composer = composerRef.current;
+		const box = composerBoxRef.current;
+		if (!chatPane || !header || !composer || !box) {
+			const reservedTerminalHeight = terminalOpen ? activeTerminalHeight : 0;
+			return Math.max(
+				180,
+				window.innerHeight - 78 - COMPOSER_MIN_TIMELINE_HEIGHT - 52 - reservedTerminalHeight,
+			);
+		}
+
+		const reservedTerminalHeight = terminalOpen ? activeTerminalHeight : 0;
+		const composerChrome = Math.max(0, composer.offsetHeight - box.offsetHeight);
+		// 输入框最大高度取决于聊天区域还剩多少可用空间，而不是固定视口比例；
+		// 否则窗口变窄后软换行变多，最小窗口下会比内容需要的高度更早触顶。
+		return Math.max(
+			180,
+			chatPane.clientHeight -
+				header.offsetHeight -
+				COMPOSER_MIN_TIMELINE_HEIGHT -
+				reservedTerminalHeight -
+				composerChrome,
+		);
+	}
+
+	function clampComposerHeight(height: number) {
+		const maxHeight = getComposerMaxHeight();
+		return Math.min(maxHeight, Math.max(COMPOSER_MIN_HEIGHT, height));
+	}
+
+	function ensureComposerTailVisible() {
+		const textarea = composerTextareaRef.current;
+		if (!textarea || document.activeElement !== textarea) return;
+		const selectionAtEnd =
+			textarea.selectionStart === textarea.value.length &&
+			textarea.selectionEnd === textarea.value.length;
+		if (!selectionAtEnd) return;
+		requestAnimationFrame(() => {
+			const current = composerTextareaRef.current;
+			if (!current) return;
+			current.scrollTop = current.scrollHeight;
+		});
+	}
+
+	function syncComposerAutoHeight() {
+		const box = composerBoxRef.current;
+		const textarea = composerTextareaRef.current;
+		if (!box || !textarea) return;
+
+		// 宽度变化会改变软换行位置，textarea 的 scrollHeight 才是当前内容真实需要的高度。
+		// 这里减去 chrome 高度（顶部留白/工具条/底部状态条），把问题修在布局源头而不是靠用户手动拖。
+		const chromeHeight = box.offsetHeight - textarea.clientHeight;
+		const nextHeight = clampComposerHeight(textarea.scrollHeight + chromeHeight);
+		setComposerAutoHeight((current) =>
+			Math.abs(current - nextHeight) <= 1 ? current : nextHeight,
+		);
+		ensureComposerTailVisible();
+	}
+
+	useEffect(() => {
+		let frame = 0;
+		const scheduleSync = () => {
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(() => {
+				setComposerHeight((current) => clampComposerHeight(current));
+				syncComposerAutoHeight();
+			});
+		};
+
+		const box = composerBoxRef.current;
+		const observer =
+			box &&
+			new ResizeObserver((entries) => {
+				const entry = entries[0];
+				if (!entry) return;
+				scheduleSync();
+			});
+		if (box) observer?.observe(box);
+
+		window.addEventListener("resize", scheduleSync);
+		scheduleSync();
+		return () => {
+			cancelAnimationFrame(frame);
+			window.removeEventListener("resize", scheduleSync);
+			observer?.disconnect();
+		};
+	}, [activeAgentId]);
+
+	useEffect(() => {
+		const frame = requestAnimationFrame(() => {
+			setComposerHeight((current) => clampComposerHeight(current));
+			syncComposerAutoHeight();
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [
+		prompt,
+		activeAgentId,
+		listCollapsed,
+		drawerCollapsed,
+		drawer,
+		terminalOpen,
+		activeTerminalHeight,
+	]);
 
 	useEffect(() => {
 		if (activeProjectId && activeAgentId)
@@ -1212,11 +1333,11 @@ export function App() {
 		function onMove(moveEvent: globalThis.PointerEvent) {
 			cancelAnimationFrame(frame);
 			frame = requestAnimationFrame(() => {
-				const maxHeight = Math.max(180, Math.floor(window.innerHeight * 0.42));
+				const maxHeight = getComposerMaxHeight();
 				// 拖动的是输入区顶部边线，鼠标向上意味着输入区变高；限制最大高度避免挤压会话阅读区域。
 				const next = Math.min(
 					maxHeight,
-					Math.max(132, startHeight + startY - moveEvent.clientY),
+					Math.max(COMPOSER_MIN_HEIGHT, startHeight + startY - moveEvent.clientY),
 				);
 				setComposerHeight(next);
 			});
@@ -1444,8 +1565,8 @@ export function App() {
 				onPointerDown={(event) => startResize("list", event)}
 			/>
 
-			<main className="chat-pane">
-				<header className="chat-header">
+			<main ref={chatPaneRef} className="chat-pane">
+				<header ref={chatHeaderRef} className="chat-header">
 					<div className="chat-title-block">
 						<strong
 							title={activeAgent?.title ?? activeProject?.name ?? "pi desktop"}
@@ -1620,8 +1741,9 @@ export function App() {
 					/>
 				)}
 
-				<footer className="composer">
+				<footer ref={composerRef} className="composer">
 					<div
+						ref={composerBoxRef}
 						className={`composer-box ${
 							prompt.startsWith("!!")
 								? "shell-silent-mode"
@@ -1629,7 +1751,7 @@ export function App() {
 									? "shell-mode"
 									: ""
 						}`}
-						style={{ height: composerHeight }}
+						style={{ height: resolvedComposerHeight }}
 					>
 						<div
 							className="composer-resize-handle"
@@ -1646,6 +1768,8 @@ export function App() {
 							onCompact={compactAgent}
 						/>
 						<textarea
+							ref={composerTextareaRef}
+							wrap="soft"
 							value={prompt}
 							className={
 								prompt.startsWith("!!")

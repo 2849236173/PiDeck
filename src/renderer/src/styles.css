@@ -169,17 +169,20 @@ button:disabled {
 	--drawer-width: 360px;
 	height: 100vh;
 	display: grid;
-	grid-template-columns: var(--list-width) 6px minmax(680px, 1fr);
+	grid-template-columns: var(--list-width) 6px minmax(0, 1fr);
 	background: #eef0f3;
 	transition: grid-template-columns 0.18s ease;
 }
 .wechat-shell.drawer-open {
-	grid-template-columns: var(--list-width) 6px minmax(600px, 1fr) 6px var(
-			--drawer-width
-		);
+	grid-template-columns:
+		var(--list-width)
+		6px
+		minmax(0, 1fr)
+		6px
+		minmax(260px, min(var(--drawer-width), 38vw));
 }
 .wechat-shell.drawer-open.drawer-collapsed {
-	grid-template-columns: var(--list-width) 6px minmax(680px, 1fr);
+	grid-template-columns: var(--list-width) 6px minmax(0, 1fr);
 }
 
 .chat-list-pane {
@@ -1891,16 +1894,25 @@ body.is-composer-resizing .composer-resize-handle::after {
 	opacity: 1;
 }
 .composer textarea {
+	display: block;
 	width: 100%;
+	max-width: 100%;
+	min-width: 0;
 	height: 100%;
 	min-height: 64px;
 	resize: none;
+	overflow-x: hidden;
+	overflow-y: auto;
+	scrollbar-gutter: stable;
 	border: 0;
 	outline: none;
 	background: transparent;
 	color: #1f2329;
 	padding: 13px 14px 8px;
 	line-height: 1.5;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 	grid-row: 3;
 }
 .composer-box:focus-within {

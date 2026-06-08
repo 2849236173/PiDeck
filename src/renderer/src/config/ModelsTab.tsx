@@ -603,6 +603,9 @@ export function ModelsTab(props: {
 															const newModel: ModelItem = {
 																id: addingModelId,
 																name: selected?.name ?? addingModelId,
+																contextWindow: 1000000,
+																maxTokens: 128000,
+																reasoning: true,
 															};
 															props.onChangeProvider(
 																name,

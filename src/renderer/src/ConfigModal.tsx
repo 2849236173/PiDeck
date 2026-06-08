@@ -15,6 +15,14 @@ import { getProviderHeaders } from "./config/providerHeaders";
 
 const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi })
 	.piDesktop;
+const DEFAULT_MODEL_CONFIG: Pick<
+	ModelItem,
+	"contextWindow" | "maxTokens" | "reasoning"
+> = {
+	contextWindow: 1000000,
+	maxTokens: 128000,
+	reasoning: true,
+};
 
 /** 配置管理弹窗：支持 models/auth/settings 三个 tab 的可视化编辑和源文件编辑 */
 export function ConfigModal(props: {
@@ -272,7 +280,11 @@ export function ConfigModal(props: {
 	const handleAddModel = (providerName: string) => {
 		const provider = modelsData.providers[providerName];
 		if (!provider) return;
-		const newModel: ModelItem = { id: "", name: "" };
+		const newModel: ModelItem = {
+			id: "",
+			name: "",
+			...DEFAULT_MODEL_CONFIG,
+		};
 		const updated = {
 			...modelsData,
 			providers: {
