@@ -5,6 +5,8 @@ import {
 	useState,
 	type PointerEvent,
 } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
 	Settings,
 	Sliders,
@@ -2426,8 +2428,11 @@ function UpdateModal(props: {
 							推荐下载：{props.info.recommendedAsset.name}
 						</p>
 					)}
-					<div className="update-notes">
-						{props.info.releaseNotes.trim() || "该版本没有填写发布日志。"}
+					<div className="update-notes markdown-body">
+						{/* GitHub Release notes 通常是 Markdown；这里复用聊天渲染链路支持标题、列表、链接和代码块。 */}
+						<ReactMarkdown remarkPlugins={[remarkGfm]}>
+							{props.info.releaseNotes.trim() || "该版本没有填写发布日志。"}
+						</ReactMarkdown>
 					</div>
 				</div>
 				<div className="update-actions">

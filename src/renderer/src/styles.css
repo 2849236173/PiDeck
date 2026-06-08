@@ -4718,7 +4718,6 @@ body.is-composer-resizing .composer-resize-handle::after {
 }
 
 .update-notes {
-	white-space: pre-wrap;
 	font-size: 13px;
 	line-height: 1.55;
 	color: #263244;
@@ -4726,6 +4725,49 @@ body.is-composer-resizing .composer-resize-handle::after {
 	border-radius: 10px;
 	background: #fbfdff;
 	padding: 12px;
+}
+
+.update-notes h1,
+.update-notes h2,
+.update-notes h3 {
+	margin: 0.4em 0 0.35em;
+	font-size: 1.05em;
+}
+
+.update-notes p,
+.update-notes ul,
+.update-notes ol {
+	margin: 0.35em 0;
+}
+
+.update-notes ul,
+.update-notes ol {
+	padding-left: 1.35em;
+}
+
+.update-notes code {
+	padding: 1px 4px;
+	border-radius: 4px;
+	background: #eef3f8;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.update-notes pre {
+	overflow: auto;
+	padding: 8px;
+	border-radius: 8px;
+	background: #0f172a;
+	color: #e2e8f0;
+}
+
+.update-notes pre code {
+	padding: 0;
+	background: transparent;
+	color: inherit;
+}
+
+.update-notes a {
+	color: #1677ff;
 }
 
 .update-actions {
