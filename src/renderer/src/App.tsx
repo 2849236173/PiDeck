@@ -13,6 +13,7 @@ import {
 	Sliders,
 	ChevronLeft,
 	ChevronRight,
+	ChevronDown,
 	History,
 	Info,
 	Search,
@@ -40,7 +41,6 @@ import {
 	ImagePreviewModal,
 	LogoMark,
 	ModelPicker,
-	PendingBubble,
 	ProjectAvatar,
 	ProjectContextMenu,
 	PromptSuggestions,
@@ -76,7 +76,6 @@ import type {
 	FileTreeNode,
 	GitBranchInfo,
 	ImageContent,
-	PendingPrompt,
 	PiCommand,
 	PiInstallStatus,
 	Project,
@@ -164,6 +163,7 @@ export function App() {
 	const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
 	const [modelPickerOpen, setModelPickerOpen] = useState(false);
 	const [thinkingPickerOpen, setThinkingPickerOpen] = useState(false);
+	const [sendBehaviorMenuOpen, setSendBehaviorMenuOpen] = useState(false);
 	const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
 	const [prompt, setPrompt] = useState("");
 	/** 当前进行的操作类型，用于按钮 loading 状态 */
@@ -173,7 +173,6 @@ export function App() {
 	/** 当前在历史中的索引，-1 表示新输入；用 ref 确保键盘事件回调中读取到最新的值 */
 	const historyIndexRef = useRef(-1);
 	const [attachedImages, setAttachedImages] = useState<ImageContent[]>([]);
-	const [pendingPrompts, setPendingPrompts] = useState<PendingPrompt[]>([]);
 	const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
 	/** 当前 agent 流式思考的实时文本，agent_end 时清空 */
 	const [streamingThinking, setStreamingThinking] = useState<
@@ -1241,8 +1240,6 @@ export function App() {
 
 	async function abortAgent(agentId = activeAgentId) {
 		if (!agentId || isPendingAgentId(agentId)) return;
-		// 用户主动停止时清空排队消息，避免 agent 空闲后自动发送已取消的内容
-		clearPendingPrompts();
 		await api.agents.abort(agentId);
 		void refreshRuntimeState(agentId);
 	}
@@ -1372,19 +1369,6 @@ export function App() {
 			(activeAgent.status === "running" || activeRuntimeState?.isStreaming),
 	);
 
-	// Agent 从忙碌变为空闲时，自动发送排队中的消息（只发当前 agent 的）
-	useEffect(() => {
-		if (
-			!isAgentStarting &&
-			!isAgentBusy &&
-			pendingPrompts.length > 0 &&
-			activeAgentId &&
-			!isPendingAgentId(activeAgentId)
-		) {
-			void flushPendingQueue();
-		}
-	}, [isAgentStarting, isAgentBusy, pendingPrompts.length, activeAgentId]);
-
 	async function sendPrompt() {
 		if (
 			isAgentStarting ||
@@ -1394,35 +1378,47 @@ export function App() {
 			return;
 		const message = prompt;
 		const images = attachedImages.length > 0 ? attachedImages : undefined;
-		// 发送前先保留快照，再立即清空 composer；这样普通发送和排队发送
-		// 都能给用户明确反馈，同时失败时不会影响已捕获的待发送内容。
+		// 发送前先保留快照，再立即清空 composer；运行中发送会走官方 steer 队列，
+		// 由 pi runtime 保证在当前工具调用结束后、下一次 LLM 调用前注入。
 		setPrompt("");
 		setAttachedImages([]);
 		setSuggestionsOpen(false);
+		setSendBehaviorMenuOpen(false);
 		await submitPromptSnapshot(activeAgentId, message, images);
+	}
+
+	async function sendPromptAsFollowUp() {
+		if (
+			isAgentStarting ||
+			!activeAgentId ||
+			(!prompt.trim() && attachedImages.length === 0)
+		)
+			return;
+		const message = prompt;
+		const images = attachedImages.length > 0 ? attachedImages : undefined;
+		setPrompt("");
+		setAttachedImages([]);
+		setSuggestionsOpen(false);
+		setSendBehaviorMenuOpen(false);
+		await submitPromptSnapshot(activeAgentId, message, images, "followUp");
 	}
 
 	async function submitPromptSnapshot(
 		agentId: string,
 		message: string,
 		images?: ImageContent[],
+		streamingBehavior?: "steer" | "followUp",
 	) {
-		// Agent 忙碌时，消息加入本地排队，等 agent 空闲后自动发送。
 		// 这里接收快照参数，让 composer 发送和历史消息“重新发送”共享同一条路径。
-		if (isAgentBusy) {
-			const pending: PendingPrompt = {
-				id: crypto.randomUUID(),
-				agentId,
-				message,
-				images,
-				enqueuedAt: Date.now(),
-			};
-			setPendingPrompts((prev) => [...prev, pending]);
-			recordMessageHistory(message);
-			return;
-		}
-
-		await api.agents.prompt({ agentId, message, images });
+		// Agent 忙碌时显式使用官方 streamingBehavior=steer：消息会进入 pi 的运行中队列，
+		// 而不是留在 desktop 本地等整个 agent idle 后再发送。
+		const behavior = streamingBehavior ?? (isAgentBusy ? "steer" : undefined);
+		await api.agents.prompt({
+			agentId,
+			message,
+			images,
+			...(behavior ? { streamingBehavior: behavior } : {}),
+		});
 		recordMessageHistory(message);
 	}
 
@@ -1439,49 +1435,6 @@ export function App() {
 		void submitPromptSnapshot(activeAgentId, message.text, message.images);
 	}
 
-	/**
-	 * Agent 空闲后，发送排队中属于当前 agent 的消息。
-	 * 逐条处理：先发、成功后移除；失败保留在队列中。
-	 */
-	async function flushPendingQueue() {
-		if (!activeAgentId) return;
-		// 取快照，不清空队列 — 发完成功后才逐条移除，避免过程中异常导致消息永久丢失
-		const snapshot = pendingPrompts.filter((p) => p.agentId === activeAgentId);
-		if (snapshot.length === 0) return;
-
-		// 从 UI 中清掉排队中的状态（这些消息正在发送）
-		setPendingPrompts((prev) =>
-			prev.filter((p) => p.agentId !== activeAgentId),
-		);
-
-		for (const item of snapshot) {
-			try {
-				await api.agents.prompt({
-					agentId: activeAgentId,
-					message: item.message,
-					images: item.images,
-					streamingBehavior: "steer",
-				});
-			} catch (error) {
-				// 发送失败时回退到队列，用户可手动取消
-				setPendingPrompts((prev) => [...prev, item]);
-				setToast(
-					`排队消息发送失败：${error instanceof Error ? error.message : String(error)}`,
-				);
-				setTimeout(() => setToast(null), 4000);
-			}
-		}
-	}
-
-	/** 取消排队中的单条消息 */
-	function cancelPendingPrompt(id: string) {
-		setPendingPrompts((prev) => prev.filter((p) => p.id !== id));
-	}
-
-	/** 清空所有排队消息 */
-	function clearPendingPrompts() {
-		setPendingPrompts([]);
-	}
 
 	/**
 	 * 处理图片文件，转为 pi RPC 可识别的 ImageContent。
@@ -2160,14 +2113,6 @@ export function App() {
 									showThinking={settings.showThinking}
 								/>
 							)}
-							{pendingPrompts.map((prompt) => (
-								<PendingBubble
-									key={prompt.id}
-									pending={prompt}
-									onCancel={() => cancelPendingPrompt(prompt.id)}
-								/>
-							))}
-
 						</div>
 					)}
 					{outlineItems.length > 1 && (
@@ -2321,25 +2266,48 @@ export function App() {
 									停止
 								</button>
 							)}
-							<button
-								disabled={
-									isAgentStarting ||
-									!activeAgentId ||
-									(!prompt.trim() && attachedImages.length === 0)
-								}
-								className={
-									isAgentBusy && (prompt.trim() || attachedImages.length > 0)
-										? "queue-send"
-										: ""
-								}
-								onClick={sendPrompt}
-							>
-								{isAgentBusy && (prompt.trim() || attachedImages.length > 0)
-									? "排队发送"
-									: pendingPrompts.length > 0
-										? `发送 (${pendingPrompts.length} 排队中)`
+							<div className="send-button-group">
+								<button
+									disabled={
+										isAgentStarting ||
+										!activeAgentId ||
+										(!prompt.trim() && attachedImages.length === 0)
+									}
+									className={
+										isAgentBusy && (prompt.trim() || attachedImages.length > 0)
+											? "queue-send"
+											: ""
+									}
+									onClick={sendPrompt}
+								>
+									{isAgentBusy && (prompt.trim() || attachedImages.length > 0)
+										? "加入指令"
 										: "发送"}
-							</button>
+								</button>
+								{isAgentBusy && (prompt.trim() || attachedImages.length > 0) && (
+									<div className="send-behavior-menu-wrap">
+										<button
+											className="send-behavior-toggle"
+											title="选择运行中发送方式"
+											onClick={() => setSendBehaviorMenuOpen((open) => !open)}
+										>
+											<ChevronDown size={14} />
+										</button>
+										{sendBehaviorMenuOpen && (
+											<div className="send-behavior-menu">
+												<button onClick={sendPrompt}>
+													<strong>加入当前回合</strong>
+													<span>steer · 下一次 LLM 调用前生效</span>
+												</button>
+												<button onClick={sendPromptAsFollowUp}>
+													<strong>排队到下一轮</strong>
+													<span>followUp · agent 停止后发送</span>
+												</button>
+											</div>
+										)}
+									</div>
+								)}
+							</div>
 						</div>
 					</div>
 				</footer>

@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.4.11-green)
+![Version](https://img.shields.io/badge/version-0.4.12-green)
 
 `pi-desktop` **不是** pi 的分支。它是一个轻量 Electron 外壳，通过启动多个 `pi --mode rpc` 进程，将项目管理、会话管理、对话界面、配置管理和工具编排整合到一个原生桌面应用中——所有 Agent 能力由 pi 原生提供。
 
@@ -16,15 +16,12 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.4.11**（2026-06-08）
+> **最新版本 v0.4.12**（2026-06-09）
 
-### v0.4.11 更新
-- 🗂️ 项目历史快捷入口：项目行右侧新增固定历史按钮，打开历史会话更直接。
-- 🧾 回答级修改摘要：Agent 每轮回答完成后，在对应回答下方展示本轮修改文件和修改行数。
-- 🔔 应用内检查更新：定时查询 GitHub Release，新版本弹窗展示发布日志和浏览器下载入口。
-- 🖥️ 终端状态修复：切换项目/Agent 不会再串用终端状态，也不会自动冒出重复终端 tab。
-- 🍎 macOS 图标修复：发版产物改为真实 `.icns` 图标，改善 Dock 图标显示。
-- ✍️ 输入框与模型默认值优化：限制最小窗口范围，新增模型默认写入更合理的上下文、输出 token 和 reasoning 配置。
+### v0.4.12 更新
+- 💬 运行中发送增强：Agent 流式执行时可选择 `steer` 加入当前回合，或选择 `followUp` 排队到结束后发送。
+- 🏷️ 消息投递标记：运行中发送的用户消息会标出“下次调用前”或“结束后排队”，更容易判断消息何时被 Agent 消费。
+- ✨ 气泡尺寸优化：短用户消息会按实际内容宽度收缩，即使带有投递标记也不会被撑长。
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 

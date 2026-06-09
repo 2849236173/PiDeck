@@ -4,6 +4,15 @@
 
 All notable changes to pi-desktop are documented here.
 
+## v0.4.12 - 2026-06-09
+
+### Added
+- Running-session prompt delivery modes: while an agent is streaming, messages can now be sent as `steer` to affect the next LLM call or as `followUp` to queue until the agent stops.
+- Delivery badges on user messages now show whether a running-session message will apply before the next call or after the current run finishes.
+
+### Improved
+- Short user messages now shrink to their actual content width even when delivery badges are visible.
+
 ## v0.4.11 - 2026-06-08
 
 ### Added

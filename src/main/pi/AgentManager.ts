@@ -251,16 +251,18 @@ export class AgentManager {
 			}
 		}
 
-		// 判断 agent 是否已在忙碌中（flush 场景：第一条消息触发 agent_start 后状态变为 running，
-		// 后续消息必须带 streamingBehavior 否则 pi 返回 error）
+		// 判断 agent 是否已在忙碌中；运行中继续发送时必须带 streamingBehavior，
+		// 否则 pi RPC 会拒绝请求。该值也用于给用户消息打上投递语义标记。
 		const alreadyBusy = runtime.tab.status === "running";
+		const promptDeliveryBehavior = input.streamingBehavior ?? (alreadyBusy ? "steer" : undefined);
 
-		// 保存用户消息（包含图片）
+		// 保存用户消息（包含图片）。运行中消息先显示在对话里，并标记它会在何时被 pi 消费：
+		// steer=下一次 LLM 调用前，followUp=当前 agent 完全停止后。
 		this.addMessage(
 			input.agentId,
 			"user",
 			trimmed || "[图片]",
-			undefined,
+			promptDeliveryBehavior ? { streamingBehavior: promptDeliveryBehavior } : undefined,
 			input.images,
 		);
 		runtime.tab.status = "running";
@@ -276,11 +278,10 @@ export class AgentManager {
 				message: trimmed || "Describe this image.",
 				...(hasImages ? { images: input.images } : {}),
 			};
-			// 如果 agent 已经忙碌且调用方没指定 streamingBehavior，默认用 steer
-			if (input.streamingBehavior) {
-				requestPayload.streamingBehavior = input.streamingBehavior;
-			} else if (alreadyBusy) {
-				requestPayload.streamingBehavior = "steer";
+			// 如果 agent 已经忙碌且调用方没指定 streamingBehavior，默认用 steer；
+			// 与上方用户消息 meta 保持同一个计算结果，避免 UI 标记和实际 RPC 语义不一致。
+			if (promptDeliveryBehavior) {
+				requestPayload.streamingBehavior = promptDeliveryBehavior;
 			}
 			const response = await runtime.process.client.request(requestPayload);
 			if (!response.success) {

@@ -35,7 +35,6 @@ import type {
 	FileTreeNode,
 	GitBranchInfo,
 	ImageContent,
-	PendingPrompt,
 	PiCommand,
 	PiInstallStatus,
 	Project,
@@ -635,45 +634,6 @@ export function ThinkingBubble(props: { thinking?: string; showThinking?: boolea
 	);
 }
 
-export function PendingBubble(props: {
-	pending: PendingPrompt;
-	onCancel: () => void;
-}) {
-	const { pending } = props;
-	const cleanText = stripAnsi(pending.message);
-	return (
-		<article className="chat-message mine pending-message">
-			<div className="msg-avatar">我</div>
-			<div className="msg-content">
-				<div className="msg-name">
-					<span>我</span>
-					<time>
-						<span className="pending-indicator" />
-						排队中
-					</time>
-				</div>
-				<div className="msg-bubble">
-					{pending.images && pending.images.length > 0 && (
-						<div className="message-images">
-							{pending.images.map((img, index) => (
-								<img
-									key={index}
-									src={`data:${img.mimeType};base64,${img.data}`}
-									alt={`图片 ${index + 1}`}
-									className="message-image"
-								/>
-							))}
-						</div>
-					)}
-					<div className="user-message-text">{cleanText}</div>
-				</div>
-				<div className="msg-actions">
-					<button onClick={props.onCancel}>取消排队</button>
-				</div>
-			</div>
-		</article>
-	);
-}
 
 export function ToolGroup(props: { group: ToolGroupItem }) {
 	const [expanded, setExpanded] = useState(false);
@@ -872,6 +832,14 @@ export function ChatBubble(props: {
 			? (message.thinking ?? "")
 			: (message.thinking ?? "").slice(0, thinkingPreviewLen) + "…";
 	const label = message.role === "assistant" ? "pi" : message.role;
+	const deliveryBehavior =
+		message.role === "user" ? message.meta?.streamingBehavior : undefined;
+	const deliveryLabel =
+		deliveryBehavior === "steer"
+			? "下次调用前"
+			: deliveryBehavior === "followUp"
+				? "结束后排队"
+				: null;
 	const detailText =
 		typeof message.meta?.detailText === "string"
 			? message.meta.detailText
@@ -895,7 +863,21 @@ export function ChatBubble(props: {
 			<div className="msg-content">
 				<div className="msg-name">
 					<span>{label}</span>
-					<time>{formatTime(message.timestamp)}</time>
+					<time>
+						{deliveryLabel && (
+							<span
+								className={`message-delivery-badge ${deliveryBehavior === "followUp" ? "follow-up" : "steer"}`}
+								title={
+									deliveryBehavior === "followUp"
+										? "followUp：等待 agent 停止后发送"
+										: "steer：当前工具调用后、下一次 LLM 调用前生效"
+								}
+							>
+								{deliveryLabel}
+							</span>
+						)}
+						{formatTime(message.timestamp)}
+					</time>
 				</div>
 				<div className={`msg-bubble ${isUser ? "" : "markdown-body"}`}>
 					{/* 思考内容展示：可折叠，默认收起长文本 */}

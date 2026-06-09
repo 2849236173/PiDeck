@@ -253,11 +253,3 @@ export type ThinkingUpdate = {
 	thinking: string;
 };
 
-/** 前端本地排队的消息，agent 忙碌时暂存，空闲后自动发送 */
-export type PendingPrompt = {
-	id: string;
-	agentId: string; // 归属的 agent，flush 时只发当前 agent 的消息
-	message: string;
-	images?: ImageContent[];
-	enqueuedAt: number;
-};
