@@ -168,6 +168,8 @@ export function App() {
 	const [pendingAgents, setPendingAgents] = useState<AgentTab[]>([]);
 	const [activeProjectId, setActiveProjectId] = useState<string>();
 	const [activeAgentId, setActiveAgentId] = useState<string>();
+	const activeAgentIdRef = useRef<string | undefined>(activeAgentId);
+	activeAgentIdRef.current = activeAgentId;
 	const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
 		new Set(),
 	);
@@ -364,19 +366,20 @@ export function App() {
 		: [];
 
 	function setPrompt(value: string | ((current: string) => string)) {
-		if (!activeAgentId) return;
+		const targetAgentId = activeAgentIdRef.current;
+		if (!targetAgentId) return;
 		setPromptByAgent((current) => {
-			const previous = current[activeAgentId] ?? "";
+			const previous = current[targetAgentId] ?? "";
 			const nextValue =
 				typeof value === "function" ? value(previous) : value;
 			if (!nextValue) {
 				const next = { ...current };
-				delete next[activeAgentId];
+				delete next[targetAgentId];
 				return next;
 			}
 			return {
 				...current,
-				[activeAgentId]: nextValue,
+				[targetAgentId]: nextValue,
 			};
 		});
 	}
