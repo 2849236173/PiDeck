@@ -23,6 +23,7 @@ import {
 	X,
 } from "lucide-react";
 import { createPreviewApi } from "./previewApi";
+import { createBrowserApi } from "./browserApi";
 import { ConfigModal } from "./ConfigModal";
 import { TerminalDock } from "./components/terminal/TerminalDock";
 import { getComposerEnterIntent } from "./composerBehavior";
@@ -91,7 +92,8 @@ import type {
 	ThinkingUpdate,
 } from "../../shared/types";
 
-const api = window.piDesktop ?? createPreviewApi();
+const isLanWeb = !window.piDesktop && window.location.protocol.startsWith("http");
+const api = window.piDesktop ?? (isLanWeb ? createBrowserApi() : createPreviewApi());
 const COMPOSER_MIN_HEIGHT = 132;
 const COMPOSER_DEFAULT_TERMINAL_HEIGHT = 220;
 const COMPOSER_MIN_TIMELINE_HEIGHT = 160;
@@ -140,6 +142,8 @@ function isReplacementForPendingAgent(agent: AgentTab, pending: AgentTab) {
 	if (agent.projectId !== pending.projectId || agent.cwd !== pending.cwd)
 		return false;
 	if (pending.sessionPath && agent.sessionPath === pending.sessionPath)
+		return true;
+	if (pending.sessionPath && agent.createdAt >= pending.createdAt - 1000)
 		return true;
 	return agent.title === pending.title && agent.createdAt >= pending.createdAt - 1000;
 }
@@ -304,6 +308,9 @@ export function App() {
 		desktopProxyBypass: "localhost,127.0.0.1,::1",
 		customPiPath: "",
 		telemetryEnabled: true,
+		webServiceEnabled: false,
+		webServiceHost: "0.0.0.0",
+		webServicePort: 8765,
 	});
 	const [settingsNotice, setSettingsNotice] = useState("");
 	const [piProxyNotice, setPiProxyNotice] = useState("");
@@ -312,6 +319,7 @@ export function App() {
 	>("info");
 	const [piStatus, setPiStatus] = useState<PiInstallStatus | null>(null);
 	const [piProxyChecking, setPiProxyChecking] = useState(false);
+	const [webServiceChanging, setWebServiceChanging] = useState(false);
 	const [appInfo, setAppInfo] = useState<AppInfo>({
 		version: "-",
 		releasesUrl: "https://github.com/ayuayue/pi-desktop/releases",
@@ -1350,7 +1358,9 @@ export function App() {
 		const project = projects.find((item) => item.id === projectId);
 		if (!project) return;
 		const existing = sessionPath
-			? displayAgents.find((agent) => agent.sessionPath === sessionPath)
+			? [...displayAgents, ...pendingAgentsRef.current].find(
+					(agent) => agent.sessionPath === sessionPath,
+				)
 			: undefined;
 		if (existing) {
 			setActiveProjectId(existing.projectId);
@@ -1833,40 +1843,66 @@ export function App() {
 	}
 
 	async function updateSettings(patch: Partial<AppSettings>) {
-		const next = await api.settings.update(patch);
-		setSettings(next);
-		let notice = "设置已保存。";
-		if (
-			"piProxyEnabled" in patch ||
-			"piProxyUrl" in patch ||
-			"piProxyBypass" in patch
-		) {
-			notice = next.piProxyEnabled
-				? "pi agent 代理设置已保存；新建或重启 agent 后生效。"
-				: "pi agent 代理已关闭。";
-			setPiProxyNoticeTone("info");
-			setPiProxyNotice(
-				next.piProxyEnabled
-					? "代理设置已保存；新建或重启 agent 后生效。"
-					: "",
+		const changesWebService =
+			"webServiceEnabled" in patch ||
+			"webServiceHost" in patch ||
+			"webServicePort" in patch;
+		if (changesWebService) {
+			setWebServiceChanging(true);
+			setSettingsNotice(
+				patch.webServiceEnabled === false ? "正在停止 Web 服务..." : "正在应用 Web 服务设置...",
 			);
 		}
-		if (
-			"desktopProxyEnabled" in patch ||
-			"desktopProxyUrl" in patch ||
-			"desktopProxyBypass" in patch
-		) {
-			notice = next.desktopProxyEnabled
-				? "桌面端代理设置已保存；模型拉取和模型测试会使用该代理。"
-				: "桌面端代理已关闭。";
+		try {
+			const next = await api.settings.update(patch);
+			setSettings(next);
+			let notice = "设置已保存。";
+			if (
+				"piProxyEnabled" in patch ||
+				"piProxyUrl" in patch ||
+				"piProxyBypass" in patch
+			) {
+				notice = next.piProxyEnabled
+					? "pi agent 代理设置已保存；新建或重启 agent 后生效。"
+					: "pi agent 代理已关闭。";
+				setPiProxyNoticeTone("info");
+				setPiProxyNotice(
+					next.piProxyEnabled
+						? "代理设置已保存；新建或重启 agent 后生效。"
+						: "",
+				);
+			}
+			if (
+				"desktopProxyEnabled" in patch ||
+				"desktopProxyUrl" in patch ||
+				"desktopProxyBypass" in patch
+			) {
+				notice = next.desktopProxyEnabled
+					? "桌面端代理设置已保存；模型拉取和模型测试会使用该代理。"
+					: "桌面端代理已关闭。";
+			}
+			if ("sendShortcut" in patch) {
+				notice = "发送快捷键设置已保存。";
+			}
+			if (
+				"webServiceEnabled" in patch ||
+				"webServiceHost" in patch ||
+				"webServicePort" in patch
+			) {
+				notice = next.webServiceEnabled
+					? `Web 服务已启动：http://本机局域网 IP:${next.webServicePort}`
+					: "Web 服务已停止。";
+			}
+			if ("useNativeTitleBar" in patch) {
+				notice = "标题栏样式已保存，重启应用后生效。";
+			}
+			setSettingsNotice(notice);
+		} catch (error) {
+			setSettings(await api.settings.get());
+			setSettingsNotice(error instanceof Error ? error.message : String(error));
+		} finally {
+			if (changesWebService) setWebServiceChanging(false);
 		}
-		if ("sendShortcut" in patch) {
-			notice = "发送快捷键设置已保存。";
-		}
-		if ("useNativeTitleBar" in patch) {
-			notice = "标题栏样式已保存，重启应用后生效。";
-		}
-		setSettingsNotice(notice);
 	}
 
 	async function testPiProxy() {
@@ -2046,27 +2082,31 @@ export function App() {
 						<span>Pi-π</span>
 					</div>
 					<div className="toolbar-actions">
-						<button
-							className="icon-button feedback-icon"
-							title="问题反馈"
-							onClick={() => setFeedbackOpen(true)}
-						>
-							<Info size={17} />
-						</button>
-						<button
-							className="icon-button config-icon"
-							title="Pi管理"
-							onClick={() => setConfigOpen(true)}
-						>
-							<Sliders size={17} />
-						</button>
-						<button
-							className="icon-button settings-icon"
-							title="设置"
-							onClick={() => setSettingsOpen(true)}
-						>
-							<Settings size={17} />
-						</button>
+						{!isLanWeb && (
+							<>
+								<button
+									className="icon-button feedback-icon"
+									title="问题反馈"
+									onClick={() => setFeedbackOpen(true)}
+								>
+									<Info size={17} />
+								</button>
+								<button
+									className="icon-button config-icon"
+									title="Pi管理"
+									onClick={() => setConfigOpen(true)}
+								>
+									<Sliders size={17} />
+								</button>
+								<button
+									className="icon-button settings-icon"
+									title="设置"
+									onClick={() => setSettingsOpen(true)}
+								>
+									<Settings size={17} />
+								</button>
+							</>
+						)}
 					</div>
 				</div>
 				<button
@@ -2297,11 +2337,13 @@ export function App() {
 					>
 						<>
 							<div className="header-action-group branch-group">
-								<BranchSelector
-									gitInfo={gitInfo}
-									switchingBranch={switchingBranch}
-									onSwitch={switchBranch}
-								/>
+								{!isLanWeb && (
+									<BranchSelector
+										gitInfo={gitInfo}
+										switchingBranch={switchingBranch}
+										onSwitch={switchBranch}
+									/>
+								)}
 							</div>
 							<div className="header-action-group session-group">
 								<button
@@ -2318,50 +2360,56 @@ export function App() {
 								>
 									Stop
 								</button>
-								<button
-									disabled={
-										!activeAgentId ||
-										activeAgent?.status === "starting" ||
-										!!loadingAction
-									}
-									title="重启 Agent 进程，重新加载配置文件（provider、API key 等）"
-									onClick={async () => {
-										if (!activeAgentId) return;
-										setLoadingAction("restart");
-										try {
-											const tab = await api.agents.restart(activeAgentId);
-											setActiveAgentId(tab.id);
-											void refreshRuntimeState(tab.id);
-										} finally {
-											setLoadingAction(null);
+								{!isLanWeb && (
+									<button
+										disabled={
+											!activeAgentId ||
+											activeAgent?.status === "starting" ||
+											!!loadingAction
 										}
-									}}
-								>
-									{loadingAction === "restart" ? "Restarting…" : "Restart"}
-								</button>
+										title="重启 Agent 进程，重新加载配置文件（provider、API key 等）"
+										onClick={async () => {
+											if (!activeAgentId) return;
+											setLoadingAction("restart");
+											try {
+												const tab = await api.agents.restart(activeAgentId);
+												setActiveAgentId(tab.id);
+												void refreshRuntimeState(tab.id);
+											} finally {
+												setLoadingAction(null);
+											}
+										}}
+									>
+										{loadingAction === "restart" ? "Restarting…" : "Restart"}
+									</button>
+								)}
 							</div>
 							<div className="header-action-group panel-group">
-								<button
-									className={drawer === "files" ? "active" : ""}
-									disabled={isAgentStarting}
-									onClick={() => {
-										setDrawerCollapsed(false);
-										openDrawer("files");
-									}}
-								>
-									Files
-								</button>
-								<button
-									className={terminalOpen ? "active" : ""}
-									disabled={!activeAgentId || isAgentStarting}
-									onClick={() => {
-										if (!activeAgentId) return;
-										setTerminalOpenForAgent(activeAgentId, !terminalOpen);
-									}}
-									title="显示或隐藏当前 Agent 的终端"
-								>
-									Terminal
-								</button>
+								{!isLanWeb && (
+									<>
+										<button
+											className={drawer === "files" ? "active" : ""}
+											disabled={isAgentStarting}
+											onClick={() => {
+												setDrawerCollapsed(false);
+												openDrawer("files");
+											}}
+										>
+											Files
+										</button>
+										<button
+											className={terminalOpen ? "active" : ""}
+											disabled={!activeAgentId || isAgentStarting}
+											onClick={() => {
+												if (!activeAgentId) return;
+												setTerminalOpenForAgent(activeAgentId, !terminalOpen);
+											}}
+											title="显示或隐藏当前 Agent 的终端"
+										>
+											Terminal
+										</button>
+									</>
+								)}
 							</div>
 						</>
 					</div>
@@ -2434,7 +2482,7 @@ export function App() {
 					/>
 				)}
 
-				{terminalOpen && activeAgentId && (
+				{!isLanWeb && terminalOpen && activeAgentId && (
 					<TerminalDock
 						agentId={activeAgentId}
 						collapsed={terminalCollapsed}
@@ -2805,6 +2853,7 @@ export function App() {
 					piProxyChecking={piProxyChecking}
 					piProxyNotice={piProxyNotice}
 					piProxyNoticeTone={piProxyNoticeTone}
+					webServiceChanging={webServiceChanging}
 					appInfo={appInfo}
 					customPiPath={customPiPath}
 					customPathValidating={customPathValidating}
@@ -2824,6 +2873,9 @@ export function App() {
 							opened ? "开发者控制台已打开。" : "开发者控制台已关闭。",
 						);
 					}}
+					onOpenWebService={(port) =>
+						api.app.openExternal(`http://127.0.0.1:${port}`)
+					}
 					onClose={() => {
 						setSettingsOpen(false);
 						setSettingsNotice("");

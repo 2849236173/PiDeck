@@ -20,6 +20,9 @@ const defaultSettings: AppSettings = {
   desktopProxyBypass: "localhost,127.0.0.1,::1",
   customPiPath: "",
   telemetryEnabled: true,
+  webServiceEnabled: false,
+  webServiceHost: "0.0.0.0",
+  webServicePort: 8765,
 };
 
 export class SettingsStore {

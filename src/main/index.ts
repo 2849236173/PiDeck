@@ -37,6 +37,7 @@ import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
 import { TelemetryService } from "./telemetry/TelemetryService";
 import { SkillManager } from "./skills/SkillManager";
 import { ExtensionManager } from "./extensions/ExtensionManager";
+import { WebServiceManager } from "./web/WebServiceManager";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -53,6 +54,7 @@ let agentManager: AgentManager;
 let configManager: ConfigManager;
 let skillManager: SkillManager;
 let extensionManager: ExtensionManager;
+let webServiceManager: WebServiceManager;
 let terminalManager: TerminalSessionManager;
 
 const RELEASES_URL = "https://github.com/ayuayue/pi-desktop/releases";
@@ -406,6 +408,20 @@ function registerIpc() {
 			if ("useNativeTitleBar" in patch) {
 				settingsStore.notifyTitleBarChange(mainWindow);
 			}
+			if (
+				"webServiceEnabled" in patch ||
+				"webServiceHost" in patch ||
+				"webServicePort" in patch
+			) {
+				try {
+					await webServiceManager.applySettings(settings);
+				} catch (error) {
+					if (settings.webServiceEnabled) {
+						await settingsStore.update({ webServiceEnabled: false });
+					}
+					throw error;
+				}
+			}
 			return settings;
 		},
 	);
@@ -650,6 +666,24 @@ app.whenReady().then(async () => {
 		() => mainWindow,
 		settingsStore,
 	);
+	webServiceManager = new WebServiceManager({
+		listProjects: () => projectStore.list(),
+		listAgents: () => agentManager.list(),
+		listSessions: (projectId) => {
+			const project = projectStore.get(projectId);
+			return sessionScanner.list(project?.path);
+		},
+		getMessages: (agentId) => agentManager.getMessages(agentId),
+		createAgent: (input) => agentManager.create(input),
+		sendPrompt: (input) => agentManager.sendPrompt(input),
+		stopAgent: (agentId) => agentManager.stop(agentId),
+		runtimeState: (agentId) => agentManager.getRuntimeState(agentId),
+		cycleModel: (agentId) => agentManager.cycleModel(agentId),
+		availableModels: (agentId) => agentManager.getAvailableModels(agentId),
+		setModel: (agentId, provider, modelId) => agentManager.setModel(agentId, provider, modelId),
+		cycleThinking: (agentId) => agentManager.cycleThinking(agentId),
+		setThinking: (agentId, level) => agentManager.setThinking(agentId, level),
+	});
 	terminalManager = new TerminalSessionManager(
 		(agentId) => agentManager.getCwd(agentId),
 		(channel, payload) => mainWindow?.webContents.send(channel, payload),
@@ -657,6 +691,10 @@ app.whenReady().then(async () => {
 
 	await settingsStore.load();
 	await applyDesktopProxy(settingsStore.get());
+	await webServiceManager.applySettings(settingsStore.get()).catch((error) => {
+		console.error("Failed to start web service:", error);
+		void settingsStore.update({ webServiceEnabled: false });
+	});
 	registerIpc();
 	sendTelemetryHeartbeat();
 	createWindow();
@@ -685,6 +723,7 @@ app.on("before-quit", () => {
 	isQuitting = true;
 	tray?.destroy();
 	tray = null;
+	void webServiceManager?.stop();
 	terminalManager?.closeAll();
 	agentManager?.stopAll();
 });

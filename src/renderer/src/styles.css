@@ -3791,6 +3791,100 @@ body.is-composer-resizing .composer-resize-handle::after {
 	background: #f6f8fb;
 	color: #98a2b3;
 }
+.web-endpoint-panel {
+	margin-top: 10px;
+	display: grid;
+	gap: 10px;
+}
+.web-endpoint-grid {
+	display: grid;
+	grid-template-columns: 150px 112px;
+	gap: 10px;
+	align-items: stretch;
+}
+.web-endpoint-metric {
+	height: 58px;
+	display: grid;
+	align-content: center;
+	gap: 5px;
+	padding: 0 12px;
+	border: 1px solid #d8dee8;
+	border-radius: 8px;
+	background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+.web-endpoint-metric span {
+	color: #7a8494;
+	font-size: 10px;
+	font-weight: 800;
+	letter-spacing: 0.08em;
+}
+.web-endpoint-metric code,
+.web-endpoint-metric input {
+	width: 100%;
+	border: 0;
+	background: transparent;
+	padding: 0;
+	color: #1f2937;
+	font: 700 15px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.web-endpoint-metric input:focus {
+	outline: none;
+}
+.web-endpoint-metric.editable:focus-within {
+	border-color: #14a514;
+	box-shadow: 0 0 0 2px rgba(20, 165, 20, 0.12);
+}
+.web-endpoint-summary {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	gap: 10px;
+	align-items: center;
+	padding: 10px 12px;
+	border: 1px solid #e1e6ef;
+	border-radius: 8px;
+	background: #fbfcfe;
+}
+.web-endpoint-summary > span {
+	width: 9px;
+	height: 9px;
+	border-radius: 999px;
+	background: #98a2b3;
+	box-shadow: 0 0 0 4px rgba(152, 162, 179, 0.14);
+}
+.web-endpoint-summary > span.online {
+	background: #14a514;
+	box-shadow: 0 0 0 4px rgba(20, 165, 20, 0.13);
+}
+.web-endpoint-summary strong {
+	display: block;
+	color: #26313f;
+	font-size: 12px;
+	font-weight: 700;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.web-endpoint-summary small {
+	display: block;
+	margin-top: 2px;
+	color: #7a8494;
+	font-size: 11px;
+}
+.web-endpoint-summary button {
+	height: 30px;
+	padding: 0 12px;
+	border: 1px solid #cfd7e3;
+	border-radius: 8px;
+	background: #fff;
+	color: #26313f;
+	font-size: 12px;
+	font-weight: 600;
+}
+.web-endpoint-summary button:disabled {
+	background: #f1f4f8;
+	color: #98a2b3;
+}
 .setting-proxy-panel {
 	margin: 4px 0 8px;
 	padding: 4px 0 2px;

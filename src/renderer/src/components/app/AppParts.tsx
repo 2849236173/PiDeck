@@ -14,6 +14,7 @@ import {
 	ChevronRight,
 	GitBranch,
 	Brain,
+	Globe2,
 	Network,
 	Pencil,
 	Pin,
@@ -2271,6 +2272,7 @@ export function SettingsModal(props: {
 	piProxyChecking: boolean;
 	piProxyNotice: string;
 	piProxyNoticeTone: "info" | "success" | "error";
+	webServiceChanging: boolean;
 	appInfo: AppInfo;
 	customPiPath: string;
 	customPathValidating: boolean;
@@ -2282,11 +2284,24 @@ export function SettingsModal(props: {
 	onTestPiProxy: () => void;
 	onCheckUpdate: () => void;
 	onToggleDevTools: () => void;
+	onOpenWebService: (port: string) => void;
 	onClose: () => void;
 	onChange: (patch: Partial<AppSettings>) => void;
 }) {
 	const [activeTab, setActiveTab] = useState<SettingsTabId>("base");
+	const [webPortDraft, setWebPortDraft] = useState(String(props.settings.webServicePort));
 	const piPath = props.settings.customPiPath || props.piStatus?.command || "";
+	useEffect(() => {
+		setWebPortDraft(String(props.settings.webServicePort));
+	}, [props.settings.webServicePort]);
+	const applyWebPortDraft = () => {
+		const port = Number(webPortDraft);
+		if (Number.isInteger(port) && port >= 1 && port <= 65535 && port !== props.settings.webServicePort) {
+			props.onChange({ webServicePort: port });
+		} else {
+			setWebPortDraft(String(props.settings.webServicePort));
+		}
+	};
 	const tabs: Array<{
 		id: SettingsTabId;
 		label: string;
@@ -2304,6 +2319,12 @@ export function SettingsModal(props: {
 			label: "代理设置",
 			description: "agent 与桌面端网络",
 			icon: <Network size={16} />,
+		},
+		{
+			id: "web",
+			label: "Web 服务",
+			description: "局域网访问入口",
+			icon: <Globe2 size={16} />,
 		},
 		{
 			id: "dev",
@@ -2528,6 +2549,65 @@ export function SettingsModal(props: {
 								</SettingsSection>
 							</>
 						)}
+						{activeTab === "web" && (
+							<SettingsSection
+								title="局域网 Web 服务"
+								description="开启后会在本机启动 HTTP 服务，局域网内其他设备可通过你的电脑 IP 和端口访问"
+							>
+								<SettingSwitch
+									title="启用 Web 服务"
+									description={props.webServiceChanging ? "服务状态切换中..." : "关闭此开关会立即停止服务"}
+									checked={props.settings.webServiceEnabled}
+									disabled={props.webServiceChanging}
+									onChange={(checked) =>
+										props.onChange({ webServiceEnabled: checked })
+									}
+								/>
+								<div className="web-endpoint-panel">
+									<div className="web-endpoint-grid">
+										<div className="web-endpoint-metric">
+											<span>HOST</span>
+											<code>{props.settings.webServiceHost}</code>
+										</div>
+										<label className="web-endpoint-metric editable">
+											<span>PORT</span>
+											<input
+												type="number"
+												min={1}
+												max={65535}
+												value={webPortDraft}
+												disabled={props.webServiceChanging}
+												onChange={(event) => setWebPortDraft(event.target.value)}
+												onBlur={applyWebPortDraft}
+												onKeyDown={(event) => {
+													if (event.key === "Enter") {
+														event.preventDefault();
+														applyWebPortDraft();
+														event.currentTarget.blur();
+													}
+												}}
+											/>
+										</label>
+									</div>
+									<div className="web-endpoint-summary">
+										<span className={props.settings.webServiceEnabled ? "online" : ""} />
+										<div>
+											<strong>
+												http://127.0.0.1:{webPortDraft || props.settings.webServicePort}
+											</strong>
+											<small>本机预览地址；局域网访问请替换为本机 IP</small>
+										</div>
+										<button
+											type="button"
+											disabled={!props.settings.webServiceEnabled}
+											onClick={() => props.onOpenWebService(webPortDraft || String(props.settings.webServicePort))}
+										>
+											打开
+										</button>
+									</div>
+								</div>
+							</SettingsSection>
+						)}
 						{activeTab === "dev" && (
 							<>
 								<SettingsSection title="环境">
@@ -2742,7 +2822,7 @@ function formatBytes(value: number) {
 	return `${value} B`;
 }
 
-type SettingsTabId = "base" | "proxy" | "dev";
+type SettingsTabId = "base" | "proxy" | "web" | "dev";
 
 function SettingsSection(props: {
 	title: string;
@@ -2764,6 +2844,7 @@ function SettingSwitch(props: {
 	title: string;
 	description?: string;
 	checked: boolean;
+	disabled?: boolean;
 	onChange: (checked: boolean) => void;
 }) {
 	return (
@@ -2775,6 +2856,7 @@ function SettingSwitch(props: {
 			<input
 				type="checkbox"
 				checked={props.checked}
+				disabled={props.disabled}
 				onChange={(event) => props.onChange(event.target.checked)}
 			/>
 		</label>
