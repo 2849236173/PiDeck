@@ -915,7 +915,7 @@ body:not(.is-list-resizing) .list-collapsed .chat-list-pane:hover .list-collapse
 	min-height: 28px;
 	padding: 4px 6px 4px 34px;
 	margin: 2px 0 0 10px;
-	background: rgba(32, 33, 36, 0.04);
+	background: color-mix(in srgb, var(--color-text-primary) 4%, transparent);
 	color: var(--color-text-secondary);
 	border-radius: var(--radius-sm);
 }
@@ -927,7 +927,7 @@ body:not(.is-list-resizing) .list-collapsed .chat-list-pane:hover .list-collapse
 	top: -1px;
 	bottom: -1px;
 	width: 1px;
-	background: rgba(95, 99, 104, 0.22);
+	background: color-mix(in srgb, var(--color-text-tertiary) 28%, transparent);
 }
 .agent-row::after {
 	content: "";
@@ -936,7 +936,7 @@ body:not(.is-list-resizing) .list-collapsed .chat-list-pane:hover .list-collapse
 	top: 50%;
 	width: 10px;
 	height: 1px;
-	background: rgba(95, 99, 104, 0.22);
+	background: color-mix(in srgb, var(--color-text-tertiary) 28%, transparent);
 }
 .agent-node-marker {
 	display: none;
@@ -952,7 +952,7 @@ body:not(.is-list-resizing) .list-collapsed .chat-list-pane:hover .list-collapse
 }
 .agent-row.active::before,
 .agent-row.active::after {
-	background: rgba(35, 134, 54, 0.34);
+	background: color-mix(in srgb, var(--color-accent) 34%, transparent);
 }
 .agent-row.active .conversation-title strong {
 	color: var(--color-text-primary);
@@ -1012,15 +1012,15 @@ body:not(.is-list-resizing) .list-collapsed .chat-list-pane:hover .list-collapse
 	padding: 4px 6px 4px 34px;
 	border: 0;
 	border-radius: var(--radius-sm);
-	background: rgba(32, 33, 36, 0.04);
+	background: color-mix(in srgb, var(--color-text-primary) 4%, transparent);
 	color: var(--color-text-secondary);
 }
 .session-row::before {
-	background: rgba(95, 99, 104, 0.22);
+	background: color-mix(in srgb, var(--color-text-tertiary) 28%, transparent);
 }
 .session-row::after {
 	top: 50%;
-	background: rgba(95, 99, 104, 0.22);
+	background: color-mix(in srgb, var(--color-text-tertiary) 28%, transparent);
 }
 .session-row:hover {
 	background: var(--color-bg-hover);
@@ -1234,7 +1234,7 @@ body.is-terminal-resizing {
 	border-color: var(--color-accent);
 	color: var(--color-text-inverse);
 	font-weight: 600;
-	box-shadow: 0 1px 3px rgba(35, 134, 54, 0.18);
+	box-shadow: 0 1px 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 /* ---- Branch custom dropdown ---- */
