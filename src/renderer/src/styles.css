@@ -4987,7 +4987,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 :root[data-theme="dark"] .composer-box,
 :root[data-theme="dark"] .feedback-body textarea,
 :root[data-theme="dark"] .setting-field input,
-:root[data-theme="dark"] .setting-field select,
+:root[data-theme="dark"] .ui-select-control,
 :root[data-theme="dark"] .config-add-provider-row input,
 :root[data-theme="dark"] .config-provider-card,
 :root[data-theme="dark"] .config-provider-form,
