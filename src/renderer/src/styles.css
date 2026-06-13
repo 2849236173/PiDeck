@@ -4382,33 +4382,33 @@ body.is-composer-resizing .composer-resize-handle::after {
 	margin-top: 8px;
 }
 .setting-pi-path-actions button {
-	border: 1px solid #b8d8ff;
+	border: 1px solid var(--color-border-subtle);
 	border-radius: var(--radius-lg);
-	background: #fff;
-	color: #1677ff;
+	background: var(--color-bg-panel);
+	color: var(--color-info);
 	padding: 7px 12px;
 	white-space: nowrap;
 }
 .setting-pi-path-actions button:disabled {
-	border-color: #d7dce4;
-	color: #98a2b3;
+	border-color: var(--color-border-subtle);
+	color: var(--color-text-tertiary);
 	cursor: not-allowed;
 }
 .setting-row button {
-	border: 1px solid #b8d8ff;
+	border: 1px solid var(--color-border-subtle);
 	border-radius: var(--radius-lg);
-	background: #fff;
-	color: #1677ff;
+	background: var(--color-bg-panel);
+	color: var(--color-info);
 	padding: 7px 12px;
 	white-space: nowrap;
 }
 .setting-row button:disabled {
-	border-color: #d7dce4;
-	color: #98a2b3;
+	border-color: var(--color-border-subtle);
+	color: var(--color-text-tertiary);
 	cursor: not-allowed;
 }
 .settings-panel p {
-	color: #8a9099;
+	color: var(--color-text-tertiary);
 	line-height: 1.5;
 	font-size: var(--font-size-control);
 }
