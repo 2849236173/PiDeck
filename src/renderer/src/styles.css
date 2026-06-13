@@ -3407,10 +3407,10 @@ body.is-composer-resizing .composer-resize-handle::after {
 }
 .feedback-actions button {
 	height: 34px;
-	border: 1px solid #d7dce4;
+	border: 1px solid var(--color-border-subtle);
 	border-radius: var(--radius-lg);
-	background: #fff;
-	color: #344054;
+	background: var(--color-bg-panel);
+	color: var(--color-text-secondary);
 	padding: 0 14px;
 }
 .feedback-actions button:hover {
@@ -3658,13 +3658,11 @@ body.is-composer-resizing .composer-resize-handle::after {
 	z-index: 70;
 	max-width: 720px;
 	padding: 9px 14px;
-	border: 1px solid #d8ead8;
-	border-radius: 999px;
-	background: #ffffff;
-	color: #2f3a46;
-	box-shadow:
-		0 16px 50px rgba(31, 35, 41, 0.12),
-		0 2px 8px rgba(31, 35, 41, 0.06);
+	border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border-subtle));
+	border-radius: var(--radius-pill);
+	background: var(--color-bg-panel);
+	color: var(--color-text-primary);
+	box-shadow: var(--shadow-popover);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
