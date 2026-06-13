@@ -773,7 +773,7 @@ body:not(.is-list-resizing) .list-collapsed .chat-list-pane:hover .list-collapse
 	/* 项目节点改用普通文件夹图标，不再用首字母色块，降低左侧目录树的信息噪音。 */
 	background: transparent;
 	color: var(--color-text-secondary);
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 .chat-project .project-avatar {
 	color: var(--color-accent);
@@ -863,7 +863,7 @@ body:not(.is-list-resizing) .list-collapsed .chat-list-pane:hover .list-collapse
 }
 .chat-project-guide {
 	color: #5f7f6a;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 }
 .project-fold {
 	display: none;
@@ -1272,7 +1272,7 @@ body.is-terminal-resizing {
 	align-items: center;
 }
 .branch-badge {
-	font-size: 10px;
+	font-size: var(--font-size-micro);
 	color: #7d8794;
 	background: #f0f3f7;
 	padding: 1px 6px;
@@ -1283,7 +1283,7 @@ body.is-terminal-resizing {
 .branch-empty-hint {
 	text-align: center;
 	color: #b3bac4;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	padding: 8px 10px;
 }
 .branch-label {
@@ -1519,7 +1519,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 	border-radius: var(--radius-md);
 	background: transparent;
 	color: var(--terminal-muted);
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	padding: 0 9px;
 	cursor: pointer;
 }
@@ -1684,7 +1684,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 	border-radius: 999px;
 	background: var(--terminal-panel);
 	color: var(--terminal-active-fg);
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 	line-height: 1;
 	padding: 6px 9px;
 	box-shadow: 0 8px 20px rgba(15, 23, 42, 0.16);
@@ -1832,7 +1832,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 }
 .chat-message.tool .msg-avatar {
 	background: #cfd5dd;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 .chat-message.error .msg-avatar {
 	background: #e56b6f;
@@ -1860,12 +1860,12 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 	gap: 8px;
 	align-items: center;
 	color: #8a9099;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	margin: 0 0 5px 2px;
 }
 .msg-name time {
 	color: #a8afb9;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
@@ -1879,7 +1879,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 	border-radius: 999px;
 	background: #f1fbf1;
 	color: #148814;
-	font-size: 10px;
+	font-size: var(--font-size-micro);
 	font-weight: 700;
 	line-height: 1;
 }
@@ -2307,7 +2307,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 }
 .thinking-header em {
 	font-style: normal;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	color: #1677ff;
 }
 .thinking-header svg {
@@ -2334,7 +2334,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 	background: transparent;
 	color: #1677ff;
 	padding: 6px 12px;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	cursor: pointer;
 	text-align: center;
 }
@@ -2345,7 +2345,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 /* 设置提示文字 */
 .setting-hint {
 	display: block;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	color: #8896a7;
 	margin-top: 2px;
 }
@@ -2558,7 +2558,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	gap: 10px;
 	padding: 0 8px 8px 14px;
 	color: #8a9099;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	grid-row: 3;
 	min-width: 0;
 }
@@ -2706,7 +2706,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	padding: 10px 14px;
 	border-bottom: 1px solid #f0f2f5;
 	color: #64748b;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	font-weight: 500;
 }
 .command-palette-close {
@@ -2767,7 +2767,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	flex: 1;
 	min-width: 0;
 	color: #64748b;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -2778,7 +2778,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	padding: 8px 14px;
 	border-top: 1px solid #f0f2f5;
 	color: #94a3b8;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 }
 
 .detail-drawer {
@@ -3261,7 +3261,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 .session-history-header span {
 	overflow: hidden;
 	color: #7b8794;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -3270,7 +3270,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	border-bottom: 1px solid #e9edf2;
 	background: #f8fafc;
 	color: #6b7280;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -3390,7 +3390,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	color: #d9f99d;
 	padding: 12px;
 	font-family: "Cascadia Code", Consolas, monospace;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	line-height: 1.55;
 }
 .feedback-actions {
@@ -3464,7 +3464,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	display: block;
 	margin-top: 2px;
 	color: #8a94a3;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	font-weight: 400;
 }
 .codex-import-toolbar {
@@ -3491,7 +3491,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	color: #7b8794;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 .codex-import-actions {
 	display: flex;
@@ -3509,7 +3509,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	background: #fff;
 	color: #4b5563;
 	padding: 0 10px;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	cursor: pointer;
 }
 .codex-import-actions button.primary-action {
@@ -3585,17 +3585,17 @@ body.is-composer-resizing .composer-resize-handle::after {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	color: #5f6b7a;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 .codex-session-main small {
 	color: #9aa4b2;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 }
 .codex-status {
 	flex: 0 0 auto;
 	border-radius: 999px;
 	padding: 2px 7px;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 	background: #eef2f7;
 	color: #64748b;
 }
@@ -3636,7 +3636,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	white-space: nowrap;
 	border-radius: 999px;
 	padding: 3px 8px;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 }
 .codex-import-report span.success {
 	background: #ecfdf5;
@@ -3722,7 +3722,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 .outline-title {
 	padding: 8px 8px 6px;
 	color: #9aa2ad;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	white-space: nowrap;
 	display: flex;
 	align-items: center;
@@ -3749,7 +3749,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 .outline-count {
 	background: #f0f3f7;
 	color: #6b7280;
-	font-size: 10px;
+	font-size: var(--font-size-micro);
 	padding: 1px 6px;
 	border-radius: 999px;
 }
@@ -3764,7 +3764,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	background: #f0fdf4;
 	color: #16a34a;
 	padding: 6px 8px;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	cursor: pointer;
 	margin-bottom: 4px;
 }
@@ -3792,12 +3792,12 @@ body.is-composer-resizing .composer-resize-handle::after {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	font-weight: 500;
 }
 .conversation-outline span {
 	color: #a7afb9;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 }
 .conversation-outline .outline-user strong {
 	color: #2f6fed;
@@ -4098,7 +4098,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	flex: 1;
 	min-width: 0;
 	color: #64748b;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -4112,7 +4112,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	border-radius: 999px;
 	background: #16a34a;
 	color: #fff;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	font-weight: 700;
 	box-shadow: 0 3px 10px rgba(22, 163, 74, 0.28);
 	animation: picker-check-in 0.18s ease-out;
@@ -4131,7 +4131,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	padding: 22px 12px;
 	text-align: center;
 	color: #94a3b8;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 .thinking-picker {
 	width: min(480px, calc(100vw - 120px));
@@ -4802,7 +4802,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	width: auto !important;
 	min-width: 0 !important;
 	padding: 0 14px !important;
-	font-size: 12px !important;
+	font-size: var(--font-size-caption) !important;
 	line-height: 1 !important;
 	border: 1px solid var(--color-border-subtle) !important;
 }
@@ -5004,10 +5004,10 @@ body.is-composer-resizing .composer-resize-handle::after {
 	color: var(--color-info);
 }
 .config-advanced-preserved strong {
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 .config-advanced-preserved span {
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	line-height: 1.5;
 }
 .config-advanced-preserved a,
@@ -5062,7 +5062,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	color: var(--color-danger);
 	overflow: auto;
 	font-family: "Cascadia Code", Consolas, monospace;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 .config-diagnostic-actions {
 	display: flex;
@@ -5802,7 +5802,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	border-radius: var(--radius-md);
 	background: #fff;
 	color: #6b7280;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	cursor: pointer;
 }
 
@@ -5910,7 +5910,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	color: #c8cdd5;
 	border-radius: var(--radius-md);
 	padding: 4px 8px;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	cursor: pointer;
 }
 .rpc-log-toolbar button:hover,
@@ -5940,14 +5940,14 @@ body.is-composer-resizing .composer-resize-handle::after {
 	background: #141923;
 	color: #d5dae3;
 	padding: 6px 9px;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 .rpc-log-list {
 	flex: 1;
 	overflow-y: auto;
 	padding: 4px 0;
 	font-family: "Cascadia Code", "Fira Code", monospace;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 .rpc-log-entry-wrap {
 	border-bottom: 1px solid #252a33;
@@ -5972,7 +5972,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 .rpc-log-entry time {
 	color: #4a5160;
 	flex-shrink: 0;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 }
 .rpc-log-entry .log-direction {
 	flex-shrink: 0;
@@ -5999,7 +5999,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	padding: 8px 16px 8px 40px;
 	background: #111520;
 	color: #a0a8b8;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 	line-height: 1.5;
 	white-space: pre-wrap;
 	word-break: break-all;
@@ -6017,7 +6017,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	color: #5a6678;
 	padding: 3px 10px;
 	border-radius: var(--radius-md);
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	cursor: pointer;
 }
 .debug-toggle:hover {
@@ -6038,7 +6038,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 }
 
 .modified-files-header {
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	color: #5d6673;
 	font-weight: 650;
 	padding: 4px 8px;
@@ -6069,7 +6069,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	flex: 0 0 16px;
 	width: 16px;
 	text-align: center;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 }
 
 .modified-file-icon.done {
@@ -6092,7 +6092,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 .modified-file-lines,
 .modified-file-tool {
 	flex: 0 0 auto;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 	color: #6b7583;
 	padding: 2px 6px;
 	border-radius: var(--radius-xs);
@@ -6120,7 +6120,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	align-items: baseline;
 	gap: 5px;
 	margin-bottom: 3px;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 	line-height: 1.2;
 }
 
@@ -6131,7 +6131,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 
 .session-file-summary-title small {
 	color: #94a3b8;
-	font-size: 10px;
+	font-size: var(--font-size-micro);
 }
 
 .session-file-summary-list {
@@ -6149,7 +6149,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	gap: 8px;
 	padding: 1px 0;
 	color: #64748b;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	line-height: 1.3;
 }
 
@@ -6171,7 +6171,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 .session-file-summary-lines {
 	flex: 0 0 auto;
 	color: #94a3b8;
-	font-size: 11px;
+	font-size: var(--font-size-micro);
 	white-space: nowrap;
 }
 
@@ -6181,7 +6181,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	border: 0;
 	background: transparent;
 	color: #789078;
-	font-size: 10px;
+	font-size: var(--font-size-micro);
 	line-height: 1.2;
 	cursor: pointer;
 }
@@ -6504,7 +6504,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	display: block;
 	margin-top: -4px;
 	color: #8a94a6;
-	font-size: 12px;
+	font-size: var(--font-size-caption);
 	word-break: break-all;
 }
 @media (max-width: 820px) {
