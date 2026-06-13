@@ -316,9 +316,10 @@ const zhCN = {
 	"environment.installDesc":
 		"请按 pi 官方 quickstart 安装并配置 CLI，安装后重新打开应用或点击下方重新检测。",
 	"environment.openInstallDocs": "打开安装文档",
+	"environment.commandLabel": "命令",
 	"environment.customPathTitle": "手动指定 pi 路径",
 	"environment.customPathDesc":
-		"如果 pi 已安装但桌面端检测不到（如使用了 nvm、pnpm 全局安装、或自定义 mise 数据目录），可运行下方 CMD 命令，将输出的 pi.cmd 或 pi.exe 路径粘贴到输入框中。",
+		"如果 pi 已安装但桌面端检测不到（如使用了 nvm、pnpm 全局安装、或自定义 mise 数据目录），可运行下方命令，将输出的 pi.cmd 或 pi.exe 路径粘贴到输入框中。",
 	"environment.validatePath": "校验并使用",
 	"environment.validatingPath": "校验中…",
 	"environment.validatePassed": "校验通过：{value}",
@@ -896,9 +897,10 @@ const enUS: Record<TranslationKey, string> = {
 	"environment.installDesc":
 		"Follow the official pi quickstart to install and configure the CLI, then reopen the app or run the check again.",
 	"environment.openInstallDocs": "Open install docs",
+	"environment.commandLabel": "Command",
 	"environment.customPathTitle": "Set pi path manually",
 	"environment.customPathDesc":
-		"If pi is installed but not detected, for example through nvm, pnpm global installs, or a custom mise data directory, run the CMD command below and paste the pi.cmd or pi.exe path here.",
+		"If pi is installed but not detected, for example through nvm, pnpm global installs, or a custom mise data directory, run the command below and paste the pi.cmd or pi.exe path here.",
 	"environment.validatePath": "Validate and use",
 	"environment.validatingPath": "Validating...",
 	"environment.validatePassed": "Validation passed: {value}",

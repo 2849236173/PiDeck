@@ -162,7 +162,7 @@ export function EnvironmentDialog(props: {
 								<small>{t("environment.customPathDesc")}</small>
 								<div className="ref-commands">
 									<div className="ref-command-item">
-										<span className="ref-label">CMD</span>
+										<span className="ref-label">{t("environment.commandLabel")}</span>
 										<code>{refCmd}</code>
 									</div>
 
