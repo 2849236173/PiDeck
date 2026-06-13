@@ -1700,7 +1700,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 	display: grid;
 	place-items: center;
 	padding: 18px;
-	background: rgba(15, 23, 42, 0.18);
+	background: color-mix(in srgb, var(--terminal-bg) 78%, transparent);
 	backdrop-filter: blur(2px);
 	z-index: 6;
 }
@@ -1744,12 +1744,12 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 	background: var(--terminal-hover);
 }
 .terminal-confirm-actions button.danger {
-	background: #dc2626;
-	border-color: #dc2626;
-	color: #fff;
+	background: var(--color-danger);
+	border-color: var(--color-danger);
+	color: var(--color-text-inverse);
 }
 .terminal-confirm-actions button.danger:hover {
-	background: #b91c1c;
+	background: color-mix(in srgb, var(--color-danger) 88%, black);
 }
 .history-loading {
 	position: absolute;
@@ -1758,19 +1758,19 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 	place-items: center;
 	align-content: center;
 	gap: 12px;
-	color: #7d8794;
-	background: rgba(247, 247, 247, 0.76);
+	color: var(--color-text-tertiary);
+	background: color-mix(in srgb, var(--color-bg-muted) 76%, transparent);
 	backdrop-filter: blur(2px);
-	font-size: 15px;
+	font-size: var(--font-size-body);
 	z-index: 5;
 	animation: fadeIn 0.16s ease;
 }
 .loader {
 	width: 28px;
 	height: 28px;
-	border: 3px solid #e5e7eb;
-	border-top-color: #22c55e;
-	border-radius: 999px;
+	border: 3px solid var(--color-border-subtle);
+	border-top-color: var(--color-accent);
+	border-radius: var(--radius-pill);
 	animation: spin 0.85s linear infinite;
 }
 @keyframes spin {
