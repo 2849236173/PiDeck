@@ -27,6 +27,7 @@ import {
 	X,
 } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
+import { Button } from "../ui/Button";
 import { CloseIconButton, IconButton } from "../ui/IconButton";
 import { SelectField } from "../ui/SelectField";
 import { TextField } from "../ui/TextField";
@@ -2619,12 +2620,12 @@ export function SettingsModal(props: {
 														</small>
 													)}
 												</div>
-												<button
+												<Button
 													onClick={props.onTestPiProxy}
 													disabled={props.piProxyChecking}
 												>
 													{props.piProxyChecking ? t("settings.testingProxy") : t("settings.testProxy")}
-												</button>
+												</Button>
 											</div>
 										</div>
 									)}
@@ -2719,13 +2720,13 @@ export function SettingsModal(props: {
 											</strong>
 											<small>{t("settings.localWebHint")}</small>
 										</div>
-										<button
-											type="button"
+										<Button
+											buttonSize="sm"
 											disabled={!props.settings.webServiceEnabled}
 											onClick={() => props.onOpenWebService(webPortDraft || String(props.settings.webServicePort))}
 										>
 											{t("common.open")}
-										</button>
+										</Button>
 									</div>
 								</div>
 							</SettingsSection>
@@ -2758,9 +2759,9 @@ export function SettingsModal(props: {
 												</small>
 											)}
 										</div>
-										<button onClick={props.onCheckPi} disabled={props.piChecking}>
+										<Button onClick={props.onCheckPi} disabled={props.piChecking}>
 											{props.piChecking ? t("settings.detecting") : t("settings.detectEnvironment")}
-										</button>
+										</Button>
 									</div>
 									<div className="setting-pi-path-panel">
 										<TextField
@@ -2776,20 +2777,20 @@ export function SettingsModal(props: {
 											onChange={props.onCustomPathChange}
 										/>
 										<div className="setting-pi-path-actions">
-											<button
+											<Button
 												onClick={props.onValidateCustomPath}
 												disabled={!props.customPiPath.trim() || props.customPathValidating}
 											>
 												{props.customPathValidating
 													? t("settings.validating")
 													: t("settings.validatePiPath")}
-											</button>
-											<button
+											</Button>
+											<Button
 												onClick={props.onClearCustomPath}
 												disabled={!props.settings.customPiPath || props.customPathValidating}
 											>
 												{t("settings.clearCustomPiPath")}
-											</button>
+											</Button>
 										</div>
 										{props.customPathResult && (
 											<small className={`setting-status ${props.customPathResult.installed ? "success" : "error"}`}>
@@ -2813,7 +2814,7 @@ export function SettingsModal(props: {
 											<strong>{t("settings.currentVersion")}</strong>
 											<small>v{props.appInfo.version}</small>
 										</div>
-										<button onClick={props.onCheckUpdate}>{t("settings.checkUpdate")}</button>
+										<Button onClick={props.onCheckUpdate}>{t("settings.checkUpdate")}</Button>
 									</div>
 								</SettingsSection>
 								<SettingsSection title={t("settings.debug")}>
@@ -2822,18 +2823,18 @@ export function SettingsModal(props: {
 											<strong>{t("settings.restartApp")}</strong>
 											<small>{t("settings.restartAppDesc")}</small>
 										</div>
-										<button onClick={props.onRestartApp}>
+										<Button onClick={props.onRestartApp}>
 											{t("settings.restartAppButton")}
-										</button>
+										</Button>
 									</div>
 									<div className="setting-row">
 										<div>
 											<strong>{t("settings.devTools")}</strong>
 											<small>{t("settings.devToolsDesc")}</small>
 										</div>
-										<button onClick={props.onToggleDevTools}>
+										<Button onClick={props.onToggleDevTools}>
 											{t("settings.toggle")}
-										</button>
+										</Button>
 									</div>
 								</SettingsSection>
 							</>

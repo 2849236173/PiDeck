@@ -805,6 +805,76 @@ select:focus-visible {
 .ui-icon-button svg {
 	display: block;
 }
+.ui-button {
+	min-height: var(--control-height-md);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-1);
+	border: 1px solid var(--color-border-subtle);
+	border-radius: var(--radius-md);
+	background: var(--color-bg-panel);
+	color: var(--color-text-primary);
+	padding: 0 var(--space-3);
+	font-size: var(--font-size-control);
+	font-weight: 600;
+	line-height: var(--line-height-control);
+	white-space: nowrap;
+	transition:
+		background-color 0.15s,
+		border-color 0.15s,
+		color 0.15s,
+		box-shadow 0.15s;
+}
+.ui-button-sm {
+	min-height: var(--control-height-sm);
+	padding: 0 10px;
+	font-size: var(--font-size-caption);
+}
+.ui-button-primary {
+	border-color: var(--color-accent);
+	background: var(--color-accent);
+	color: var(--color-text-inverse);
+}
+.ui-button-secondary {
+	border-color: var(--color-border-subtle);
+	background: var(--color-bg-panel);
+	color: var(--color-text-primary);
+}
+.ui-button-danger {
+	border-color: color-mix(in srgb, var(--color-danger) 28%, var(--color-border-subtle));
+	background: var(--color-danger-soft);
+	color: var(--color-danger);
+}
+.ui-button-ghost {
+	border-color: transparent;
+	background: transparent;
+	color: var(--color-text-secondary);
+}
+.ui-button:hover:not(:disabled) {
+	border-color: var(--color-border-strong);
+	background: var(--color-bg-hover);
+	color: var(--color-text-primary);
+}
+.ui-button-primary:hover:not(:disabled) {
+	border-color: var(--color-accent-strong);
+	background: var(--color-accent-strong);
+	color: var(--color-text-inverse);
+}
+.ui-button-danger:hover:not(:disabled) {
+	border-color: var(--color-danger);
+	background: color-mix(in srgb, var(--color-danger-soft) 82%, var(--color-danger));
+	color: var(--color-danger);
+}
+.ui-button:disabled {
+	background: var(--color-bg-muted);
+	color: var(--color-text-tertiary);
+	cursor: not-allowed;
+}
+.ui-button svg {
+	display: block;
+	flex: none;
+}
 .search-row {
 	height: 52px;
 	display: grid;
@@ -4571,19 +4641,8 @@ body.is-composer-resizing .composer-resize-handle::after {
 	color: var(--color-text-tertiary);
 	font-size: var(--font-size-micro);
 }
-.web-endpoint-summary button {
-	height: 30px;
-	padding: 0 12px;
-	border: 1px solid var(--color-border-subtle);
-	border-radius: var(--radius-sm);
-	background: var(--color-bg-panel);
-	color: var(--color-text-primary);
-	font-size: var(--font-size-caption);
-	font-weight: 600;
-}
-.web-endpoint-summary button:disabled {
-	background: var(--color-bg-muted);
-	color: var(--color-text-tertiary);
+.web-endpoint-summary .ui-button {
+	justify-self: end;
 }
 .setting-proxy-panel {
 	margin: 4px 0 8px;
@@ -4641,32 +4700,6 @@ body.is-composer-resizing .composer-resize-handle::after {
 	flex-wrap: wrap;
 	gap: 8px;
 	margin-top: 8px;
-}
-.setting-pi-path-actions button {
-	border: 1px solid var(--color-border-subtle);
-	border-radius: var(--radius-lg);
-	background: var(--color-bg-panel);
-	color: var(--color-info);
-	padding: 7px 12px;
-	white-space: nowrap;
-}
-.setting-pi-path-actions button:disabled {
-	border-color: var(--color-border-subtle);
-	color: var(--color-text-tertiary);
-	cursor: not-allowed;
-}
-.setting-row button {
-	border: 1px solid var(--color-border-subtle);
-	border-radius: var(--radius-lg);
-	background: var(--color-bg-panel);
-	color: var(--color-info);
-	padding: 7px 12px;
-	white-space: nowrap;
-}
-.setting-row button:disabled {
-	border-color: var(--color-border-subtle);
-	color: var(--color-text-tertiary);
-	cursor: not-allowed;
 }
 .settings-panel p {
 	color: var(--color-text-tertiary);
@@ -6820,8 +6853,6 @@ body.is-composer-resizing .composer-resize-handle::after {
 :root[data-theme="dark"] .session-rename-button,
 :root[data-theme="dark"] .feedback-actions button,
 :root[data-theme="dark"] .update-actions button,
-:root[data-theme="dark"] .setting-row button,
-:root[data-theme="dark"] .setting-pi-path-actions button,
 :root[data-theme="dark"] .codex-import-actions button {
 	background: var(--color-bg-panel);
 	color: var(--color-text-primary);
@@ -6832,8 +6863,6 @@ body.is-composer-resizing .composer-resize-handle::after {
 :root[data-theme="dark"] .session-rename-button:hover:not(:disabled),
 :root[data-theme="dark"] .feedback-actions button:hover,
 :root[data-theme="dark"] .update-actions button:hover,
-:root[data-theme="dark"] .setting-row button:hover,
-:root[data-theme="dark"] .setting-pi-path-actions button:hover,
 :root[data-theme="dark"] .codex-import-actions button:hover {
 	background: var(--color-bg-hover);
 	border-color: var(--color-border-strong);
