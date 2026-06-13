@@ -29,6 +29,7 @@ import {
 import { t, type TranslationKey } from "../../i18n";
 import { CloseIconButton, IconButton } from "../ui/IconButton";
 import { SelectField } from "../ui/SelectField";
+import { TextField } from "../ui/TextField";
 import type {
 	AgentRuntimeState,
 	AgentTab,
@@ -2585,31 +2586,25 @@ export function SettingsModal(props: {
 									/>
 									{props.settings.piProxyEnabled && (
 										<div className="setting-proxy-panel">
-											<div className="setting-field">
-												<span>{t("settings.proxyUrl")}</span>
-												<input
-													type="text"
-													value={props.settings.piProxyUrl}
-													placeholder="http://127.0.0.1:7890"
-													onChange={(event) =>
-														props.onChange({ piProxyUrl: event.target.value })
-													}
-												/>
-											</div>
-											<div className="setting-field">
-												<span>{t("settings.proxyBypass")}</span>
-												<input
-													type="text"
-													value={props.settings.piProxyBypass}
-													placeholder="localhost,127.0.0.1,::1"
-													onChange={(event) =>
-														props.onChange({ piProxyBypass: event.target.value })
-													}
-												/>
-												<small className="setting-hint">
-													{t("settings.noProxyHint")}
-												</small>
-											</div>
+											<TextField
+												className="setting-field"
+												label={t("settings.proxyUrl")}
+												value={props.settings.piProxyUrl}
+												placeholder="http://127.0.0.1:7890"
+												onChange={(value) =>
+													props.onChange({ piProxyUrl: value })
+												}
+											/>
+											<TextField
+												className="setting-field"
+												label={t("settings.proxyBypass")}
+												value={props.settings.piProxyBypass}
+												placeholder="localhost,127.0.0.1,::1"
+												description={t("settings.noProxyHint")}
+												onChange={(value) =>
+													props.onChange({ piProxyBypass: value })
+												}
+											/>
 											<div className="setting-row">
 												<div>
 													<strong>{t("settings.proxyTest")}</strong>
@@ -2648,35 +2643,25 @@ export function SettingsModal(props: {
 									/>
 									{props.settings.desktopProxyEnabled && (
 										<div className="setting-proxy-panel">
-											<div className="setting-field">
-												<span>{t("settings.proxyUrl")}</span>
-												<input
-													type="text"
-													value={props.settings.desktopProxyUrl}
-													placeholder="http://127.0.0.1:7890"
-													onChange={(event) =>
-														props.onChange({
-															desktopProxyUrl: event.target.value,
-														})
-													}
-												/>
-											</div>
-											<div className="setting-field">
-												<span>{t("settings.proxyBypass")}</span>
-												<input
-													type="text"
-													value={props.settings.desktopProxyBypass}
-													placeholder="localhost,127.0.0.1,::1"
-													onChange={(event) =>
-														props.onChange({
-															desktopProxyBypass: event.target.value,
-														})
-													}
-												/>
-												<small className="setting-hint">
-													{t("settings.electronProxyHint")}
-												</small>
-											</div>
+											<TextField
+												className="setting-field"
+												label={t("settings.proxyUrl")}
+												value={props.settings.desktopProxyUrl}
+												placeholder="http://127.0.0.1:7890"
+												onChange={(value) =>
+													props.onChange({ desktopProxyUrl: value })
+												}
+											/>
+											<TextField
+												className="setting-field"
+												label={t("settings.proxyBypass")}
+												value={props.settings.desktopProxyBypass}
+												placeholder="localhost,127.0.0.1,::1"
+												description={t("settings.electronProxyHint")}
+												onChange={(value) =>
+													props.onChange({ desktopProxyBypass: value })
+												}
+											/>
 										</div>
 									)}
 								</SettingsSection>
@@ -2778,19 +2763,18 @@ export function SettingsModal(props: {
 										</button>
 									</div>
 									<div className="setting-pi-path-panel">
-										<div className="setting-field">
-											<span>{t("settings.customPiPath")}</span>
-											<input
-												type="text"
-												value={props.customPiPath}
-												placeholder={piPath || "D:\\mise-data\\installs\\node\\24 13 0\\pi.cmd"}
-												onChange={(event) => props.onCustomPathChange(event.target.value)}
-												disabled={props.customPathValidating}
-											/>
-											<small className="setting-hint">
-												{t("settings.customPiPathHint")}
-											</small>
-										</div>
+										<TextField
+											className="setting-field"
+											label={t("settings.customPiPath")}
+											value={props.customPiPath}
+											placeholder={
+												piPath ||
+												"D:\\mise-data\\installs\\node\\24 13 0\\pi.cmd"
+											}
+											description={t("settings.customPiPathHint")}
+											disabled={props.customPathValidating}
+											onChange={props.onCustomPathChange}
+										/>
 										<div className="setting-pi-path-actions">
 											<button
 												onClick={props.onValidateCustomPath}
