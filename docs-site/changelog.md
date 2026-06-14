@@ -2,16 +2,17 @@
 
 完整更新日志仍维护在仓库根目录：
 
-- [中文 CHANGELOG](https://github.com/ayuayue/pi-desktop/blob/main/CHANGELOG.zh-CN.md)
-- [English CHANGELOG](https://github.com/ayuayue/pi-desktop/blob/main/CHANGELOG.md)
+- [中文 CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.zh-CN.md)
+- [English CHANGELOG](https://github.com/ayuayue/PiDeck/blob/main/CHANGELOG.md)
 
-## v0.4.17
+## v0.6.0
 
-发布时间：2026-06-11
+发布时间：2026-06-14
 
-- Skill 管理：配置弹窗新增独立 Skills 页面，可查看全局 Skill、创建模板、启用或禁用、删除和打开目录。
-- pi 路径兜底：自动检测失败时可手动输入 pi 路径，支持带引号、双反斜杠、无扩展名和包含空格的 Windows `.cmd` 路径。
-- 体验优化：设置页可直接查看和修改 pi 路径并原地检测；Skill 列表和删除确认弹窗改为应用内一致风格。
+- 会话活动轨迹：思考、工具调用和回答片段按流程聚合展示，工具详情可展开复制。
+- 会话导入：项目右键菜单支持导入 Claude 会话，并继续支持 Codex 会话导入。
+- 性能与输入：长历史会话分页和懒渲染减少卡顿，输入框更适合多行内容，命令历史可用方向键复用。
+- 稳定性：Windows 绿色版设置持久化、系统托盘行为和 bash 工具退出码展示更可靠。
 
 ## 历史版本
 

@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.5.0-green)
+![Version](https://img.shields.io/badge/version-0.6.0-green)
 
 `PiDeck` **不是** pi 的分支。它是一个轻量 Electron 外壳，通过启动多个 `pi --mode rpc` 进程，将项目管理、会话管理、对话界面、配置管理和工具编排整合到一个原生桌面应用中——所有 Agent 能力由 pi 原生提供。
 
@@ -16,12 +16,13 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.5.0**（2026-06-14）
+> **最新版本 v0.6.0**（2026-06-14）
 
-### v0.5.0 更新
-- 🎨 桌面体验大更新：侧栏、Header、输入区、抽屉、设置/配置/反馈弹层全面迁移到统一设计 token，暗色模式和中英文文案覆盖大幅提升。
-- 🧭 工作流增强：项目侧栏内联展示最近历史会话，左键打开/复用，右键管理；支持新建 Git 分支、项目目录定位和历史会话删除。
-- 🧩 能力扩展：新增局域网 Web 服务、pi Extension 管理、PiDeck 自绘下拉控件、终端暗色主题适配和完整 UI 设计审计文档。
+### v0.6.0 更新
+- 🧭 会话流程：新增紧凑活动轨迹，思考、工具调用和回答片段按流程展示，工具详情可展开复制，长回答可换行和选中。
+- 🔁 会话迁移：项目右键支持导入 Claude 会话，并继续支持 Codex 会话导入，导入后进入 PiDeck 历史会话。
+- ⚡ 性能与输入：长历史会话分页和懒渲染减少卡顿，输入框更适合多行内容，命令历史可用方向键复用。
+- 🛠️ 稳定性：Windows 绿色版设置持久化、系统托盘行为和 bash 工具退出码展示更可靠。
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 
@@ -38,11 +39,12 @@
 | **斜线命令 & `!` Shell** | 内置斜线命令建议（`/compact`、`/session` 等），支持 `!command` / `!!command` 在聊天输入框直接执行 Shell 命令。 |
 | **内嵌终端 Dock** | 当前 Agent 绑定独立终端 tab，支持 PowerShell/cmd/sh fallback、多 tab、主题切换、拖拽高度、右键复制选区和关闭确认。 |
 | **会话管理** | 新建会话、项目内联历史、恢复历史会话、重命名、复制、导出 HTML、删除历史会话和关闭 Agent——通过侧边栏或右键菜单即可完成。 |
+| **会话导入** | 项目右键可导入 Codex 和 Claude 本地会话，转换为 PiDeck 历史会话后继续浏览和恢复。 |
 | **Git 集成** | 实时显示当前分支，支持本地 + 远程分支选择器、分支数量徽章、分支切换和新建分支。 |
 | **局域网 Web 服务** | 可在设置中启动本机 Web 服务，局域网设备可通过电脑 IP 和端口访问。 |
-| **工具调用可视化** | 工具调用聚合卡片，摘要 + 可展开详情，运行中/完成/失败状态清晰标识。 |
+| **会话活动轨迹** | 思考、工具调用和回答片段按流程聚合展示，工具详情可展开复制，状态和退出码清晰标识。 |
 | **回答级修改摘要** | Agent 每轮回答完成后在对应回答下方以紧凑列表展示本轮修改文件名和修改行数，Files 面板保留本次会话总览。 |
-| **上下文感知输入** | `@` 文件引用建议、`!` Shell 执行、`/` 斜线命令——统一在同一个输入框中。 |
+| **上下文感知输入** | `@` 文件引用建议、`!` Shell 执行、`/` 斜线命令和命令历史——统一在同一个输入框中。 |
 | **应用更新提示** | 定时检查 GitHub Release，发现新版本后展示发布日志和推荐下载入口，下载交由系统默认浏览器处理。 |
 | **系统托盘** | 关闭窗口默认最小化到托盘，托盘右键菜单，双击恢复窗口。 |
 
@@ -54,7 +56,7 @@
 
 ![工作区总览](docs/images/overview.png)
 
-Markdown 渲染 + 流式输出、工具调用详情、回答级修改文件摘要、模型/思考等级/上下文/缓存状态栏、Git 分支选择器、操作按钮（New Session · Stop · Restart · Files · History · Terminal）。
+Markdown 渲染 + 流式输出、活动轨迹、工具调用详情、回答级修改文件摘要、模型/思考等级/上下文/缓存状态栏、Git 分支选择器、操作按钮（New Session · Stop · Restart · Files · History · Terminal）。
 
 ### 配置管理
 
@@ -131,7 +133,7 @@ pi --mode rpc
 
 **Windows**、**macOS**、**Linux** 平台的预构建安装包在 GitHub Release 中发布：
 
-👉 **[GitHub Releases](https://github.com/ayuayue/pi-desktop/releases)**
+👉 **[GitHub Releases](https://github.com/ayuayue/PiDeck/releases)**
 
 > PiDeck 需要单独安装 `pi` CLI 并确保其加入系统 `PATH`。
 
@@ -140,7 +142,7 @@ pi --mode rpc
 ## 快速开始（从源码运行）
 
 ```bash
-git clone https://github.com/ayuayue/pi-desktop.git
+git clone https://github.com/ayuayue/PiDeck.git
 cd pi-desktop
 npm install
 npm run make-icon

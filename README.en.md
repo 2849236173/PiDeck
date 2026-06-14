@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.5.0-green)
+![Version](https://img.shields.io/badge/version-0.6.0-green)
 
 `PiDeck` is **not** a fork of pi. It is a lightweight Electron shell that orchestrates multiple `pi --mode rpc` processes, providing a native desktop UI for projects, sessions, conversations, configuration, and tool orchestration — all powered by pi's native agent capabilities.
 
@@ -16,12 +16,13 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.5.0** (2026-06-14)
+> **Latest: v0.6.0** (2026-06-14)
 
-### v0.5.0 Updates
-- 🎨 Major desktop refresh: the sidebar, header, composer, drawer, and Settings/Config/Feedback pages now share a stronger design-token system, with much broader dark-mode and localization coverage.
-- 🧭 Workflow upgrades: project rows show recent sessions inline, left-click opens or reuses sessions, right-click is reserved for management, and Git branch creation, project reveal, and session deletion are now available.
-- 🧩 Expanded capabilities: LAN web service, pi Extension management, PiDeck-styled custom selects, terminal dark-theme adaptation, and the full UI design audit documentation are now included.
+### v0.6.0 Updates
+- 🧭 Session flow: a compact activity view now shows thinking, tool calls, and answer updates in order, with expandable/copyable tool details and wrapped selectable answers.
+- 🔁 Session migration: project context menus can import Claude sessions alongside Codex sessions, then browse them as PiDeck history sessions.
+- ⚡ Performance and input: long historical sessions use pagination and lazy rendering, the composer has more room for multi-line prompts, and command history is available from the keyboard.
+- 🛠️ Reliability: Windows portable settings, tray behavior, and bash tool exit-code display are more reliable.
 
 [View Full Changelog →](CHANGELOG.md)
 
@@ -38,11 +39,12 @@
 | **Slash Commands & `!` Shell** | Built-in slash command suggestions (`/reload`, `/compact`, `/session`, …) and `!command` / `!!command` for inline shell execution directly in the chat composer. |
 | **Embedded Terminal Dock** | Agent-scoped terminal tabs with PowerShell/cmd/sh fallback, multiple tabs, theme switching, height resizing, right-click selection copy, and close-all confirmation. |
 | **Session Management** | Create sessions, browse inline project history, restore historical sessions, rename, copy, export HTML, delete history, and close agents from the sidebar or context menus. |
+| **Session Import** | Import local Codex and Claude sessions from the project context menu, then browse or restore them as PiDeck history sessions. |
 | **Git Integration** | Real-time branch display with local + remote branch selector, branch count badge, switching support, and branch creation. |
 | **LAN Web Service** | Start a local web service from Settings so devices on the same network can open PiDeck through the host IP and port. |
-| **Tool Call Visualization** | Grouped tool-call cards with summary and expandable details, clear status indicators for running/completed/failed calls. |
+| **Session Activity View** | Thinking notes, tool calls, and answer updates are grouped into a compact flow with expandable/copyable details and clear status or exit-code labels. |
 | **Session File Summary** | Completed agent runs show a compact list of modified file names and changed line counts; more than three files can be expanded. |
-| **Context-Aware Input** | `@` file suggestions from project tree, `!` shell execution, `/` slash commands — all from a single composer. |
+| **Context-Aware Input** | `@` file suggestions from project tree, `!` shell execution, `/` slash commands, and command history — all from a single composer. |
 | **Update Prompt** | Periodically checks GitHub Releases and shows release notes plus recommended download links opened in the system browser. |
 | **System Tray** | Close to tray by default, tray context menu, double-click to restore. |
 
@@ -54,7 +56,7 @@
 
 ![Workspace overview](docs/images/overview.png)
 
-Markdown rendering with streaming text, tool-call details, session file-change summary, model/thinking/context/cache status bar, git branch selector, and action controls (New Session · Stop · Restart · Files · History · Terminal).
+Markdown rendering with streaming text, activity flow, tool-call details, session file-change summary, model/thinking/context/cache status bar, git branch selector, and action controls (New Session · Stop · Restart · Files · History · Terminal).
 
 ### Configuration Management
 
@@ -131,7 +133,7 @@ pi --mode rpc
 
 Prebuilt packages for **Windows**, **macOS**, and **Linux** are published from tagged releases:
 
-👉 **[GitHub Releases](https://github.com/ayuayue/pi-desktop/releases)**
+👉 **[GitHub Releases](https://github.com/ayuayue/PiDeck/releases)**
 
 > PiDeck requires the `pi` CLI to be installed separately and available in your system `PATH`.
 
@@ -140,7 +142,7 @@ Prebuilt packages for **Windows**, **macOS**, and **Linux** are published from t
 ## Quick Start (from Source)
 
 ```bash
-git clone https://github.com/ayuayue/pi-desktop.git
+git clone https://github.com/ayuayue/PiDeck.git
 cd pi-desktop
 npm install
 npm run make-icon

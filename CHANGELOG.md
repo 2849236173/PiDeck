@@ -6,21 +6,28 @@ All notable changes to PiDeck are documented here.
 
 ## [Unreleased]
 
+## v0.6.0 - 2026-06-14
+
 ### Added
-- Performance testing script to validate optimization improvements
+- Claude session import from the project context menu, converting local Claude JSONL sessions into PiDeck history sessions.
+- Composer command history with Up/Down navigation for quickly reusing previous prompts while editing at the first or last line.
+- Performance testing script and renderer helpers for validating long-session rendering improvements.
 
 ### Improved
-- **Startup experience**: Application window now maximizes automatically on launch for better workspace utilization
-- **Composer input**: Increased default input box height from 132px to 160px for better multi-line editing and code snippet input
-- **Historical session performance**: Significantly reduced input lag when opening sessions with many messages (average 90.3% performance improvement)
+- **Session workflow display**: Thinking, tool calls, and answer updates now appear in a compact activity flow with accurate status, timing alignment, wrapping, and copyable details.
+- **Historical session performance**: Significantly reduced input lag when opening sessions with many messages (average 90.3% performance improvement).
   - Message update optimization: Added reference equality check to skip unnecessary state updates
   - Suggestion calculation optimization: Suggestions are now only computed when the dropdown is open
   - Modified files calculation optimization: Computation now only triggers when message count changes
   - Outline calculation optimization: Reduced re-computation frequency by optimizing dependencies
-- **Input responsiveness**: Typing in the composer is now more responsive, especially in long conversation sessions
+- **Tool-call status**: Bash command exit codes are now shown as command results instead of being treated as RPC tool failures.
+- **Startup experience**: Application window now maximizes automatically on launch for better workspace utilization.
+- **Composer input**: Increased default input box height from 132px to 160px for better multi-line editing and code snippet input.
+- **Input responsiveness**: Typing in the composer is now more responsive, especially in long conversation sessions.
 
 ### Fixed
-- Settings persistence in Windows portable mode now works correctly across restarts
+- Settings persistence in Windows portable mode now works correctly across restarts.
+- System tray behavior is more reliable.
 
 ## v0.5.0 - 2026-06-14
 

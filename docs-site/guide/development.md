@@ -40,4 +40,4 @@ env:
   VITEPRESS_BASE: /
 ```
 
-默认配置面向 `https://ayuayue.github.io/pi-desktop/`，所以 base 为 `/pi-desktop/`。
+默认配置面向 `https://ayuayue.github.io/PiDeck/`，所以 base 为 `/PiDeck/`。

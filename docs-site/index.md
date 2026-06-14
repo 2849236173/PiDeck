@@ -8,19 +8,19 @@ hero:
   actions:
     - theme: brand
       text: 下载最新版本
-      link: https://github.com/ayuayue/pi-desktop/releases
+      link: https://github.com/ayuayue/PiDeck/releases
     - theme: alt
       text: 快速开始
       link: /guide/getting-started
     - theme: alt
       text: 查看 GitHub
-      link: https://github.com/ayuayue/pi-desktop
+      link: https://github.com/ayuayue/PiDeck
 
 features:
   - title: 多项目工作区
     details: 添加、搜索、拖动排序和切换本地项目目录，每个 Agent 会话都保持项目级隔离。
-  - title: 会话时间线
-    details: 恢复历史会话、查看工具调用、导出 HTML，并在回答下方看到本轮修改摘要。
+  - title: 会话活动轨迹
+    details: 恢复历史会话，按流程查看思考、工具调用和回答片段，并在回答下方看到本轮修改摘要。
   - title: 配置与 Skills
     details: 可视化管理 models、auth、settings 和全局 Skills，减少频繁打开配置文件的上下文切换。
   - title: 文件与 Git
@@ -32,13 +32,13 @@ features:
 ---
 
 <figure class="home-showcase">
-  <img src="/images/overview.png" alt="pi-desktop 工作区与对话界面截图">
+  <img src="/images/overview.png" alt="PiDeck 工作区与对话界面截图">
   <figcaption>工作区、会话、文件抽屉、Git 分支和工具调用集中在同一个桌面窗口中。</figcaption>
 </figure>
 
 ## 面向本地开发的桌面控制台
 
-`pi-desktop` 不是 pi 的分支。它是一个轻量 Electron 外壳，通过启动多个 `pi --mode rpc` 进程，把项目管理、会话管理、配置管理和桌面交互整合起来，Agent 能力仍由 pi 原生提供。
+`PiDeck` 不是 pi 的分支。它是一个轻量 Electron 外壳，通过启动多个 `pi --mode rpc` 进程，把项目管理、会话管理、配置管理和桌面交互整合起来，Agent 能力仍由 pi 原生提供。
 
 <div class="info-strip">
   <div>
