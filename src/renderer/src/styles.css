@@ -6163,7 +6163,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	padding: 14px 16px;
+	padding: 8px 14px;
 	cursor: pointer;
 	transition: background 0.15s;
 }
@@ -6182,7 +6182,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 
 .config-provider-name {
 	font-weight: 600;
-	font-size: var(--font-size-body);
+	font-size: var(--font-size-control);
 	color: var(--color-text-primary);
 }
 
@@ -6692,7 +6692,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	display: flex;
 	gap: 12px;
 	align-items: center;
-	padding: 14px 16px;
+	padding: 8px 14px;
 	cursor: pointer;
 	transition: background 0.15s;
 }
@@ -6703,7 +6703,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 
 .config-auth-provider {
 	font-weight: 600;
-	font-size: var(--font-size-body);
+	font-size: var(--font-size-control);
 	color: var(--color-text-primary);
 }
 
