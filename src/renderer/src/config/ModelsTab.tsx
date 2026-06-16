@@ -269,8 +269,16 @@ export function ModelsTab(props: {
 								<span>{t("config.providerGuideApiDesc3")}</span>
 							</div>
 							<div className="config-provider-api-item">
+								<code>openai-codex-responses</code>
+								<span>{t("config.providerGuideApiDesc5")}</span>
+							</div>
+							<div className="config-provider-api-item">
 								<code>google-generative-ai</code>
 								<span>{t("config.providerGuideApiDesc4")}</span>
+							</div>
+							<div className="config-provider-api-item">
+								<code>mistral-conversations</code>
+								<span>{t("config.providerGuideApiDesc6")}</span>
 							</div>
 						</div>
 

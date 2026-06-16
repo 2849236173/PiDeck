@@ -59,3 +59,29 @@ export const PROVIDER_API_OPTIONS = [
 	"google-generative-ai",
 	"mistral-conversations",
 ];
+
+export const API_TYPE_LABELS: Record<string, string> = {
+	"openai-completions": "OpenAI Chat Completions",
+	"openai-responses": "OpenAI Responses",
+	"openai-codex-responses": "OpenAI Codex Responses",
+	"anthropic-messages": "Anthropic Messages",
+	"google-generative-ai": "Google Generative AI",
+	"mistral-conversations": "Mistral Conversations",
+};
+
+export const API_TYPE_DESCRIPTIONS: Record<string, string> = {
+	"openai-completions": "OpenAI Chat Completions API — 兼容性最广，适用于大多数第三方服务和本地模型",
+	"openai-responses": "OpenAI Responses API — 新版 API，支持更多功能",
+	"openai-codex-responses": "OpenAI Codex Responses — 用于 ChatGPT Plus/Pro 订阅。如遇问题可尝试 openai-responses + 自定义 User-Agent",
+	"anthropic-messages": "Anthropic Messages API — Claude 系列模型专用",
+	"google-generative-ai": "Google Generative AI API — Gemini 系列模型",
+	"mistral-conversations": "Mistral Conversations API — Mistral 模型原生接口",
+};
+export const API_TYPE_DESCRIPTIONS_EN: Record<string, string> = {
+	"openai-completions": "OpenAI Chat Completions API — Most compatible, works with most third-party services and local models",
+	"openai-responses": "OpenAI Responses API — Newer API with more features",
+	"openai-codex-responses": "OpenAI Codex Responses — For ChatGPT Plus/Pro. Try openai-responses + custom User-Agent if issues occur",
+	"anthropic-messages": "Anthropic Messages API — For Claude models",
+	"google-generative-ai": "Google Generative AI API — For Gemini models",
+	"mistral-conversations": "Mistral Conversations API — Native Mistral interface",
+};

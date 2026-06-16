@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { MouseEvent } from "react";
 import { Check, Eye, EyeOff, ChevronDown } from "lucide-react";
 import { t } from "../i18n";
-import { PROVIDER_API_OPTIONS } from "./providerHeaders";
+import { PROVIDER_API_OPTIONS, API_TYPE_LABELS, API_TYPE_DESCRIPTIONS, API_TYPE_DESCRIPTIONS_EN } from "./providerHeaders";
 
 // ── 复制到剪贴板工具 ──────────────────────────────────
 
@@ -150,7 +150,7 @@ export function ApiTypeInput(props: {
 				<ChevronDown size={14} />
 			</button>
 			{open && (
-				<div className="config-combobox-menu">
+				<div className="config-combobox-menu config-api-type-menu">
 					{PROVIDER_API_OPTIONS.map((option) => (
 						<button
 							key={option}
@@ -162,7 +162,8 @@ export function ApiTypeInput(props: {
 								setOpen(false);
 							}}
 						>
-							{option}
+							<span className="config-api-type-label">{API_TYPE_LABELS[option] || option}</span>
+							<small className="config-api-type-desc">{API_TYPE_DESCRIPTIONS[option] || ""}</small>
 						</button>
 					))}
 				</div>
