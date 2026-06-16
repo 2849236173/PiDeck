@@ -5868,14 +5868,6 @@ body.is-composer-resizing .composer-resize-handle::after {
 	justify-content: flex-end;
 	gap: 8px;
 }
-.config-btn.danger {
-	background: var(--color-danger);
-	color: white;
-	border-color: var(--color-danger);
-}
-.config-btn.danger:hover {
-	opacity: 0.85;
-}
 
 .config-toolbar {
 	display: flex;
@@ -5934,6 +5926,16 @@ body.is-composer-resizing .composer-resize-handle::after {
 
 .config-btn.danger:hover:not(:disabled) {
 	background: var(--color-danger-soft);
+}
+
+/* 确认对话框中的危险按钮（红色背景） */
+.config-modal-actions .config-btn.danger {
+	background: var(--color-danger);
+	color: white;
+	border-color: var(--color-danger);
+}
+.config-modal-actions .config-btn.danger:hover {
+	opacity: 0.85;
 }
 
 .config-btn.small {
