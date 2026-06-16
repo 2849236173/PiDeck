@@ -498,24 +498,6 @@ export function ModelsTab(props: {
 												<span>{t("config.headerEmptyHint")}</span>
 											</div>
 										</div>
-										{(providerComplexFields.length > 0 || providerAdvancedFields.length > 0) && (
-											<div className="config-advanced-preserved">
-												<strong>{t("config.advancedPreservedTitle")}</strong>
-												<span>
-													{t("config.advancedPreservedProvider", {
-														fields: [...providerComplexFields, ...providerAdvancedFields].join(", "),
-													})}
-													{" "}
-													<a href="https://pi.dev/docs/latest/models" target="_blank" rel="noreferrer">
-														pi {t("config.docsModels")}
-													</a>
-													{" / "}
-													<a href="https://pi.dev/docs/latest/custom-provider" target="_blank" rel="noreferrer">
-														{t("config.docsCustomProvider")}
-													</a>
-												</span>
-											</div>
-										)}
 
 
 										{/* 快速测试连接 */}
@@ -678,6 +660,25 @@ export function ModelsTab(props: {
 												</label>
 											</div>
 										</div>
+
+										{(providerComplexFields.length > 0 || providerAdvancedFields.length > 0) && (
+											<div className="config-advanced-preserved">
+												<strong>{t("config.advancedPreservedTitle")}</strong>
+												<span>
+													{t("config.advancedPreservedProvider", {
+														fields: [...providerComplexFields, ...providerAdvancedFields].join(", "),
+													})}
+													{" "}
+													<a href="https://pi.dev/docs/latest/models" target="_blank" rel="noreferrer">
+														pi {t("config.docsModels")}
+													</a>
+													{" / "}
+													<a href="https://pi.dev/docs/latest/custom-provider" target="_blank" rel="noreferrer">
+														{t("config.docsCustomProvider")}
+													</a>
+												</span>
+											</div>
+										)}
 									</div>
 
 									<div className="config-models-section">
