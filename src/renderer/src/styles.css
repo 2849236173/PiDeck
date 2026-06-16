@@ -6542,8 +6542,8 @@ body.is-composer-resizing .composer-resize-handle::after {
 
 /* API 类型下拉菜单 —— 宽菜单带描述 */
 .config-api-type-menu {
-	width: 420px;
-	max-width: calc(100vw - 60px);
+	width: 480px;
+	max-width: calc(100vw - 40px);
 	max-height: 280px;
 }
 .config-api-type-menu button {

@@ -423,7 +423,8 @@ export class ConfigManager {
 					body: JSON.stringify({
 						model: modelId,
 						messages: [{ role: "user", content: "Hi" }],
-						max_tokens: 1,
+						// 部分代理与 Claude 模型对 max_tokens 有最低要求，设为 10 避免 400/404。
+						max_tokens: 10,
 					}),
 				};
 
