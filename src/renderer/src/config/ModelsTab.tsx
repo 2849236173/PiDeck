@@ -221,7 +221,7 @@ export function ModelsTab(props: {
 					</button>
 					{batchMode && (
 						<button
-							className="config-btn danger"
+							className="config-btn danger-fill"
 							onClick={() => {
 								if (selectedProviders.size > 0) {
 									props.onDeleteProviders([...selectedProviders] as string[]);

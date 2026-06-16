@@ -107,7 +107,7 @@ export function AuthTab(props: {
 					</button>
 					{batchMode && (
 						<button
-							className="config-btn danger"
+							className="config-btn danger-fill"
 							onClick={() => {
 								if (selectedAuths.size > 0) {
 									props.onDeleteAuths([...selectedAuths] as string[]);
