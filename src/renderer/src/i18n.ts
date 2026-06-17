@@ -57,6 +57,7 @@ const zhCN = {
   "app.exportedPath": "已导出：{path}",
   "app.feedbackCopied": "反馈内容已复制",
   "app.filesRefreshed": "文件列表已刷新",
+  "app.openFileFailed": "打开文件失败：{error}",
   "app.imageAlt": "图片 {index}",
   "app.imagePreviewClose": "关闭图片预览",
   "app.imagePreviewAlt": "图片预览",
@@ -309,6 +310,7 @@ const zhCN = {
   "config.renderCrashedHelpSuffix": "，并把控制台错误和配置片段反馈给我们。",
   "config.saveFailed": "保存失败",
   "config.saved": "配置已保存",
+  "config.modelsSavedRestartHint": "模型配置已保存，请重启激活的 Agent 会话以应用新配置",
   "config.skillCreatedToast": "Skill 已创建，重启 agent 后生效",
   "config.skillDeletedToast": "Skill 已删除，重启 agent 后生效",
   "config.skillDisabledToast": "Skill 已禁用，重启 agent 后生效",
@@ -513,6 +515,7 @@ const zhCN = {
   "menu.removeProject": "删除目录记录",
   "menu.revealProject": "在文件管理器中定位",
   "menu.revealFile": "在文件夹中显示",
+  "menu.copyPath": "复制路径",
   "menu.rpcLogs": "RPC 日志",
   "preview.agentTitle": "预览会话",
   "preview.assistantText":
@@ -596,6 +599,10 @@ const zhCN = {
   "settings.environment": "环境",
   "settings.foundPi": "已找到 {version}",
   "settings.inputShortcut": "发送快捷键",
+  "settings.linkOpenMode": "链接打开方式",
+  "settings.linkOpenModeDesc": "默认使用系统浏览器；应用内窗口适合临时查看文档和网页。",
+  "settings.linkOpenMode.external": "默认浏览器",
+  "settings.linkOpenMode.internal": "应用内窗口",
   "settings.localWebHint": "本机预览地址；局域网访问请替换为本机 IP",
   "settings.nativeMenu": "显示原生菜单",
   "settings.nativeTitleBar": "使用系统标题栏",
@@ -617,6 +624,8 @@ const zhCN = {
   "settings.restartAppDesc":
     "关闭当前窗口并重新打开桌面版，适合应用标题栏或底层设置变更。",
   "settings.restartNotice": "标题栏设置保存后需要重启 PiDeck 生效。",
+  "settings.rpcTimeout": "RPC 超时时间（秒）",
+  "settings.rpcTimeoutDesc": "Agent 执行命令的最长等待时间，默认 600 秒（10 分钟），最小 30 秒",
   "settings.sendShortcut.ctrl": "Ctrl/⌘ + Enter 发送，Enter 换行",
   "settings.sendShortcut.enter": "Enter 发送，Ctrl/Shift+Enter 换行",
   "settings.sendShortcut.shift": "Shift + Enter 发送，Enter 换行",
@@ -770,6 +779,7 @@ const enUS: Record<TranslationKey, string> = {
   "app.exportedPath": "Exported: {path}",
   "app.feedbackCopied": "Feedback copied",
   "app.filesRefreshed": "File list refreshed",
+  "app.openFileFailed": "Failed to open file: {error}",
   "app.imageAlt": "Image {index}",
   "app.imagePreviewClose": "Close image preview",
   "app.imagePreviewAlt": "Image preview",
@@ -1027,6 +1037,7 @@ const enUS: Record<TranslationKey, string> = {
     ", then send us the console error and config snippet.",
   "config.saveFailed": "Save failed",
   "config.saved": "Configuration saved",
+  "config.modelsSavedRestartHint": "Model configuration saved. Please restart active Agent sessions to apply the new configuration.",
   "config.skillCreatedToast":
     "Skill created. Restart agents for it to take effect.",
   "config.skillDeletedToast":
@@ -1241,6 +1252,7 @@ const enUS: Record<TranslationKey, string> = {
   "menu.removeProject": "Remove project record",
   "menu.revealProject": "Reveal in File Manager",
   "menu.revealFile": "Show in folder",
+  "menu.copyPath": "Copy path",
   "menu.rpcLogs": "RPC Logs",
   "preview.agentTitle": "Preview Session",
   "preview.assistantText":
@@ -1333,6 +1345,10 @@ const enUS: Record<TranslationKey, string> = {
   "settings.environment": "Environment",
   "settings.foundPi": "Found {version}",
   "settings.inputShortcut": "Send shortcut",
+  "settings.linkOpenMode": "Link open mode",
+  "settings.linkOpenModeDesc": "Use the system browser by default. The in-app window is useful for quick docs and web previews.",
+  "settings.linkOpenMode.external": "Default browser",
+  "settings.linkOpenMode.internal": "In-app window",
   "settings.localWebHint":
     "Local preview address. Replace with this computer's IP for LAN access.",
   "settings.nativeMenu": "Show native menu",
@@ -1358,6 +1374,8 @@ const enUS: Record<TranslationKey, string> = {
     "Close the current window and reopen the desktop app. Useful after title bar or shell setting changes.",
   "settings.restartNotice":
     "Title bar changes take effect after restarting PiDeck.",
+  "settings.rpcTimeout": "RPC timeout (seconds)",
+  "settings.rpcTimeoutDesc": "Maximum wait time for agent command execution. Default is 600 seconds (10 minutes), minimum is 30 seconds.",
   "settings.sendShortcut.ctrl": "Ctrl/⌘ + Enter sends, Enter inserts a newline",
   "settings.sendShortcut.enter":
     "Enter sends, Ctrl/Shift+Enter inserts a newline",

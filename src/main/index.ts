@@ -42,6 +42,7 @@ import { WebServiceManager } from "./web/WebServiceManager";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let internalLinkWindow: BrowserWindow | null = null;
 /** 标记是否由用户主动退出（托盘菜单「退出」），区别于窗口关闭隐藏到托盘 */
 let isQuitting = false;
 let projectStore: ProjectStore;
@@ -288,6 +289,48 @@ function setupTray() {
 	tray.setContextMenu(contextMenu);
 }
 
+async function openExternalUrl(url: string) {
+	if (!url.startsWith("http:") && !url.startsWith("https:")) return;
+	const settings = settingsStore.get();
+	if (settings.linkOpenMode === "internal") {
+		openInternalLinkWindow(url);
+		return;
+	}
+	await shell.openExternal(url);
+}
+
+function openInternalLinkWindow(url: string) {
+	// 内部打开使用独立 BrowserWindow，避免外部网页导航污染主工作台，同时保留系统浏览器作为默认选项。
+	if (!internalLinkWindow || internalLinkWindow.isDestroyed()) {
+		internalLinkWindow = new BrowserWindow({
+			width: 1180,
+			height: 820,
+			minWidth: 760,
+			minHeight: 520,
+			title: "PiDeck",
+			parent: mainWindow ?? undefined,
+			webPreferences: {
+				nodeIntegration: false,
+				contextIsolation: true,
+				sandbox: true,
+			},
+		});
+		internalLinkWindow.on("closed", () => {
+			internalLinkWindow = null;
+		});
+		internalLinkWindow.webContents.setWindowOpenHandler(({ url: nextUrl }) => {
+			void openExternalUrl(nextUrl);
+			return { action: "deny" };
+		});
+	}
+	internalLinkWindow.loadURL(url).catch((error) => {
+		void shell.openExternal(url);
+		console.warn("Failed to load internal link window, falling back to browser:", error);
+	});
+	internalLinkWindow.show();
+	internalLinkWindow.focus();
+}
+
 function printStartupInfo() {
 	if (!mainWindow || mainWindow.isDestroyed()) return;
 
@@ -361,12 +404,9 @@ function createWindow() {
 		},
 	});
 
-	// 所有 target="_blank" 或 window.open 的链接统一用系统浏览器打开，
-	// 避免在 Electron 窗口内弹出新 BrowserWindow。
+	// 所有 target="_blank" 或 window.open 的链接统一经同一入口处理，遵守用户设置的打开方式。
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-		if (url.startsWith("http:") || url.startsWith("https:")) {
-			void shell.openExternal(url);
-		}
+		void openExternalUrl(url);
 		return { action: "deny" };
 	});
 
@@ -467,7 +507,9 @@ function registerIpc() {
 	});
 
 	ipcMain.handle(ipcChannels.filesOpen, async (_event, path: string) => {
-		await shell.openPath(path);
+		const error = await shell.openPath(path);
+		// Electron 通过返回字符串报告打开失败；显式抛出后前端才能提示路径不存在或系统无法打开。
+		if (error) throw new Error(error);
 	});
 
 	ipcMain.handle(
@@ -598,8 +640,8 @@ function registerIpc() {
 		};
 	});
 	ipcMain.handle(ipcChannels.appOpenExternal, async (_event, url: string) => {
-		// 外部链接统一经主进程打开，避免 renderer 直接依赖 shell 权限，也便于后续做白名单校验。
-		await shell.openExternal(url);
+		// 外部链接统一经主进程打开，避免 renderer 直接依赖 shell 权限，并遵守用户设置的打开方式。
+		await openExternalUrl(url);
 	});
 	ipcMain.handle(ipcChannels.appRestart, async () => {
 		// 标记为退出状态，避免 closeToTray 阻止重启

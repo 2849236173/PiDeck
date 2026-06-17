@@ -296,6 +296,19 @@ export class AgentManager {
 			promptDeliveryBehavior ? { streamingBehavior: promptDeliveryBehavior } : undefined,
 			input.images,
 		);
+
+		// 在设置状态为 running 之前检查进程是否还活着，避免进程崩溃后状态不一致
+		if (!runtime.process.isRunning()) {
+			runtime.tab.status = "error";
+			this.addMessage(
+				input.agentId,
+				"error",
+				"Agent 进程已停止，请重启 Agent 后重试",
+			);
+			this.emitState();
+			return;
+		}
+
 		runtime.tab.status = "running";
 		this.emitState();
 
@@ -314,7 +327,11 @@ export class AgentManager {
 			if (promptDeliveryBehavior) {
 				requestPayload.streamingBehavior = promptDeliveryBehavior;
 			}
-			const response = await runtime.process.client.request(requestPayload);
+			// 使用用户配置的 RPC 超时时间，因为用户提示词可能触发长时间运行的命令或复杂操作
+			const response = await runtime.process.client.request(
+				requestPayload,
+				this.settingsStore.get().rpcTimeout,
+			);
 			if (!response.success) {
 				// pi RPC 会把不支持图片、忙碌队列参数缺失等前置错误作为 success:false 返回；
 				// 必须显式显示出来，否则 UI 会停在“已发送但无响应”的状态。
@@ -327,12 +344,28 @@ export class AgentManager {
 				this.emitState();
 			}
 		} catch (error) {
-			runtime.tab.status = "idle";
-			this.addMessage(
-				input.agentId,
-				"error",
-				`图片消息发送失败：${error instanceof Error ? error.message : String(error)}`,
-			);
+			// 超时或进程崩溃后，需要明确提示用户重启 Agent
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			const isProcessDead = errorMessage.includes("pi process is not running") || 
+			                     errorMessage.includes("RPC command timed out");
+			
+			if (isProcessDead) {
+				runtime.tab.status = "error";
+				this.addMessage(
+					input.agentId,
+					"error",
+					errorMessage.includes("timed out") 
+						? `命令执行超时（${Math.round(this.settingsStore.get().rpcTimeout / 1000)}秒），Agent 进程可能已停止。请重启 Agent 后重试，或在设置中增加 RPC 超时时间。`
+						: `Agent 进程已停止，请重启 Agent 后重试。`,
+				);
+			} else {
+				runtime.tab.status = "idle";
+				this.addMessage(
+					input.agentId,
+					"error",
+					`消息发送失败：${errorMessage}`,
+				);
+			}
 			this.emitState();
 		}
 	}
@@ -352,6 +385,19 @@ export class AgentManager {
 			`${excludeFromContext ? "!!" : "!"}${command}`,
 		);
 		const runtime = this.requireRuntime(agentId);
+		
+		// 检查进程是否还活着
+		if (!runtime.process.isRunning()) {
+			runtime.tab.status = "error";
+			this.addMessage(
+				agentId,
+				"error",
+				"Agent 进程已停止，请重启 Agent 后重试",
+			);
+			this.emitState();
+			return;
+		}
+		
 		runtime.tab.status = "running";
 		this.emitState();
 
@@ -391,13 +437,30 @@ export class AgentManager {
 				this.addMessage(agentId, "tool", toolMessage.text, toolMessage.meta);
 			}
 		} catch (error) {
-			this.addMessage(
-				agentId,
-				"error",
-				`命令执行失败：${error instanceof Error ? error.message : String(error)}`,
-			);
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			const isProcessDead = errorMessage.includes("pi process is not running") || 
+			                     errorMessage.includes("RPC command timed out");
+			
+			if (isProcessDead) {
+				runtime.tab.status = "error";
+				this.addMessage(
+					agentId,
+					"error",
+					errorMessage.includes("timed out") 
+						? `命令执行超时，Agent 进程可能已停止。请重启 Agent 后重试。`
+						: `Agent 进程已停止，请重启 Agent 后重试。`,
+				);
+			} else {
+				this.addMessage(
+					agentId,
+					"error",
+					`命令执行失败：${errorMessage}`,
+				);
+			}
 		} finally {
-			runtime.tab.status = "idle";
+			if (runtime.tab.status !== "error") {
+				runtime.tab.status = "idle";
+			}
 			this.emitState();
 		}
 	}

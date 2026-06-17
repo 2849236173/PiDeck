@@ -522,8 +522,10 @@ select:focus-visible {
 	--drawer-width: 270px;
 	--window-drag-height: 0px;
 	height: 100vh;
+	min-height: 0;
 	display: grid;
 	grid-template-columns: var(--list-width) 6px minmax(0, 1fr);
+	grid-template-rows: minmax(0, 1fr);
 	background: var(--color-bg-app);
 	transition: grid-template-columns 0.18s ease;
 }
@@ -3867,6 +3869,9 @@ body.is-composer-resizing .composer-resize-handle::after {
 	grid-column: 5;
 	background: var(--color-bg-panel);
 	min-width: 0;
+	/* Grid item 默认 min-height:auto 会被深层文件树内容撑开，导致内部 .files-panel 的 overflow 无法形成滚动区。 */
+	min-height: 0;
+	height: 100%;
 	display: flex;
 	flex-direction: column;
 	box-shadow: var(--shadow-drawer);
@@ -3874,6 +3879,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 }
 .drawer-header {
 	height: 58px;
+	flex: 0 0 58px;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -3922,6 +3928,14 @@ body.is-composer-resizing .composer-resize-handle::after {
 	opacity: 0.34;
 	cursor: not-allowed;
 }
+.drawer-content-frame {
+	/* LazyWrapper 会在抽屉和内容之间多包一层 div；它也必须成为 flex 列并允许收缩，内部文件面板才能滚动。 */
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
 .drawer-restore {
 	position: fixed;
 	right: 0;
@@ -3949,49 +3963,75 @@ body.is-composer-resizing .composer-resize-handle::after {
 }
 .files-panel,
 .sessions-panel {
+	/* 作为右侧抽屉的 flex 内容区时必须允许收缩，否则深层文件树会撑开容器导致滚动条失效。 */
+	flex: 1;
+	min-height: 0;
 	overflow: auto;
 	padding: var(--space-4);
 }
-.file-node button {
+.file-node-row {
+	--file-depth-offset: 0px;
 	width: 100%;
-	display: flex;
+	display: grid;
+	grid-template-columns: 22px minmax(0, 1fr);
 	gap: var(--space-2);
 	align-items: center;
 	border: 0;
 	background: transparent;
 	color: var(--color-text-primary);
-	padding: 7px var(--space-2);
+	padding: 7px var(--space-2) 7px calc(var(--space-2) + var(--file-depth-offset));
 	border-radius: var(--radius-sm);
 	text-align: left;
 	font-size: var(--font-size-control);
 	font-weight: 500;
 	line-height: 1.28;
-	overflow: hidden;
-	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.file-node button.file {
+.file-node-row:hover {
+	background: var(--color-bg-hover);
+	color: var(--color-text-primary);
+}
+.file-node-row:active {
+	background: var(--color-bg-active);
+}
+.file-node-row:focus-visible {
+	outline: none;
+	box-shadow: var(--focus-ring);
+}
+.file-node-row.file {
 	cursor: default;
 	color: var(--color-text-secondary);
 }
-.file-node button.file:hover {
-	background: transparent;
-}
-.file-node button.directory {
+.file-node-row.directory {
 	color: var(--color-text-secondary);
 	font-weight: 600;
 	cursor: default;
 }
-.file-node button span {
+.file-node-icon {
 	width: 22px;
 	color: var(--color-accent);
 	font-size: var(--font-size-caption);
 	text-align: center;
+	display: inline-grid;
+	place-items: center;
+}
+.file-node-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 .file-children {
-	padding-left: 16px;
-	margin-left: 10px;
+	position: relative;
+}
+.file-children::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: calc(var(--space-2) + var(--file-depth-offset, 0px) + 11px);
 	border-left: 1px solid var(--color-border-subtle);
+	pointer-events: none;
 }
 .panel-action-row {
 	display: flex;
@@ -7837,6 +7877,21 @@ body.is-composer-resizing .composer-resize-handle::after {
 	background: var(--color-accent-soft);
 }
 
+.modified-files-toggle {
+	margin: 6px 8px 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--color-text-secondary);
+	font-size: var(--font-size-micro);
+	line-height: 1.2;
+	cursor: pointer;
+}
+
+.modified-files-toggle:hover {
+	color: var(--color-accent);
+}
+
 /* 回答级文件摘要是 AI 回答的轻量附件：和回答气泡左边对齐，弱化边框与留白。 */
 .session-file-summary-list-card {
 	max-width: min(320px, 100%);
@@ -7876,14 +7931,24 @@ body.is-composer-resizing .composer-resize-handle::after {
 }
 
 .session-file-summary-row {
+	width: 100%;
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: center;
 	gap: 8px;
 	padding: 1px 0;
+	border: 0;
+	background: transparent;
 	color: var(--color-text-secondary);
 	font-size: var(--font-size-caption);
 	line-height: 1.3;
+	text-align: left;
+	border-radius: var(--radius-xs);
+	cursor: pointer;
+}
+
+.session-file-summary-row:hover {
+	background: var(--color-bg-hover);
 }
 
 .session-file-summary-name {

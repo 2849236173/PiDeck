@@ -4,10 +4,11 @@ import {
 	useEffect,
 	useRef,
 	useState,
+	type CSSProperties,
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
 	Check,
@@ -1431,6 +1432,7 @@ export const AgentRun = memo(function AgentRun(props: {
 	onPreviewImage: (image: ImageContent) => void;
 	showThinking?: boolean;
 	onOpenExternal: (url: string) => void;
+	onOpenFile?: (path: string) => void;
 	onResendUserMessage?: (message: ChatMessage) => void;
 	fileSummariesByMessage?: Record<string, SessionModifiedFile[]>;
 }) {
@@ -1476,12 +1478,13 @@ export const AgentRun = memo(function AgentRun(props: {
 									message={item.message}
 									onPreviewImage={props.onPreviewImage}
 									onOpenExternal={props.onOpenExternal}
+									onOpenFile={props.onOpenFile}
 									onResendUserMessage={props.onResendUserMessage}
 									showThinking={false}
 									compact
 								/>
 								{item.message.role === "assistant" && fileSummary && fileSummary.length > 0 && (
-									<SessionFileSummary files={fileSummary} />
+									<SessionFileSummary files={fileSummary} onOpenFile={props.onOpenFile} />
 								)}
 							</div>
 						);
@@ -1532,6 +1535,7 @@ export const ChatBubble = memo(function ChatBubble(props: {
 	onPreviewImage: (image: ImageContent) => void;
 	showThinking?: boolean;
 	onOpenExternal: (url: string) => void;
+	onOpenFile?: (path: string) => void;
 	onResendUserMessage?: (message: ChatMessage) => void;
 	compact?: boolean;
 }) {
@@ -1638,17 +1642,19 @@ export const ChatBubble = memo(function ChatBubble(props: {
 					) : (
 						<ReactMarkdown
 							remarkPlugins={[remarkGfm]}
+							urlTransform={markdownUrlTransform}
 							components={{
 								pre: CodeBlock,
 								a: (linkProps) => (
 									<MarkdownLink
 										{...linkProps}
 										onOpenExternal={props.onOpenExternal}
+										onOpenFile={props.onOpenFile}
 									/>
 								),
 							}}
 						>
-							{cleanText}
+							{linkifyFilePaths(cleanText)}
 						</ReactMarkdown>
 					)}
 					{expanded && <pre className="tool-detail">{cleanDetail}</pre>}
@@ -1716,18 +1722,84 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
 	);
 }
 
-/** Markdown 内的链接默认会在 Electron 窗口内导航,这里拦截点击统一用系统浏览器打开。 */
+/** Markdown 内的链接默认会在 Electron 窗口内导航,这里拦截点击统一用系统浏览器打开。
+ * 支持文件路径链接（file:// 协议）点击打开文件。
+ */
+function markdownUrlTransform(url: string): string {
+	// react-markdown 默认会清空 file:// 协议；这里只放行本地文件链接，普通外链仍使用默认安全过滤。
+	return url.startsWith("file://") ? url : defaultUrlTransform(url);
+}
+
 function MarkdownLink(
 	props: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
 		onOpenExternal: (url: string) => void;
+		onOpenFile?: (path: string) => void;
 	},
 ) {
-	const { onOpenExternal, ...anchorProps } = props;
+	const { onOpenExternal, onOpenFile, ...anchorProps } = props;
 	const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
 		e.preventDefault();
-		if (props.href) void onOpenExternal(props.href);
+		if (!props.href) return;
+		
+		// 处理文件路径链接（file:// 协议）
+		if (props.href.startsWith('file://')) {
+			const filePath = decodeURIComponent(props.href.slice(7));
+			if (onOpenFile) {
+				void onOpenFile(filePath);
+			}
+		} else {
+			// 普通 URL 链接用系统浏览器打开
+			void onOpenExternal(props.href);
+		}
 	};
 	return <a {...anchorProps} onClick={handleClick} />;
+}
+
+/**
+ * 将文本中的文件路径转换为可点击的 Markdown 链接。
+ * 只处理 Markdown 链接之外的裸路径，避免把 `[path](file://...)` 二次改写成非法嵌套链接。
+ */
+function linkifyFilePaths(text: string): string {
+	const protectedRanges = collectMarkdownLinkRanges(text);
+	// 支持常见文件路径：Windows 盘符路径、Unix 绝对路径、./ 或 ../ 相对路径、src/file.ts 这类项目相对路径。
+	// 排除 Markdown 控制字符和 URL 常见字符，防止匹配到已有链接语法或普通 http(s) 地址。
+	const filePathRegex = /(?:['"`])?(?:(?:[A-Z]:\\|[A-Z]:\/|\.\.?\/|\/)[^\s<>"'`|?*\n\[\]()]+|(?:[a-zA-Z_][a-zA-Z0-9_-]*[\\/])+[^\s<>"'`|?*\n\[\]()]+)\.[a-zA-Z0-9]+(?:['"`])?/g;
+	const replacements: Array<{ start: number; end: number; value: string }> = [];
+
+	for (const match of text.matchAll(filePathRegex)) {
+		const start = match.index ?? 0;
+		const end = start + match[0].length;
+		if (protectedRanges.some((range) => start >= range.start && end <= range.end)) continue;
+
+		let path = match[0].trim();
+		if (/^['"`]/.test(path)) path = path.slice(1);
+		if (/['"`]$/.test(path)) path = path.slice(0, -1);
+		if (!path) continue;
+
+		replacements.push({
+			start,
+			end,
+			value: `[${path}](file://${encodeURIComponent(path)})`,
+		});
+	}
+
+	let result = text;
+	// 从后向前替换，避免前面的替换改变后续匹配下标。
+	for (const item of replacements.reverse()) {
+		result = `${result.slice(0, item.start)}${item.value}${result.slice(item.end)}`;
+	}
+	return result;
+}
+
+/** 收集 Markdown inline link 的范围，用于保护已存在链接不被文件路径自动链接逻辑破坏。 */
+function collectMarkdownLinkRanges(text: string): Array<{ start: number; end: number }> {
+	const ranges: Array<{ start: number; end: number }> = [];
+	const linkRegex = /\[[^\]\n]+\]\([^\)\n]+\)/g;
+	for (const match of text.matchAll(linkRegex)) {
+		const start = match.index ?? 0;
+		ranges.push({ start, end: start + match[0].length });
+	}
+	return ranges;
 }
 
 function extractText(node: ReactNode): string {
@@ -2126,6 +2198,8 @@ export function DrawerContent(props: {
 	);
 }
 
+const MODIFIED_FILES_PREVIEW_LIMIT = 5;
+
 function FilesPanel(props: {
 	files: FileTreeNode[];
 	/** 当前会话中 agent 修改过的文件 */
@@ -2135,6 +2209,17 @@ function FilesPanel(props: {
 	onFileContextMenu: (node: FileTreeNode, x: number, y: number) => void;
 	onRefreshFiles: () => void;
 }) {
+	const [modifiedFilesExpanded, setModifiedFilesExpanded] = useState(false);
+	// 后端按修改时间升序传入；抽屉顶部优先展示最新文件，避免文件多时用户看不到刚改的内容。
+	const latestModifiedFiles = [...props.modifiedFiles].reverse();
+	const visibleModifiedFiles = modifiedFilesExpanded
+		? latestModifiedFiles
+		: latestModifiedFiles.slice(0, MODIFIED_FILES_PREVIEW_LIMIT);
+	const hiddenModifiedFileCount = Math.max(
+		0,
+		latestModifiedFiles.length - visibleModifiedFiles.length,
+	);
+
 	return (
 		<div className="files-panel">
 			<div className="panel-action-row">
@@ -2144,7 +2229,7 @@ function FilesPanel(props: {
 			{props.modifiedFiles.length > 0 && (
 				<div className="modified-files-section">
 					<div className="modified-files-header">{t("drawer.modifiedThisSession")}</div>
-					{props.modifiedFiles.map((file) => {
+					{visibleModifiedFiles.map((file) => {
 						const fileName = file.path.split(/[/\\]/).pop() ?? file.path;
 						const isRunning = file.status === "running";
 						// 构造最小的 FileTreeNode 以复用右键菜单,保持修改清单和文件树相同的打开/定位入口。
@@ -2181,6 +2266,17 @@ function FilesPanel(props: {
 							</div>
 						);
 					})}
+					{latestModifiedFiles.length > MODIFIED_FILES_PREVIEW_LIMIT && (
+						<button
+							className="modified-files-toggle"
+							type="button"
+							onClick={() => setModifiedFilesExpanded((current) => !current)}
+						>
+							{modifiedFilesExpanded
+								? t("common.collapse")
+								: t("drawer.moreFiles", { count: hiddenModifiedFileCount })}
+						</button>
+					)}
 				</div>
 			)}
 			{props.files.map((node) => (
@@ -2196,7 +2292,10 @@ function FilesPanel(props: {
 	);
 }
 
-export function SessionFileSummary(props: { files: SessionModifiedFile[] }) {
+export function SessionFileSummary(props: {
+	files: SessionModifiedFile[];
+	onOpenFile?: (path: string) => void;
+}) {
 	const [expanded, setExpanded] = useState(false);
 	const totalLines = props.files.reduce(
 		(total, file) => total + (file.changedLines ?? 0),
@@ -2219,16 +2318,23 @@ export function SessionFileSummary(props: { files: SessionModifiedFile[] }) {
 				{visibleFiles.map((file) => {
 					const fileName = file.path.split(/[/\\]/).pop() ?? file.path;
 					return (
-						<li key={file.path} className="session-file-summary-row" title={file.path}>
-							<span className="session-file-summary-name">{fileName}</span>
-							<span
-								className="session-file-summary-lines"
-								title={t("drawer.changedLinesEstimate")}
+						<li key={file.path}>
+							<button
+								className="session-file-summary-row"
+								type="button"
+								title={file.path}
+								onClick={() => props.onOpenFile?.(file.path)}
 							>
-								{file.changedLines
-									? `~${t("drawer.changedLines", { count: file.changedLines })}`
-									: t("drawer.changed")}
-							</span>
+								<span className="session-file-summary-name">{fileName}</span>
+								<span
+									className="session-file-summary-lines"
+									title={t("drawer.changedLinesEstimate")}
+								>
+									{file.changedLines
+										? `~${t("drawer.changedLines", { count: file.changedLines })}`
+										: t("drawer.changed")}
+								</span>
+							</button>
 						</li>
 					);
 				})}
@@ -2251,34 +2357,43 @@ function FileNode(props: {
 	expandedDirs: Set<string>;
 	onToggleDirectory: (path: string) => void;
 	onFileContextMenu: (node: FileTreeNode, x: number, y: number) => void;
+	depth?: number;
 }) {
-	const { node, expandedDirs, onToggleDirectory } = props;
+	const { node, expandedDirs, onToggleDirectory, depth = 0 } = props;
 	const expanded = expandedDirs.has(node.path);
+	// 每行保持同一个宽度，只通过 CSS 变量控制缩进；避免深层递归容器把最后一层可用宽度越压越窄。
+	const rowStyle = { "--file-depth-offset": `${depth * 16}px` } as CSSProperties;
 	const menu = (event: React.MouseEvent) => {
 		event.preventDefault();
 		props.onFileContextMenu(node, event.clientX, event.clientY);
 	};
 	if (node.type === "file")
 		return (
-			<div className="file-node">
-				<button className="file" title={node.relativePath} onContextMenu={menu}>
-					<span>{fileIcon(node.name)}</span>
-					{node.name}
+			<div className="file-node" style={rowStyle}>
+				<button
+					className="file file-node-row"
+					style={rowStyle}
+					title={node.relativePath}
+					onContextMenu={menu}
+				>
+					<span className="file-node-icon">{fileIcon(node.name)}</span>
+					<span className="file-node-name">{node.name}</span>
 				</button>
 			</div>
 		);
 	return (
-		<div className="file-node">
+		<div className="file-node" style={rowStyle}>
 			<button
-				className="directory"
+				className="directory file-node-row"
+				style={rowStyle}
 				onClick={() => onToggleDirectory(node.path)}
 				onContextMenu={menu}
 				title={node.relativePath}
 			>
-				<span>
+				<span className="file-node-icon">
 					{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
 				</span>
-				{node.name}
+				<span className="file-node-name">{node.name}</span>
 			</button>
 			{expanded && node.children && node.children.length > 0 && (
 				<div className="file-children">
@@ -2289,6 +2404,7 @@ function FileNode(props: {
 							expandedDirs={expandedDirs}
 							onToggleDirectory={onToggleDirectory}
 							onFileContextMenu={props.onFileContextMenu}
+							depth={depth + 1}
 						/>
 					))}
 				</div>
@@ -2822,6 +2938,7 @@ export function FileContextMenu(props: {
 	onOpen: () => void;
 	onReveal: () => void;
 	onAttach: () => void;
+	onCopyPath: () => void;
 }) {
 	const isFile = props.menu.node.type === "file";
 	return (
@@ -2838,6 +2955,7 @@ export function FileContextMenu(props: {
 					{t("menu.defaultOpen")}
 				</button>
 				<button onClick={props.onReveal}>{t("menu.revealFile")}</button>
+				<button onClick={props.onCopyPath}>{t("menu.copyPath")}</button>
 			</div>
 		</div>
 	);
@@ -3046,6 +3164,10 @@ export function SettingsModal(props: {
 		{ value: "ctrl-enter-send", label: t("settings.sendShortcut.ctrl") },
 		{ value: "shift-enter-send", label: t("settings.sendShortcut.shift") },
 	];
+	const linkOpenModeOptions = [
+		{ value: "external", label: t("settings.linkOpenMode.external") },
+		{ value: "internal", label: t("settings.linkOpenMode.internal") },
+	];
 
 	return (
 		<div className="modal-backdrop">
@@ -3148,6 +3270,29 @@ export function SettingsModal(props: {
 											props.onChange({
 												sendShortcut:
 													value as AppSettings["sendShortcut"],
+											})
+										}
+									/>
+									<TextField
+										className="setting-field"
+										label={t("settings.rpcTimeout")}
+										type="number"
+										value={String(Math.round(props.settings.rpcTimeout / 1000))}
+										description={t("settings.rpcTimeoutDesc")}
+										onChange={(value) => {
+											const seconds = Math.max(30, parseInt(value) || 600);
+											props.onChange({ rpcTimeout: seconds * 1000 });
+										}}
+									/>
+									<SelectField
+										className="setting-field"
+										label={t("settings.linkOpenMode")}
+										description={t("settings.linkOpenModeDesc")}
+										value={props.settings.linkOpenMode}
+										options={linkOpenModeOptions}
+										onChange={(value) =>
+											props.onChange({
+												linkOpenMode: value as AppSettings["linkOpenMode"],
 											})
 										}
 									/>

@@ -68,6 +68,10 @@ export class PiProcess extends EventEmitter {
     return this.rpc;
   }
 
+  isRunning(): boolean {
+    return this.proc !== undefined && this.rpc !== undefined;
+  }
+
   stop() {
     if (!this.proc) return;
 

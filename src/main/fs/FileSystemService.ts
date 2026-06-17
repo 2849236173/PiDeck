@@ -4,8 +4,11 @@ import type { FileTreeNode } from "../../shared/types";
 
 const ignoredNames = new Set([".git", "node_modules", "dist", "build", ".next", "coverage", ".venv", "__pycache__"]);
 
+// 文件侧边栏需要能展示常见前端/桌面项目的深层源码目录；保留上限是为了避免误打开超大仓库时递归读取拖慢 UI。
+const DEFAULT_FILE_TREE_MAX_DEPTH = 12;
+
 export class FileSystemService {
-  async listTree(root: string, maxDepth = 2): Promise<FileTreeNode[]> {
+  async listTree(root: string, maxDepth = DEFAULT_FILE_TREE_MAX_DEPTH): Promise<FileTreeNode[]> {
     return this.readDirectory(root, root, 0, maxDepth);
   }
 
@@ -25,7 +28,7 @@ export class FileSystemService {
           path: absolutePath,
           relativePath,
           type: "directory",
-          // 第一版限制深度，避免打开大仓库时一次性读取过多目录导致 UI 卡顿。
+          // 深度达到上限时停止继续递归；上限由默认常量控制，兼顾深层目录展示和大仓库性能。
           children: depth < maxDepth ? await this.readDirectory(root, absolutePath, depth + 1, maxDepth) : [],
         });
       } else if (entry.isFile()) {

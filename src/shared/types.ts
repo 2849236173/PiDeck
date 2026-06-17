@@ -182,6 +182,7 @@ export type SendShortcutMode =
 
 export type AppThemeMode = "system" | "light" | "dark";
 export type AppLanguageMode = "system" | "zh-CN" | "en-US" | "pseudo";
+export type LinkOpenMode = "external" | "internal";
 
 export type AppSettings = {
 	useNativeTitleBar: boolean;
@@ -228,6 +229,10 @@ export type AppSettings = {
 	telemetryLastHeartbeatDate?: string;
 	/** 应用安装类型：portable（便携版）或 installed（安装版），启动时自动检测并持久化 */
 	installationType?: "portable" | "installed";
+	/** RPC 调用超时时间（毫秒），默认 600000（10 分钟），用于长时间运行的命令 */
+	rpcTimeout: number;
+	/** 外部链接打开方式：external 使用系统默认浏览器，internal 使用应用内独立窗口 */
+	linkOpenMode: LinkOpenMode;
 };
 
 export type PiInstallStatus = {

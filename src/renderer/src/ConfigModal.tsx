@@ -306,6 +306,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 
 	const saveAndReload = async (
 		saveFn: () => Promise<{ valid: boolean; error?: string }>,
+		successMessage?: string,
 	) => {
 		setSaving(true);
 		setError(null);
@@ -316,7 +317,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 				return;
 			}
 			onSaved();
-			showToast(t("config.saved"));
+			showToast(successMessage ?? t("config.saved"));
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
 		} finally {
@@ -544,7 +545,10 @@ function ConfigModalContent(props: ConfigModalProps) {
 	};
 
 	const handleSaveModels = async () => {
-		await saveAndReload(() => api.config.saveModels(modelsData));
+		await saveAndReload(
+			() => api.config.saveModels(modelsData),
+			t("config.modelsSavedRestartHint"),
+		);
 		await loadConfig("models");
 	};
 
@@ -645,8 +649,12 @@ function ConfigModalContent(props: ConfigModalProps) {
 	// ── Raw 操作 ─────────────────────────────────────────
 
 	const handleSaveRaw = async () => {
-		await saveAndReload(() => api.config.saveRaw(rawFileName, rawContent));
-		if (rawFileName === "models.json") await loadConfig("models");
+		const isModelsFile = rawFileName === "models.json";
+		await saveAndReload(
+			() => api.config.saveRaw(rawFileName, rawContent),
+			isModelsFile ? t("config.modelsSavedRestartHint") : undefined,
+		);
+		if (isModelsFile) await loadConfig("models");
 		else if (rawFileName === "auth.json") await loadConfig("auth");
 		else await loadConfig("settings");
 	};

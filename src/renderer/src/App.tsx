@@ -157,6 +157,17 @@ function isChatProject(project?: Project) {
   return project?.kind === "chat";
 }
 
+function isAbsoluteFilePath(path: string) {
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("/");
+}
+
+function resolveFileLinkPath(path: string, basePath?: string) {
+  if (!path || isAbsoluteFilePath(path) || !basePath) return path;
+  // 浏览器端不引入 Node path；按项目根路径分隔符拼接，满足点击 AI 输出的项目相对路径。
+  const separator = basePath.includes("\\") ? "\\" : "/";
+  return `${basePath.replace(/[\\/]+$/, "")}${separator}${path.replace(/^[\\/]+/, "")}`;
+}
+
 // 会话文件路径可能来自扫描器或 Agent 状态回写，比较时统一分隔符和大小写，避免重复恢复同一历史会话。
 function normalizeSessionPathForCompare(sessionPath?: string) {
   return sessionPath?.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
@@ -403,6 +414,8 @@ export function App() {
     webServiceEnabled: false,
     webServiceHost: "0.0.0.0",
     webServicePort: 8765,
+    rpcTimeout: 600_000,
+    linkOpenMode: "external",
   });
   const [settingsNotice, setSettingsNotice] = useState("");
   const [piProxyNotice, setPiProxyNotice] = useState("");
@@ -632,9 +645,11 @@ export function App() {
                 : undefined;
       if (!filePath) continue;
       const previous = byPath.get(filePath);
+      // 同一路径再次被修改时移动到 Map 末尾，右侧修改清单才能按“最新修改”展示。
+      if (previous) byPath.delete(filePath);
       byPath.set(filePath, {
         path: filePath,
-        toolName: previous?.toolName ?? toolName,
+        toolName,
         status: status === "running" ? "running" : (previous?.status ?? status),
         changedLines:
           (previous?.changedLines ?? 0) +
@@ -1430,6 +1445,16 @@ export function App() {
     const next = await api.files.list(projectId);
     setFiles(next);
     showToast(t("app.filesRefreshed"), 1800);
+  }
+
+  function openFilePath(path: string) {
+    // 绝对路径直接打开；相对路径按当前 agent cwd / 项目目录解析后交给系统默认应用。
+    const resolvedPath = resolveFileLinkPath(path, activeAgent?.cwd ?? activeProject?.path);
+    void api.files.open(resolvedPath).catch((error) => {
+      showToast(t("app.openFileFailed", {
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    });
   }
 
   async function refreshSessionHistory(projectId = sessionsProjectId) {
@@ -3391,6 +3416,7 @@ export function App() {
                     run={item}
                     onPreviewImage={setPreviewImage}
                     onOpenExternal={(url) => api.app.openExternal(url)}
+                    onOpenFile={openFilePath}
                     onResendUserMessage={resendUserMessage}
                     showThinking={settings.showThinking}
                     fileSummariesByMessage={turnFileSummaryByMessage}
@@ -3409,6 +3435,7 @@ export function App() {
                       message={item.message}
                       onPreviewImage={setPreviewImage}
                       onOpenExternal={(url) => api.app.openExternal(url)}
+                      onOpenFile={openFilePath}
                       onResendUserMessage={resendUserMessage}
                       showThinking={settings.showThinking}
                     />
@@ -3416,6 +3443,7 @@ export function App() {
                       turnFileSummaryByMessage[item.message.id]?.length > 0 && (
                         <SessionFileSummary
                           files={turnFileSummaryByMessage[item.message.id]}
+                          onOpenFile={openFilePath}
                         />
                       )}
                   </Fragment>
@@ -3669,6 +3697,7 @@ export function App() {
       {drawer && !drawerCollapsed && (
         <aside className="detail-drawer">
           <LazyWrapper
+            className="drawer-content-frame"
             enabled={true}
             threshold={0}
             rootMargin="50px"
@@ -3751,6 +3780,10 @@ export function App() {
               (current) =>
                 `${current}${current.endsWith(" ") || current.length === 0 ? "" : " "}@${fileMenu.node.relativePath} `,
             );
+            setFileMenu(null);
+          }}
+          onCopyPath={() => {
+            void navigator.clipboard.writeText(fileMenu.node.path);
             setFileMenu(null);
           }}
         />

@@ -139,6 +139,8 @@ let previewSettings: AppSettings = {
 	webServiceEnabled: false,
 	webServiceHost: "0.0.0.0",
 	webServicePort: 8765,
+	rpcTimeout: 600_000,
+	linkOpenMode: "external",
 };
 
 export function createPreviewApi(): PiDesktopApi {

@@ -25,6 +25,8 @@ const defaultSettings: AppSettings = {
   webServiceEnabled: false,
   webServiceHost: "0.0.0.0",
   webServicePort: 8765,
+  rpcTimeout: 600_000,
+  linkOpenMode: "external",
 };
 
 export class SettingsStore {
