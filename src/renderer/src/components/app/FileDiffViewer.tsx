@@ -19,10 +19,14 @@ export function FileDiffViewer(props: {
 	mode?: ViewMode;
 	onClose: () => void;
 	readContent: (path: string) => Promise<string>;
+	/** 读取文件的 Git HEAD 原始内容，供差异模式左侧基准列使用。 */
+	readOriginalContent?: (path: string) => Promise<string>;
 	saveContent?: (path: string, content: string) => Promise<void>;
 	theme?: "light" | "dark";
 }) {
 	const [content, setContent] = useState("");
+	// 差异模式左侧展示的 Git HEAD 原始内容；新增/未跟踪文件为空字符串。
+	const [original, setOriginal] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [sideBySide, setSideBySide] = useState(true);
@@ -46,9 +50,16 @@ export function FileDiffViewer(props: {
 			setError(null);
 			setDirty(false);
 			try {
-				const result = await props.readContent(props.filePath);
+				// 差异模式需要同时拿到当前内容和 HEAD 原始内容；并发读取减少打开延迟。
+				const [result, originalResult] = await Promise.all([
+					props.readContent(props.filePath),
+					isDiffMode && props.readOriginalContent
+						? props.readOriginalContent(props.filePath).catch(() => "")
+						: Promise.resolve(""),
+				]);
 				if (!cancelled) {
 					setContent(result);
+					setOriginal(originalResult);
 					setLoadedPath(props.filePath);
 					if (result === "" && !loading) {
 						// 文件可能已被删除或为空
@@ -63,7 +74,7 @@ export function FileDiffViewer(props: {
 		}
 		void load();
 		return () => { cancelled = true; };
-	}, [props.filePath, props.readContent, loadedPath]);
+	}, [props.filePath, props.readContent, props.readOriginalContent, isDiffMode, loadedPath]);
 
 	const handleClose = useCallback(() => {
 		props.onClose();
@@ -73,10 +84,16 @@ export function FileDiffViewer(props: {
 		if (readOnly) {
 			setReadOnly(false);
 		} else {
-			if (dirty && content !== null && props.saveContent) {
+			// 保存时从当前激活的编辑器取最新内容：差异模式则读 modified 模型，
+			// 避免仅依赖 state 造成与编辑器实际内容不同步。
+			const latest = isDiffMode
+				? diffEditorRef.current?.getModifiedEditor().getValue() ?? content
+				: editorRef.current?.getValue() ?? content;
+			if (dirty && props.saveContent) {
 				setSaving(true);
 				try {
-					await props.saveContent(props.filePath, content);
+					await props.saveContent(props.filePath, latest);
+					setContent(latest);
 					setDirty(false);
 				} catch (e) {
 					setError(e instanceof Error ? e.message : String(e));
@@ -86,7 +103,7 @@ export function FileDiffViewer(props: {
 			}
 			setReadOnly(true);
 		}
-	}, [readOnly, dirty, content, props.filePath, props.saveContent]);
+	}, [readOnly, dirty, content, isDiffMode, props.filePath, props.saveContent]);
 
 	const handleEditorChange = useCallback((value: string | undefined) => {
 		if (value !== undefined) {
@@ -101,6 +118,12 @@ export function FileDiffViewer(props: {
 
 	const handleDiffEditorMount = useCallback((editor: Monaco.editor.IStandaloneDiffEditor) => {
 		diffEditorRef.current = editor;
+		// 差异编辑器没有统一的 onChange；手动监听 modified 模型变化以跟踪未保存状态。
+		const modified = editor.getModifiedEditor();
+		modified.onDidChangeModelContent(() => {
+			setContent(modified.getValue());
+			setDirty(true);
+		});
 	}, []);
 
 	// 组件卸载前先清理 Monaco 编辑器引用，避免异步清理造成 TextModel disposed 竞态。
@@ -128,7 +151,9 @@ export function FileDiffViewer(props: {
 
 	const diffOptions: Monaco.editor.IStandaloneDiffEditorConstructionOptions = {
 		...editorOptions,
-		readOnly: true,
+		// 差异模式下只跟随 readOnly 状态控制 modified 侧是否可编辑；
+		// 先前硬编码为 true 导致“编辑”按钮切换后仍不可编辑。
+		readOnly,
 		renderSideBySide: sideBySide,
 	};
 
@@ -182,7 +207,7 @@ export function FileDiffViewer(props: {
 							</div>
 							<div style={{ display: !isDiffMode ? "none" : "flex", height: "100%", flexDirection: "column" }}>
 								<DiffEditor
-									original=""
+									original={original}
 									modified={content}
 									language={language}
 									theme={props.theme === "dark" ? "vs-dark" : "vs"}

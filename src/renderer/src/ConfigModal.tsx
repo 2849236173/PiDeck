@@ -211,6 +211,31 @@ function ConfigModalContent(props: ConfigModalProps) {
 	const [fetchedModels, setFetchedModels] = useState<
 		Record<string, Array<{ id: string; name?: string }>>
 	>({});
+
+	/**
+	 * 根据 API 类型返回对应的获取模型提示。
+	 * 不同服务对 /models 端点的支持不同，提供针对性的指导。
+	 */
+	function getFetchModelsHintByApi(api: string | undefined, baseUrl: string): string {
+		switch (api) {
+			case "openai-completions":
+				return t("config.fetchModelsHintOpenaiCompletions", { baseUrl });
+			case "openai-responses":
+				return t("config.fetchModelsHintOpenai", { baseUrl });
+			case "openai-codex-responses":
+				return t("config.fetchModelsHintOpenaiCodex");
+			case "anthropic-messages":
+				return t("config.fetchModelsHintAnthropic");
+			case "google-generative-ai":
+				return t("config.fetchModelsHintGoogle");
+			case "mistral-conversations":
+				return t("config.fetchModelsHintMistral");
+			default:
+				// 未知 API 类型时使用通用提示
+				return t("config.fetchModelsHint");
+		}
+	}
+
 	// 快速测试连接
 	const [testingProvider, setTestingProvider] = useState<string | null>(null);
 	const [testResult, setTestResult] = useState<{
@@ -436,7 +461,9 @@ function ConfigModalContent(props: ConfigModalProps) {
 				}));
 				showToast(t("config.fetchedModels", { count: result.models.length }));
 			} else {
-				setError((result.error ?? t("config.fetchModelsFailed")) + "\n" + t("config.fetchModelsHint"));
+				// 根据 API 类型提供不同的错误提示
+				const apiTypeHint = getFetchModelsHintByApi(provider.api as string | undefined, provider.baseUrl);
+				setError((result.error ?? t("config.fetchModelsFailed")) + "\n" + apiTypeHint);
 			}
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));

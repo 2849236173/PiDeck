@@ -4082,6 +4082,7 @@ export function App() {
           mode={diffViewMode}
           onClose={() => { setDiffViewFile(null); setDiffViewMode("view"); }}
           readContent={(path) => api.files.readContent(path)}
+          readOriginalContent={(path) => api.git.originalContent(path)}
           saveContent={(path, content) => api.files.writeContent(path, content)}
           theme={document.documentElement.dataset.theme === "dark" ? "dark" : "light"}
         />

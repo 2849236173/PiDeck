@@ -312,22 +312,51 @@ export class ConfigManager {
 	 * 支持的 api 类型：openai-completions, openai-responses, anthropic-messages, google-generative-ai。
 	 * 历史别名 openai-chat-completions 会归一为 pi 官方的 openai-completions。
 	 */
+	/**
+	 * 根据 API 类型构造获取模型列表请求的 URL、headers。
+	 *
+	 * 各厂商 /models 端点格式差异较大。
+	 * 自动补齐常见路径段有助于降低用户配置门槛。
+	 *
+	 * OpenAI:
+	 *   baseUrl=https://api.openai.com → /v1/models
+	 *   baseUrl=https://api.openai.com/v1 → /v1/models
+	 *
+	 * Anthropic:
+	 *   baseUrl=https://api.anthropic.com → /models（不在 v1 下）
+	 *   baseUrl=https://api.anthropic.com/v1 → /models（忽略配置的 v1）
+	 *
+	 * Google:
+	 *   baseUrl=https://generativelanguage.googleapis.com → /v1beta/models?key=xxx
+	 *   baseUrl=https://generativelanguage.googleapis.com/v1beta → /v1beta/models?key=xxx
+	 *
+	 * Mistral + OpenAI 兼容（默认）:
+	 *   baseUrl=https://api.mistral.ai → /v1/models
+	 *   baseUrl=http://localhost:11434 → /v1/models
+	 *   baseUrl=http://localhost:11434/v1 → /v1/models（已有路径不重复追加）
+	 */
 	private buildModelsRequest(
 		baseUrl: string,
 		apiKey: string,
 		apiType?: string,
 	): TestRequest {
-		const u = baseUrl.replace(/\/+$/, "");
 		const api = this.normalizeApiType(apiType);
 
 		if (api === "google-generative-ai") {
+			// Google: 前缀需要 /v1beta（或用户指定的版本），不自动覆盖
+			const u = baseUrl.replace(/\/+$/, "");
+			const needsPrefix = !/[\/]v\d+(alpha|beta)?$/.test(u);
+			const versioned = needsPrefix ? `${u}/v1beta` : u;
 			return {
-				url: `${u}/models?key=${encodeURIComponent(apiKey)}`,
+				url: `${versioned}/models?key=${encodeURIComponent(apiKey)}`,
 				headers: { "Content-Type": "application/json" },
 			};
 		}
 
 		if (api === "anthropic-messages") {
+			// Anthropic 的 /models 端点不在 v1 下，而是在根路径
+			// https://api.anthropic.com/models
+			const u = baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
 			return {
 				url: `${u}/models`,
 				headers: this.withAnthropicSdkUserAgent({
@@ -337,6 +366,10 @@ export class ConfigManager {
 				}),
 			};
 		}
+
+		// OpenAI 兼容 API（Chat Completions / Responses / Mistral）：
+		// models 端点在 /v1/models 下
+		let u = this.ensureVersionPath(baseUrl);
 
 		return {
 			url: `${u}/models`,
@@ -388,7 +421,6 @@ export class ConfigManager {
 		apiType: string,
 		requestHeaders?: Record<string, string>,
 	): { url: string; headers: Record<string, string>; body: string } {
-		const u = baseUrl.replace(/\/+$/, "");
 		const api = this.normalizeApiType(apiType);
 		const extraHeaders = this.normalizeRequestHeaders(requestHeaders);
 
@@ -396,7 +428,7 @@ export class ConfigManager {
 			case "openai-responses":
 			case "openai-codex-responses":
 				return {
-					url: `${u}/responses`,
+					url: `${this.ensureVersionPath(baseUrl)}/responses`,
 					headers: this.withOpenAiSdkUserAgent({
 						Authorization: `Bearer ${apiKey}`,
 						"Content-Type": "application/json",
@@ -412,8 +444,10 @@ export class ConfigManager {
 				};
 
 			case "anthropic-messages":
+				// Anthropic Messages API 的聊天端点在 /v1/messages
+				// 自动补齐 v1（Anthropic 文档示例：https://api.anthropic.com/v1/messages）
 				return {
-					url: `${u}/messages`,
+					url: `${this.ensureVersionPath(baseUrl)}/messages`,
 					headers: this.withAnthropicSdkUserAgent({
 						"x-api-key": apiKey,
 						"anthropic-version": "2023-06-01",
@@ -430,26 +464,33 @@ export class ConfigManager {
 
 			case "google-generative-ai":
 				// Gemini 的 API key 作为查询参数
-				return {
-					url: `${u}/${this.googleModelPath(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-					headers: {
-						"Content-Type": "application/json",
-						...extraHeaders,
-					},
-					body: JSON.stringify({
-						contents: [
-							{
-								role: "user",
-								parts: [{ text: "Hi" }],
-							},
-						],
-						generationConfig: { maxOutputTokens: 1 },
-					}),
-				};
+				// 自动补齐 v1beta（如果 baseUrl 不包含版本路径）
+				// Google 文档示例：https://generativelanguage.googleapis.com/v1beta
+				{
+					const u = baseUrl.replace(/\/+$/, "");
+					const needsPrefix = !/[\/]v\d+(alpha|beta)?$/.test(u);
+					const versioned = needsPrefix ? `${u}/v1beta` : u;
+					return {
+						url: `${versioned}/${this.googleModelPath(modelId)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+						headers: {
+							"Content-Type": "application/json",
+							...extraHeaders,
+						},
+						body: JSON.stringify({
+							contents: [
+								{
+									role: "user",
+									parts: [{ text: "Hi" }],
+								},
+							],
+							generationConfig: { maxOutputTokens: 1 },
+						}),
+					};
+				}
 
 			case "mistral-conversations":
 				return {
-					url: `${u}/conversations`,
+					url: `${baseUrl.replace(/\/+$/, "")}/conversations`,
 					headers: {
 						Authorization: `Bearer ${apiKey}`,
 						"Content-Type": "application/json",
@@ -465,7 +506,7 @@ export class ConfigManager {
 			default:
 				// openai-completions 是 pi 官方名称，对应 OpenAI Chat Completions 接口。
 				return {
-					url: `${u}/chat/completions`,
+					url: `${this.ensureVersionPath(baseUrl)}/chat/completions`,
 					headers: {
 						Authorization: `Bearer ${apiKey}`,
 						"Content-Type": "application/json",
@@ -521,6 +562,19 @@ export class ConfigManager {
 			default:
 				return "openai-completions";
 		}
+	}
+
+	/**
+	 * 确保 OpenAI 兼容 API 的基础 URL 包含 /v1 版本路径。
+	 * 很多代理/本地模型需要 {baseUrl}/v1/... 格式的请求路径。
+	 * 用户配置 baseUrl 时习惯只填到域名字段（如 http://localhost:11434），
+	 * 自动补齐 /v1 可以避免常见错误。
+	 * 如果 baseUrl 已包含 /v1、/api 等路径段则跳过补齐。
+	 */
+	private ensureVersionPath(baseUrl: string): string {
+		const u = baseUrl.replace(/\/+$/, "");
+		const hasVersionPath = /\/v\d+$|\/api$/.test(u);
+		return hasVersionPath ? u : `${u}/v1`;
 	}
 
 	private googleModelPath(modelId: string) {

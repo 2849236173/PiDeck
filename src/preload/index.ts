@@ -133,6 +133,12 @@ const api = {
 				projectId,
 				branchName,
 			) as Promise<GitBranchInfo>,
+		// 读取文件的 Git HEAD 原始内容，供差异编辑器左侧基准列使用。
+		originalContent: (filePath: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitOriginalContent,
+				filePath,
+			) as Promise<string>,
 	},
 	pi: {
 		check: () =>

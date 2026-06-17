@@ -2298,6 +2298,7 @@ function FilesPanel(props: {
 					onToggleDirectory={props.onToggleDirectory}
 					onFileContextMenu={props.onFileContextMenu}
 					onOpenFile={props.onOpenFile}
+					onViewFile={props.onViewFile}
 					onDiffFile={props.onDiffFile}
 				/>
 			))}

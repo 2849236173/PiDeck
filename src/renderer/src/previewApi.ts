@@ -211,6 +211,8 @@ export function createPreviewApi(): PiDesktopApi {
 				current: branchName,
 				branches: ["main", "dev", branchName],
 			}),
+			// 预览环境无真实 Git，返回空原始内容，差异左侧显示为空。
+			originalContent: async () => "",
 		},
 		pi: {
 			check: async () => ({

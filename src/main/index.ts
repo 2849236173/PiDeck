@@ -618,6 +618,14 @@ function registerIpc() {
 		},
 	);
 
+	// 差异查看需要文件的 Git HEAD 原始内容作为对比基准；参数是绝对文件路径，后端自行定位仓库根。
+	ipcMain.handle(
+		ipcChannels.gitOriginalContent,
+		async (_event, filePath: string) => {
+			return gitService.getOriginalContent(filePath);
+		},
+	);
+
 	ipcMain.handle(ipcChannels.piCheck, () => {
 		// 用户手动指定的路径优先于自动检测
 		const settings = settingsStore.get();

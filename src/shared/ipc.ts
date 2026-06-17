@@ -32,6 +32,7 @@ export const ipcChannels = {
 	gitBranches: "git:branches",
 	gitCheckout: "git:checkout",
 	gitCreateBranch: "git:create-branch",
+	gitOriginalContent: "git:original-content",
 	piCheck: "pi:check",
 	piCheckCustom: "pi:check-custom",
 	appInfo: "app:info",
