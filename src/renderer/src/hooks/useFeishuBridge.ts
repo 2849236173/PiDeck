@@ -29,6 +29,7 @@ type PiDesktopFeishuApi = {
 	bindingRemove: (chatId: string) => Promise<boolean>;
 	bindingUpdate: (chatId: string, patch: Partial<FeishuChatBinding>) => Promise<FeishuChatBinding | undefined>;
 	onMessages: (callback: (message: FeishuChatMessage) => void) => () => void;
+	onBindingsChanged: (callback: (bindings: FeishuChatBinding[]) => void) => () => void;
 };
 
 function getApi(): PiDesktopFeishuApi | undefined {
@@ -77,6 +78,14 @@ export function useFeishuBridge() {
 		if (!api) return;
 		return api.onMessages((msg) => {
 			setMessages((prev) => [...prev.slice(-99), msg]);
+		});
+	}, [api]);
+
+	// 绑定列表变更推送
+	useEffect(() => {
+		if (!api) return;
+		return api.onBindingsChanged((bi) => {
+			setBindings(bi);
 		});
 	}, [api]);
 

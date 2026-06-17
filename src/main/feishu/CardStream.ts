@@ -21,6 +21,9 @@ export class CardStream {
 	private pendingTimer: NodeJS.Timeout | null = null;
 	private inFlight: Promise<void> | null = null;
 	private closed = false;
+	/** 最近一次 patch 是否失败（用于上层判断是否需要降级兜底） */
+	public lastPatchFailed = false;
+	public lastPatchError = "";
 
 	private constructor(
 		private readonly client: LarkClient,
@@ -95,7 +98,10 @@ export class CardStream {
 		if (this.pendingTimer || this.inFlight) return;
 		this.pendingTimer = setTimeout(() => {
 			this.pendingTimer = null;
-			void this.drain();
+			this.drain().catch(() => {
+				// 非终态更新失败由 lastPatchFailed 标记记录，
+				// 终态 flush 会走 handleAgentEvent 的显式路径
+			});
 		}, THROTTLE_MS);
 		this.pendingTimer.unref?.();
 	}
@@ -120,22 +126,37 @@ export class CardStream {
 
 	private async sendUpdate(card: object): Promise<void> {
 		let attempt = 0;
+		let lastErr: unknown;
 		while (true) {
 			try {
 				await this.client.im.v1.message.patch({
 					path: { message_id: this.messageId },
 					data: { content: JSON.stringify(card) },
 				});
+				this.lastPatchFailed = false;
+				this.lastPatchError = "";
 				return;
 			} catch (err) {
+				lastErr = err;
 				attempt++;
 				if (attempt > MAX_UPDATE_RETRIES) {
+					const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+					// 尝试提取飞书 API 错误详情
+					let apiDetail = "";
+					if (lastErr && typeof lastErr === "object" && "code" in (lastErr as Record<string, unknown>)) {
+						const e = lastErr as Record<string, unknown>;
+						apiDetail = ` [API code=${e.code}, msg=${e.msg}]`;
+					}
+					this.lastPatchFailed = true;
+					this.lastPatchError = errMsg + apiDetail;
 					console.error("[飞书 CardStream] patch 失败（已达最大重试）", {
 						messageId: this.messageId,
-						err: err instanceof Error ? err.message : String(err),
+						cardSize: JSON.stringify(card).length,
+						err: errMsg + apiDetail,
 					});
-					return;
+					throw new Error(`CardStream patch 失败: ${errMsg}${apiDetail}`);
 				}
+				console.warn(`[飞书 CardStream] patch 重试 ${attempt}/${MAX_UPDATE_RETRIES}:`, lastErr instanceof Error ? lastErr.message : String(lastErr));
 				await new Promise((r) => setTimeout(r, 200 * attempt));
 			}
 		}

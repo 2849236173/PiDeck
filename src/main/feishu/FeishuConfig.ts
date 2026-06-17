@@ -151,6 +151,7 @@ export type FeishuChatBindingPersist = {
 	botId: string;
 	userId: string;
 	sessionId: string;
+	sessionPath?: string;
 	workspaceId: string;
 	channelId?: string;
 	modelId?: string;

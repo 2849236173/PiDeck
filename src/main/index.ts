@@ -707,7 +707,7 @@ function registerIpc() {
 		const tab = await agentManager.create(input);
 		// Session Mirror: Pi 中创建会话时，飞书自动拉群（1会话=1群）
 		if (feishuBridge && feishuBridge.getStatus().status === "connected") {
-			void feishuBridge.ensureSessionMirror(tab.id, tab.title).catch((e) => {
+			void feishuBridge.ensureSessionMirror(tab.id, tab.title, tab.sessionPath).catch((e) => {
 				console.error("[飞书] 自动拉群失败:", e);
 			});
 		}
@@ -728,11 +728,11 @@ function registerIpc() {
 			const tab = agentManager.list().find(t => t.id === input.agentId);
 			if (tab) {
 				// 1. 确保有飞书群绑定（如果还没有，自动拉群）
-				void feishuBridge.ensureSessionMirror(tab.id, tab.title).catch((e) => {
+				void feishuBridge.ensureSessionMirror(tab.id, tab.title, tab.sessionPath).catch((e) => {
 					console.error("[飞书] ensureSessionMirror 失败:", e);
 				});
 				// 2. 开启流式卡片
-				void feishuBridge.startSessionMirrorRun(tab.id, tab.title).catch((e) => {
+				void feishuBridge.startSessionMirrorRun(tab.id, tab.title, tab.sessionPath).catch((e) => {
 					console.error("[飞书] SessionMirror 流式卡片初始化失败:", e);
 				});
 				// 3. 转发用户消息到飞书（双向同步）

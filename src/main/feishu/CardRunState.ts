@@ -136,11 +136,13 @@ export function reduceFromPiEvent(state: RunState, event: Record<string, unknown
 			if (!assistantEvent) return state;
 
 			if (assistantEvent.type === "text_delta") {
-				const text = (assistantEvent as { text?: string }).text ?? "";
+				// AgentManager 发出的字段是 delta，兼容 delta 和 text 两种格式
+				const text = (assistantEvent as { delta?: string; text?: string }).delta ?? (assistantEvent as { text?: string }).text ?? "";
 				if (text) return appendText(state, text);
 			}
 			if (assistantEvent.type === "thinking_delta") {
-				const thinking = (assistantEvent as { thinking?: string }).thinking ?? "";
+				// AgentManager 发出的字段是 delta，兼容 delta 和 thinking 两种格式
+				const thinking = (assistantEvent as { delta?: string; thinking?: string }).delta ?? (assistantEvent as { thinking?: string }).thinking ?? "";
 				if (thinking) return appendThinking(state, thinking);
 			}
 			if (assistantEvent.type === "toolcall_start") {

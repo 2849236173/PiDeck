@@ -111,6 +111,7 @@ export const ipcChannels = {
 	feishuBindingsList: "feishu:bindings-list",
 	feishuBindingRemove: "feishu:binding-remove",
 	feishuBindingUpdate: "feishu:binding-update",
+	feishuBindingsChanged: "feishu:bindings-changed",
 	feishuMessages: "feishu:messages",
 	feishuQrCode: "feishu:qr-code",
 	feishuConnectByBot: "feishu:connect-by-bot",

@@ -83,8 +83,8 @@ export class FeishuBridge {
 	private groupInfoCache = new Map<string, FeishuGroupInfo>();
 	private userNameCache = new Map<string, string>();
 
-	private pendingImages = new Map<string, FeishuImageAttachment[]>();
-	private pendingFiles = new Map<string, FeishuFileAttachment[]>();
+	// ===== 图片/文件即时处理（参考 Proma 思路：不做 pending 等待，收到即处理） =====
+	private imageConfirmTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	// 流式卡片：sessionId → CardStream
 	private streamingCards = new Map<string, CardStream>();
@@ -92,6 +92,8 @@ export class FeishuBridge {
 	private streamingRunStates = new Map<string, RunState>();
 	// 卡片未创建时的缓存事件（并行模式下 Agent 先启动，事件暂存于此）
 	private pendingCardEvents = new Map<string, unknown[]>();
+	// 记录卡片更新失败的 session（用于 runAgent 降级兜底）
+	private cardUpdateFailed = new Set<string>();
 
 	private unsubscribeLocalEvents: (() => void) | null = null;
 	// 哪些 session 是飞书发起的（不需要 session mirror）
@@ -114,6 +116,14 @@ export class FeishuBridge {
 	getStatus(): FeishuBridgeStatus { return { ...this.status }; }
 	listBindings(): FeishuChatBinding[] { return Array.from(this.chatBindings.values()); }
 
+	/** 刷新绑定：重新从磁盘加载并匹配当前 agent 列表 */
+	reloadBindings(): void {
+		this.sessionToChat.clear();
+		this.feishuSessions.clear();
+		this.loadPersistedBindings();
+		log(`[飞书 Bridge] 手动刷新绑定完成，活跃绑定: ${this.chatBindings.size}`);
+	}
+
 	// ===== 绑定管理 =====
 
 	removeBinding(chatId: string): boolean {
@@ -126,11 +136,14 @@ export class FeishuBridge {
 		this.streamingCards.delete(binding.sessionId);
 		this.streamingRunStates.delete(binding.sessionId);
 		this.pendingCardEvents.delete(binding.sessionId);
-		this.pendingImages.delete(chatId);
-		this.pendingFiles.delete(chatId);
+		this.cardUpdateFailed.delete(binding.sessionId);
+		// 清理图片确认定时器（如果有）
+		const timer = this.imageConfirmTimers.get(chatId);
+		if (timer) { clearTimeout(timer); this.imageConfirmTimers.delete(chatId); }
 		this.lastUserMessageId.delete(chatId);
 		this.updateStatus({ activeBindings: this.chatBindings.size });
 		this.persistBindings();
+		this.pushBindings();
 		log(`[飞书 Bridge] 已移除绑定: ${chatId}`);
 		return true;
 	}
@@ -220,10 +233,12 @@ export class FeishuBridge {
 		if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
 		this.wsClient = null; this.client = null;
 		this.chatBindings.clear(); this.sessionToChat.clear(); this.feishuSessions.clear();
-		this.pendingImages.clear(); this.pendingFiles.clear();
 		this.recentMessageIds.clear(); this.recentEventIds.clear(); this.recentContent.clear();
 		this.processingChats.clear(); this.lastUserMessageId.clear();
 		this.groupInfoCache.clear(); this.userNameCache.clear(); this.botOpenId = null;
+		this.cardUpdateFailed.clear();
+		for (const [, timer] of this.imageConfirmTimers) { clearTimeout(timer); }
+		this.imageConfirmTimers.clear();
 		this.updateStatus({ status: "disconnected", activeBindings: 0 });
 		log("[飞书 Bridge] 已停止");
 	}
@@ -318,7 +333,11 @@ export class FeishuBridge {
 		this.processingChats.add(chatId);
 
 		try {
-			if (chatType === "group" && this.botConfig.requireMention !== false && !this.isBotMentioned(mentions)) return;
+			if (chatType === "group" && this.botConfig.requireMention !== false && !this.isBotMentioned(mentions)) {
+			// session-mirror 群（Bot 自建群）允许无 @mention 消息
+			const binding = this.chatBindings.get(chatId);
+			if (!binding || binding.source !== "session-mirror") return;
+		}
 			if (chatType === "group" && messageId) this.lastUserMessageId.set(chatId, messageId);
 
 			const supportedTypes = new Set(["text", "image", "post", "file"]);
@@ -332,10 +351,23 @@ export class FeishuBridge {
 				const content = JSON.parse(message.content as string) as { text?: string };
 				text = (content.text ?? "").replace(/@_user_\d+/g, "").trim();
 			} else if (messageType === "post") {
-				const content = JSON.parse(message.content as string) as { title?: string; content?: Array<Array<{ tag: string; text?: string }>> };
+				const content = JSON.parse(message.content as string) as { title?: string; content?: Array<Array<{ tag: string; text?: string; image_key?: string }>> };
 				const parts: string[] = [];
 				if (content.title) parts.push(content.title);
-				for (const line of content.content ?? []) for (const node of line) if (node.tag === "text" && node.text) parts.push(node.text);
+				for (const line of content.content ?? []) {
+					for (const node of line) {
+						if (node.tag === "text" && node.text) {
+							parts.push(node.text);
+						} else if ((node.tag === "img" || node.tag === "image") && node.image_key) {
+							try {
+								const imgData = await this.downloadImage(messageId, node.image_key);
+								imageAttachments.push({ imageKey: node.image_key, data: imgData, mediaType: this.inferImageMediaType(imgData) });
+							} catch (e) {
+								logErr("[飞书 Bridge] post 图片下载失败:", e);
+							}
+						}
+					}
+				}
 				text = parts.join(" ").replace(/@_user_\d+/g, "").trim();
 			} else if (messageType === "image") {
 				const content = JSON.parse(message.content as string) as { image_key?: string };
@@ -345,17 +377,19 @@ export class FeishuBridge {
 				if (content.file_key) { try { const fileData = await this.downloadFile(messageId, content.file_key); if (fileData.length > 50 * 1024 * 1024) { await this.sendSmartMessage(chatId, "文件过大（超过 50MB），暂不支持处理。"); return; } fileAttachments.push({ fileKey: content.file_key, fileName: content.file_name || `feishu-${content.file_key}`, data: fileData }); } catch (e) { logErr("[飞书 Bridge] 下载文件失败:", e); await this.sendSmartMessage(chatId, "⚠️ 文件下载失败，请重试。"); return; } }
 			}
 
-			if (!text && (imageAttachments.length > 0 || fileAttachments.length > 0)) {
-				if (imageAttachments.length > 0) { const existing = this.pendingImages.get(chatId) ?? []; existing.push(...imageAttachments); this.pendingImages.set(chatId, existing); }
-				if (fileAttachments.length > 0) { const existing = this.pendingFiles.get(chatId) ?? []; existing.push(...fileAttachments); this.pendingFiles.set(chatId, existing); }
-				const parts: string[] = []; const ic = this.pendingImages.get(chatId)?.length ?? 0; const fc = this.pendingFiles.get(chatId)?.length ?? 0;
-				if (ic > 0) parts.push(`${ic} 张图片`); if (fc > 0) parts.push(`${fc} 个文件`);
-				await this.sendSmartMessage(chatId, `已收到${parts.join("和")}，请继续发送文字消息来触发处理。`);
-				return;
+			// ===== 即时处理模式（参考 Proma：收到图片/文件立即处理，不做 pending 等待） =====
+			// 图片/文件 + 文字 → 一起处理
+			// 仅图片 → 自动附加 "请根据图片内容进行分析" 作为 prompt
+			// 仅文件 → 自动附加 "请处理以下文件内容" 作为 prompt
+			if (!text && imageAttachments.length > 0 && fileAttachments.length === 0) {
+				text = "请根据图片内容进行分析。";
+			} else if (!text && fileAttachments.length > 0) {
+				const imageCount = imageAttachments.length;
+				const fileNames = fileAttachments.map((f) => f.fileName).join(", ");
+				text = imageCount > 0
+					? `请根据 ${imageCount} 张图片和以下文件内容进行分析。\n文件: ${fileNames}`
+					: `请处理以下文件内容。\n文件: ${fileNames}`;
 			}
-
-			if (text && this.pendingImages.has(chatId)) { imageAttachments.unshift(...this.pendingImages.get(chatId)!); this.pendingImages.delete(chatId); }
-			if (text && this.pendingFiles.has(chatId)) { fileAttachments.unshift(...this.pendingFiles.get(chatId)!); this.pendingFiles.delete(chatId); }
 			if (!text && imageAttachments.length === 0 && fileAttachments.length === 0) return;
 
 			let groupName: string | undefined; let senderName: string | undefined;
@@ -399,6 +433,10 @@ export class FeishuBridge {
 					`你的 open_id: \`${userId}\`\n\n📋 你可以将此 ID 填入 PiDeck 飞书配置中的「你的 Open ID」字段，以便新建会话时自动拉你进群。`
 				);
 				break;
+			case "/refresh": case "/r":
+				this.reloadBindings();
+				await this.sendSmartMessage(chatId, `✅ 已刷新绑定 (${this.chatBindings.size} 个活跃)`);
+				break;
 			default: await this.sendSmartMessage(chatId, `未知命令: ${command}。输入 /help 查看帮助。`);
 		}
 	}
@@ -408,7 +446,24 @@ export class FeishuBridge {
 	private async runAgent(ctx: FeishuMessageContext, text: string, imageAttachments: FeishuImageAttachment[], fileAttachments: FeishuFileAttachment[]): Promise<void> {
 		const { chatId } = ctx;
 		let binding = this.chatBindings.get(chatId);
-		if (!binding) { await this.createNewSession(ctx); binding = this.chatBindings.get(chatId); if (!binding) return; }
+
+		// ===== 绑定失效恢复：重启后 sessionId 对应的 agent 不存在时，自动恢复或重建 =====
+		if (binding) {
+			const agentExists = this.agentManager.list().some((t) => t.id === binding!.sessionId);
+			if (!agentExists) {
+				log(`[飞书 Bridge] 绑定 ${chatId} 的 agent ${binding.sessionId.slice(0, 8)} 不存在，尝试恢复...`);
+				const resumed = await this.resumeOrCreateAgent(binding);
+				if (!resumed) {
+					await this.sendSmartMessage(chatId, "⚠️ 会话恢复失败，请尝试 /new 创建新会话");
+					return;
+				}
+				binding = resumed;
+			}
+		} else {
+			await this.createNewSession(ctx);
+			binding = this.chatBindings.get(chatId);
+			if (!binding) return;
+		}
 
 		// 关闭已有流式卡片
 		const existingCard = this.streamingCards.get(binding.sessionId);
@@ -463,8 +518,24 @@ export class FeishuBridge {
 			// agent_end 事件会在 handleAgentEvent 中 flush 终态卡片
 			await this.waitForAgentEnd(binding.sessionId, 300_000);
 
+			// 等待一小段时间让 handleAgentEvent 的异步 flush 完成
+			await new Promise((r) => setTimeout(r, 800));
+
 			// 如果流式卡片已创建，结果已展示在卡片中，无需额外发送
 			if (hasCard) {
+				// 检查卡片更新是否失败（patch 错误被静默吞掉的情况）
+				if (this.cardUpdateFailed.has(binding.sessionId)) {
+					this.cardUpdateFailed.delete(binding.sessionId);
+					log(`[飞书 Bridge] 卡片更新失败，降级为文本消息`);
+					// 降级：用文本消息发送最终结果
+					const messages = this.agentManager.getMessages(binding.sessionId);
+					const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
+					const resultText = lastAssistant?.text ?? "";
+					if (resultText.trim()) {
+						const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+						await this.sendSmartMessage(chatId, `${resultText}\n\n---\n⏱ ${duration}s`);
+					}
+				}
 				// 清理可能残留的状态（handleAgentEvent 已处理大部分）
 				this.streamingCards.delete(binding.sessionId);
 				this.streamingRunStates.delete(binding.sessionId);
@@ -492,6 +563,7 @@ export class FeishuBridge {
 			}
 			this.streamingRunStates.delete(binding.sessionId);
 			this.pendingCardEvents.delete(binding.sessionId);
+			this.cardUpdateFailed.delete(binding.sessionId);
 			await this.sendSmartMessage(chatId, `❌ Agent 错误: ${msg}`);
 		}
 	}
@@ -556,8 +628,17 @@ export class FeishuBridge {
 				if (nextState.terminal === "running") {
 					cardStream.update(card);
 				} else {
-					// 终态：强制 flush + close
-					void cardStream.flush(card).then(() => cardStream.close()).catch(() => {});
+					// 终态：强制 flush + close，记录失败以便 runAgent 降级兜底
+					void cardStream.flush(card).then(() => {
+						// flush 成功 → 检查实际 patch 是否成功
+						if (cardStream.lastPatchFailed) {
+							this.cardUpdateFailed.add(agentId);
+							log(`[飞书 Bridge] 终态卡片 patch 失败: ${cardStream.lastPatchError}`);
+						}
+					}).then(() => cardStream.close()).catch((e) => {
+						this.cardUpdateFailed.add(agentId);
+						logErr("[飞书 Bridge] 终态卡片 flush/close 异常:", e);
+					});
 					this.streamingRunStates.delete(agentId);
 					this.streamingCards.delete(agentId);
 					this.pendingCardEvents.delete(agentId);
@@ -611,7 +692,7 @@ export class FeishuBridge {
 			// 没有绑定，尝试创建 session mirror
 			const tab = this.agentManager.list().find(t => t.id === agentId);
 			if (tab) {
-				await this.ensureSessionMirror(agentId, tab.title);
+				await this.ensureSessionMirror(agentId, tab.title, tab.sessionPath);
 			}
 			return;
 		}
@@ -631,7 +712,7 @@ export class FeishuBridge {
 			const tab = await this.agentManager.create({ projectId });
 			const binding: FeishuChatBinding = {
 				chatId, botId: this.botConfig.id, userId: ctx.senderOpenId, sessionId: tab.id,
-				workspaceId: this.botConfig.defaultWorkspaceId ?? "", source: "feishu", chatType: ctx.chatType,
+				sessionPath: tab.sessionPath, workspaceId: this.botConfig.defaultWorkspaceId ?? "", source: "feishu", chatType: ctx.chatType,
 				groupName: ctx.groupName, createdAt: Date.now(),
 			};
 			this.chatBindings.set(chatId, binding);
@@ -639,6 +720,7 @@ export class FeishuBridge {
 			this.feishuSessions.add(tab.id);
 			this.updateStatus({ activeBindings: this.chatBindings.size });
 			this.persistBindings();
+			this.pushBindings();
 			await this.sendSmartMessage(chatId, `✅ 已创建会话 (${tab.id.slice(0, 8)})`);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
@@ -646,8 +728,69 @@ export class FeishuBridge {
 		}
 	}
 
+	/**
+	 * 绑定失效恢复：当 sessionId 对应的 agent 不存在时，
+	 * 尝试用 sessionPath 恢复会话；若无法恢复则创建新 agent 并复用已有绑定（不留群）。
+	 * 参考了 Proma 的 ConversationManager 思路：用 chatId 作为稳定 key，
+	 * 会话文件持久化，重启后优先恢复而不是重建。
+	 */
+	private async resumeOrCreateAgent(binding: FeishuChatBinding): Promise<FeishuChatBinding | undefined> {
+		const projects = this.getProjects();
+		if (projects.length === 0) {
+			log("[飞书 Bridge] 恢复会话失败：无可用项目");
+			return undefined;
+		}
+		const projectId = projects[0].id;
+
+		// 1. 尝试用 sessionPath 恢复已有会话
+		if (binding.sessionPath) {
+			const { existsSync } = await import("node:fs");
+			if (existsSync(binding.sessionPath)) {
+				try {
+					const tab = await this.agentManager.create({
+						projectId,
+						sessionPath: binding.sessionPath,
+						title: binding.groupName || `飞书会话`,
+					});
+					log(`[飞书 Bridge] 会话恢复成功: ${tab.id} (从 ${binding.sessionPath})`);
+					binding.sessionId = tab.id;
+					binding.sessionPath = tab.sessionPath;
+					this.sessionToChat.set(tab.id, binding.chatId);
+					this.feishuSessions.add(tab.id);
+					this.chatBindings.set(binding.chatId, binding);
+					this.persistBindings();
+					this.pushBindings();
+					return binding;
+				} catch (e) {
+					log(`[飞书 Bridge] sessionPath 恢复失败: ${e instanceof Error ? e.message : String(e)}`);
+				}
+			} else {
+				log(`[飞书 Bridge] sessionPath 不存在: ${binding.sessionPath}`);
+			}
+		}
+
+		// 2. sessionPath 不可用 → 创建新 agent，复用已有 chatId 绑定（不新建群）
+		try {
+			const tab = await this.agentManager.create({ projectId, title: binding.groupName || `飞书会话` });
+			log(`[飞书 Bridge] 已为新 agent ${tab.id} 复用绑定 ${binding.chatId}`);
+			binding.sessionId = tab.id;
+			binding.sessionPath = tab.sessionPath;
+			this.sessionToChat.set(tab.id, binding.chatId);
+			this.feishuSessions.add(tab.id);
+			this.chatBindings.set(binding.chatId, binding);
+			this.persistBindings();
+			this.pushBindings();
+			await this.sendSmartMessage(binding.chatId, `🔄 会话已恢复，新 ID: ${tab.id.slice(0, 8)}`);
+			return binding;
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			logErr(`[飞书 Bridge] 新建 agent 失败: ${msg}`);
+			return undefined;
+		}
+	}
+
 	/** Session Mirror: Pi 侧创建会话时自动拉群（1会话=1群） */
-	async ensureSessionMirror(sessionId: string, sessionTitle?: string): Promise<string | undefined> {
+	async ensureSessionMirror(sessionId: string, sessionTitle?: string, sessionPath?: string): Promise<string | undefined> {
 		if (!this.client || this.status.status !== "connected") {
 			log("[飞书 Session Mirror] Bridge 未连接，跳过自动拉群");
 			return undefined;
@@ -655,31 +798,59 @@ export class FeishuBridge {
 
 		const groupName = `Pi Agent - ${(sessionTitle || `新会话 ${sessionId.slice(0, 8)}`).slice(0, 50)}`;
 
-		// 1. 先按 sessionId 找已有绑定
+		// 1. 按 sessionId 找已有绑定
 		let existingChatId = this.sessionToChat.get(sessionId);
 
-		// 2. sessionId 没匹配 → 按 groupName 在所有绑定中搜索（重启后 sessionId 可能变）
-		if (!existingChatId) {
-			for (const [chatId, binding] of this.chatBindings) {
-				if (binding.groupName === groupName && binding.source === "session-mirror") {
-					log(`[飞书 Session Mirror] 按群名匹配到已有群: ${groupName} → ${chatId}`);
-					existingChatId = chatId;
+		// 2. sessionId 没匹配 → 尝试按 sessionPath 找已有绑定
+		//    （重启后 sessionId 变但 sessionPath 不变，可精准复用旧群）
+		if (!existingChatId && sessionPath) {
+			for (const [cid, binding] of this.chatBindings) {
+				if (binding.sessionPath && binding.sessionPath === sessionPath) {
+					existingChatId = cid;
+					log(`[飞书 Session Mirror] 按 sessionPath 复用旧群: ${cid} (path: ${sessionPath})`);
 					// 更新 sessionId 映射
-					this.sessionToChat.set(sessionId, chatId);
-					// 更新绑定中的 sessionId
 					binding.sessionId = sessionId;
+					this.sessionToChat.set(sessionId, cid);
+					this.feishuSessions.add(sessionId);
 					this.persistBindings();
 					break;
 				}
 			}
 		}
 
-		// 3. 已有绑定：检查是否需要修复空群
+		// 3. 已有绑定：检查是否需要修复空群，确保 sessionId 映射正确；或者尝试复用孤立的 session-mirror 群
+		if (!existingChatId) {
+			// 3a. 没有直接匹配 → 尝试复用孤立的 session-mirror 群（重启后 sessionId 变化导致的孤儿）
+			for (const [cid, binding] of this.chatBindings) {
+				if (
+					binding.source === "session-mirror" &&
+					binding.botId === this.botConfig.id &&
+					!this.agentManager.list().some(t => t.id === binding.sessionId)
+				) {
+					const oldSessionId = binding.sessionId;
+					existingChatId = cid;
+					binding.sessionId = sessionId;
+					if (sessionPath) binding.sessionPath = sessionPath;
+					this.sessionToChat.set(sessionId, cid);
+					this.feishuSessions.add(sessionId);
+					log(`[飞书 Session Mirror] 复用孤立飞书群: ${cid} (原 ${oldSessionId?.slice(0, 8)} → ${sessionId.slice(0, 8)})`);
+					this.persistBindings();
+					this.pushBindings();
+					break;
+				}
+			}
+		}
+
 		if (existingChatId) {
 			const effectiveUserOpenId = this.botConfig.defaultUserOpenId || this.userOpenId;
-			if (effectiveUserOpenId) {
-				const binding = this.chatBindings.get(existingChatId);
-				if (binding && !binding.userId) {
+			const binding = this.chatBindings.get(existingChatId);
+			if (binding) {
+				// 确保当前 sessionId 也有映射（可能刚通过 sessionPath 匹配到）
+				if (binding.sessionId !== sessionId) {
+					this.sessionToChat.set(sessionId, existingChatId);
+					this.feishuSessions.add(sessionId);
+				}
+				if (effectiveUserOpenId && !binding.userId) {
 					log(`[飞书 Session Mirror] 检测到空群 ${existingChatId}，尝试补加用户 ${effectiveUserOpenId}`);
 					await this.repairEmptyGroup(existingChatId, effectiveUserOpenId).catch(() => {});
 					binding.userId = effectiveUserOpenId;
@@ -734,15 +905,18 @@ export class FeishuBridge {
 			log(`[飞书 Session Mirror] 群创建成功: chatId=${chatId}, 成员数=${effectiveUserOpenId ? 2 : 1}`);
 
 			// 创建绑定
+			// 找到对应的 agent tab 以获取 sessionPath
+			const agentTab = this.agentManager.list().find((t) => t.id === sessionId);
 			const binding: FeishuChatBinding = {
 				chatId, botId: this.botConfig.id, userId: effectiveUserOpenId ?? "",
-				sessionId, workspaceId: this.botConfig.defaultWorkspaceId ?? "",
+				sessionId, sessionPath: agentTab?.sessionPath, workspaceId: this.botConfig.defaultWorkspaceId ?? "",
 				source: "session-mirror" as const, chatType: "group", groupName, createdAt: Date.now(),
 			};
 			this.chatBindings.set(chatId, binding);
 			this.sessionToChat.set(sessionId, chatId);
 			this.updateStatus({ activeBindings: this.chatBindings.size });
 			this.persistBindings();
+			this.pushBindings();
 
 			await this.sendSmartMessage(chatId, `🤖 Pi Agent 会话已创建\n会话 ID: ${sessionId.slice(0, 8)}\n\n直接发消息即可与 Agent 对话。`);
 			return chatId;
@@ -773,11 +947,11 @@ export class FeishuBridge {
 	}
 
 	/** Session Mirror: Agent 运行前为 Pi 侧会话打开流式卡片 */
-	async startSessionMirrorRun(sessionId: string, sessionTitle?: string): Promise<void> {
+	async startSessionMirrorRun(sessionId: string, sessionTitle?: string, sessionPath?: string): Promise<void> {
 		if (!this.client || this.status.status !== "connected") return;
 
 		// 确保有群
-		await this.ensureSessionMirror(sessionId, sessionTitle);
+		await this.ensureSessionMirror(sessionId, sessionTitle, sessionPath);
 
 		const binding = this.sessionToChat.get(sessionId)
 			? this.chatBindings.get(this.sessionToChat.get(sessionId)!)
@@ -863,7 +1037,7 @@ export class FeishuBridge {
 		await this.sendCardMessage(chatId, {
 			config: { wide_screen_mode: true, update_multi: true },
 			header: { title: { tag: "plain_text", content: "🤖 Pi Agent 帮助" }, template: "green" },
-			elements: [{ tag: "markdown", content: ["**可用命令**", "", "`/new` 或 `/n` — 创建新会话", "`/stop` 或 `/s` — 停止当前 Agent", "`/status` — 查看当前状态", "`/whoami` — 查看你的 open_id（用于自动拉群配置）", "`/help` 或 `/h` — 查看帮助", "", "直接发送文字消息即可与 Agent 对话。", "", "💡 **Pi 中创建会话时，飞书自动拉群**", "在 PiDeck 中新建会话后，飞书会自动创建一个群聊。", "如需自动拉你进群，请先配置「你的 Open ID」（发 /whoami 获取）。"].join("\n") }],
+			elements: [{ tag: "markdown", content: ["**可用命令**", "", "`/new` 或 `/n` — 创建新会话", "`/stop` 或 `/s` — 停止当前 Agent", "`/status` — 查看当前状态", "`/whoami` — 查看你的 open_id（用于自动拉群配置）", "`/refresh` 或 `/r` — 手动刷新绑定", "`/help` 或 `/h` — 查看帮助", "", "直接发送文字消息即可与 Agent 对话。", "", "💡 **Pi 中创建会话时，飞书自动拉群**", "在 PiDeck 中新建会话后，飞书会自动创建一个群聊。", "如需自动拉你进群，请先配置「你的 Open ID」（发 /whoami 获取）。"].join("\n") }],
 		});
 	}
 
@@ -875,7 +1049,7 @@ export class FeishuBridge {
 		return this.downloadViaImageGet(imageKey);
 	}
 	private async downloadMessageResource(messageId: string, fileKey: string, type: "image" | "file"): Promise<Buffer> {
-		const resp = this.client!.im.messageResource.get({ path: { message_id: messageId, file_key: fileKey }, params: { type } });
+		const resp = await this.client!.im.messageResource.get({ path: { message_id: messageId, file_key: fileKey }, params: { type } });
 		return this.streamToBuffer(resp);
 	}
 	private async downloadViaImageGet(imageKey: string): Promise<Buffer> {
@@ -958,6 +1132,7 @@ export class FeishuBridge {
 			if (tab) {
 				const binding: FeishuChatBinding = {
 					chatId: b.chatId, botId: b.botId, userId: b.userId, sessionId: tab.id,
+					sessionPath: tab.sessionPath ?? b.sessionPath,
 					workspaceId: b.workspaceId, channelId: b.channelId, modelId: b.modelId,
 					source: b.source as "feishu" | "session-mirror", chatType: b.chatType as "p2p" | "group",
 					groupName: b.groupName, createdAt: b.createdAt,
@@ -966,17 +1141,22 @@ export class FeishuBridge {
 				this.sessionToChat.set(tab.id, b.chatId);
 				if (b.source === "feishu" || b.source === "session-mirror") this.feishuSessions.add(tab.id);
 			} else {
-				// session-mirror 绑定：即使没有匹配的 tab 也保留，后续 ensureSessionMirror 会处理
-				if (b.source === "session-mirror") {
-					log(`[飞书 Bridge] 保留无主绑定（等后续匹配）: ${b.groupName ?? b.chatId}`);
-					const binding: FeishuChatBinding = {
-						chatId: b.chatId, botId: b.botId, userId: b.userId, sessionId: b.sessionId,
-						workspaceId: b.workspaceId, channelId: b.channelId, modelId: b.modelId,
-						source: b.source as "feishu" | "session-mirror", chatType: b.chatType as "p2p" | "group",
-						groupName: b.groupName, createdAt: b.createdAt,
-					};
-					this.chatBindings.set(b.chatId, binding);
-				}
+				// 无匹配 tab: 保留绑定（用存储的 sessionId/sessionPath），
+				// 后续消息到来时 resumeOrCreateAgent 会恢复或重建 agent。
+				// 参考了 Proma 的 ConversationManager 思路：chatId 是稳定 key，
+				// 不依赖 agent 运行状态。
+				log(`[飞书 Bridge] 保留无主绑定（等后续恢复）: ${b.groupName ?? b.chatId}，sessionPath=${b.sessionPath ?? "(无)"}`);
+				const binding: FeishuChatBinding = {
+					chatId: b.chatId, botId: b.botId, userId: b.userId, sessionId: b.sessionId,
+					sessionPath: b.sessionPath,
+					workspaceId: b.workspaceId, channelId: b.channelId, modelId: b.modelId,
+					source: b.source as "feishu" | "session-mirror", chatType: b.chatType as "p2p" | "group",
+					groupName: b.groupName, createdAt: b.createdAt,
+				};
+				this.chatBindings.set(b.chatId, binding);
+				// 即使 agent 不存在，也建立 sessionId → chatId 映射，
+				// 方便后续通过 resumeOrCreateAgent 更新
+				if (b.sessionId) this.sessionToChat.set(b.sessionId, b.chatId);
 			}
 		}
 		if (this.chatBindings.size > 0) log(`[飞书 Bridge] 已恢复 ${this.chatBindings.size} 个聊天绑定`);
@@ -986,6 +1166,7 @@ export class FeishuBridge {
 	private persistBindings(): void {
 		const bindings: FeishuChatBindingPersist[] = Array.from(this.chatBindings.values()).map((b) => ({
 			chatId: b.chatId, botId: b.botId, userId: b.userId, sessionId: b.sessionId,
+			sessionPath: b.sessionPath,
 			workspaceId: b.workspaceId, channelId: b.channelId, modelId: b.modelId,
 			source: b.source, chatType: b.chatType, groupName: b.groupName, createdAt: b.createdAt,
 		}));
@@ -998,6 +1179,14 @@ export class FeishuBridge {
 		this.status = { ...this.status, ...partial };
 		const win = this.getWindow();
 		if (win && !win.isDestroyed()) win.webContents.send(ipcChannels.feishuStatus, this.status);
+	}
+
+	/** 将绑定列表推送到前端（绑定变更时调用） */
+	private pushBindings(): void {
+		const win = this.getWindow();
+		if (win && !win.isDestroyed()) {
+			win.webContents.send(ipcChannels.feishuBindingsChanged, this.listBindings());
+		}
 	}
 
 	pushMessage(message: FeishuChatMessage): void {

@@ -463,6 +463,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.feishuBindingUpdate, chatId, patch) as Promise<FeishuChatBinding | undefined>,
 		onMessages: (callback: (message: FeishuChatMessage) => void) =>
 			subscribe(ipcChannels.feishuMessages, callback),
+		onBindingsChanged: (callback: (bindings: FeishuChatBinding[]) => void) =>
+			subscribe(ipcChannels.feishuBindingsChanged, callback),
 	},
 };
 

@@ -496,6 +496,7 @@ export function createPreviewApi(): PiDesktopApi {
 			bindingRemove: async () => false,
 			bindingUpdate: async () => undefined,
 			onMessages: () => () => {},
+			onBindingsChanged: () => () => {},
 		},
 	};
 }
