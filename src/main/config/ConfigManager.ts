@@ -313,24 +313,21 @@ export class ConfigManager {
 	 * 根据 API 类型构造获取模型列表的 URL 列表（含优先路径和回退路径）。
 	 * fetchProviderModels 会逐条尝试直到成功或全部失败。
 	 *
-	 * 各厂商 /models 端点格式差异较大。
-	 * 自动补齐常见路径段有助于降低用户配置门槛。
+	 * 各厂商获取模型列表的支持情况：
 	 *
-	 * OpenAI:
-	 *   baseUrl=https://api.openai.com → [/v1/models, /models]
-	 *   baseUrl=https://api.openai.com/v1 → [/v1/models, /models]
+	 * | API 类型 | 优先路径 | 回退路径 |
+	 * |----------|---------|---------|
+	 * | OpenAI Chat Completions | /v1/models | /models |
+	 * | OpenAI Responses / Codex | /v1/models | /models |
+	 * | Anthropic Messages | /v1/models | /models |
+	 * | Google Gemini | /v1beta/models | - |
+	 * | Mistral Conversations | /v1/models | /models |
 	 *
-	 * Anthropic:
-	 *   baseUrl=https://api.anthropic.com → /models（不在 v1 下）
-	 *   baseUrl=https://api.anthropic.com/v1 → /models（忽略配置的 v1）
-	 *
-	 * Google:
-	 *   baseUrl=https://generativelanguage.googleapis.com → /v1beta/models?key=xxx
-	 *   baseUrl=https://generativelanguage.googleapis.com/v1beta → /v1beta/models?key=xxx
-	 *
-	 * Mistral + OpenAI 兼容（默认）:
-	 *   baseUrl=https://api.mistral.ai → [/v1/models, /models]
-	 *   baseUrl=http://localhost:11434/v1 → [/v1/models, /models]
+	 * OpenAI 生态（Chat Completions / Responses / Codex / Mistral）统一通过
+	 * GET /v1/models 获取模型列表。
+	 * 虽然 Anthropic 官方未公开 models 端点，但大部分兼容 Anthropic 协议的
+	 * 第三方网关同样支持 /v1/models。优先尝试 /v1/models，再回退到 /models。
+	 * Google Gemini 使用独立的 /v1beta/models。
 	 */
 	private buildModelsRequest(
 		baseUrl: string,
@@ -340,7 +337,7 @@ export class ConfigManager {
 		const api = this.normalizeApiType(apiType);
 
 		if (api === "google-generative-ai") {
-			// Google: 前缀需要 /v1beta（或用户指定的版本），不自动覆盖
+			// Google Gemini：使用独立的 v1beta 路径
 			const u = baseUrl.replace(/\/+$/, "");
 			const needsPrefix = !/[\/]v\d+(alpha|beta)?$/.test(u);
 			const versioned = needsPrefix ? `${u}/v1beta` : u;
@@ -351,20 +348,25 @@ export class ConfigManager {
 		}
 
 		if (api === "anthropic-messages") {
-			// Anthropic 的 /models 端点不在 v1 下，而是在根路径
-			// https://api.anthropic.com/models
+			// Anthropic：优先尝试 /v1/models（兼容大部分第三方网关），
+			// 再回退到 /models（原生 Anthropic API 或旧实现）
 			const u = baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
-			return [{
-				url: `${u}/models`,
-				headers: this.withAnthropicSdkUserAgent({
-					"x-api-key": apiKey,
-					"anthropic-version": "2023-06-01",
-					"Content-Type": "application/json",
-				}),
-			}];
+			const headers = this.withAnthropicSdkUserAgent({
+				"x-api-key": apiKey,
+				"anthropic-version": "2023-06-01",
+				"Content-Type": "application/json",
+			});
+			const primaryUrl = `${u}/v1/models`;
+			const fallbackUrl = `${u}/models`;
+			return primaryUrl === fallbackUrl
+				? [{ url: primaryUrl, headers }]
+				: [
+					{ url: primaryUrl, headers },
+					{ url: fallbackUrl, headers },
+				];
 		}
 
-		// OpenAI 兼容 API（Chat Completions / Responses / Mistral）：
+		// OpenAI 兼容 API（Chat Completions / Responses / Codex / Mistral）：
 		// 优先尝试 ensureVersionPath 补齐后的路径，再回退到原始 baseUrl + /models
 		const headers = this.withOpenAiSdkUserAgent({
 			Authorization: `Bearer ${apiKey}`,
