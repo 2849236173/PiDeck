@@ -299,6 +299,17 @@ export type PiExtensionSummary = {
 	scope: "user" | "project" | "unknown";
 };
 
+export type PiPackageInfo = {
+	name: string;
+	description: string;
+	installCmd: string;
+	tags: string[];
+	downloads: string;
+	updated: string;
+	npmUrl: string;
+	repoUrl?: string;
+};
+
 export type PiExtensionListResult = {
 	extensions: PiExtensionSummary[];
 	raw: string;

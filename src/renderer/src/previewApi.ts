@@ -320,6 +320,7 @@ export function createPreviewApi(): PiDesktopApi {
 				raw: "User packages:\n  npm:preview-extension\n    C:/Users/preview/.pi/agent/npm/node_modules/preview-extension\n",
 			}),
 			uninstall: async () => undefined,
+			install: async (_source: string) => "",
 		},
 		settings: {
 			get: async (): Promise<AppSettings> => ({ ...previewSettings }),

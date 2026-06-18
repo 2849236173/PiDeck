@@ -3548,6 +3548,7 @@ export function App() {
           />
         )}
 
+        {activeAgent && (
         <footer ref={composerRef} className="composer">
           {/* 图片预览作为输入框上方的附件栏,避免占用 textarea 的可输入区域。 */}
           {attachedImages.length > 0 && (
@@ -3735,6 +3736,7 @@ export function App() {
             </div>
           </div>
         </footer>
+        )}
       </main>
 
       {drawer && !drawerCollapsed && (

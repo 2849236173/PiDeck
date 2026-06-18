@@ -955,6 +955,9 @@ function registerIpc() {
 	ipcMain.handle(ipcChannels.extensionsUninstall, (_event, source: string, scope?: "user" | "project" | "unknown") =>
 		extensionManager.uninstall(source, scope),
 	);
+	ipcMain.handle(ipcChannels.extensionsInstall, (_event, source: string) =>
+		extensionManager.install(source),
+	);
 
 	ipcMain.handle(ipcChannels.agentsList, () => agentManager.list());
 	ipcMain.handle(ipcChannels.agentsCreate, async (_event, input: CreateAgentInput) => {

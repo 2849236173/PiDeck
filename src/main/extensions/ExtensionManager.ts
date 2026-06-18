@@ -30,6 +30,12 @@ export class ExtensionManager {
 		], 30_000);
 	}
 
+	async install(source: string): Promise<string> {
+		const normalized = source.trim();
+		if (!normalized) throw new Error("扩展名称不能为空");
+		return this.runPi(["install", normalized, "--no-approve"], 60_000);
+	}
+
 	private async runPi(args: string[], timeout: number) {
 		const command = this.locator.resolveCommand(this.getSettings().customPiPath);
 		const invocation = this.locator.createInvocation(command, args);

@@ -726,13 +726,11 @@ export function EmptyState(props: { hasProject: boolean; onCreate: () => void })
 				</svg>
 			</div>
 			<h2>{t("app.startAgent")}</h2>
-			<p>
-				{props.hasProject
-					? t("app.emptyHasProject")
-					: t("app.emptyNoProject")}
-			</p>
-			{props.hasProject && (
+			<p>{t("app.emptyGuide")}</p>
+			{props.hasProject ? (
 				<button onClick={props.onCreate}>{t("app.createAgent")}</button>
+			) : (
+				<p className="empty-hint">{t("app.emptyNoProject")}</p>
 			)}
 		</div>
 	);

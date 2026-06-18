@@ -207,6 +207,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.extensionsList) as Promise<PiExtensionListResult>,
 		uninstall: (source: string, scope?: "user" | "project" | "unknown") =>
 			ipcRenderer.invoke(ipcChannels.extensionsUninstall, source, scope) as Promise<void>,
+		install: (source: string) =>
+			ipcRenderer.invoke(ipcChannels.extensionsInstall, source) as Promise<string>,
 	},
 	settings: {
 		get: () =>
