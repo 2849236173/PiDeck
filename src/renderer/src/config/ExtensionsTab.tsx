@@ -77,7 +77,7 @@ export function ExtensionsTab(props: {
 
 	return (
 		<div className="extensions-tab">
-			{/* 预设推荐扩展 */}
+			{/* 预设推荐扩展 — 大列表简洁显示 */}
 			<div className="config-section" style={{ marginBottom: 20 }}>
 				<div className="config-toolbar">
 					<span className="config-count">{t("config.recommendedPackages")}</span>
@@ -85,49 +85,50 @@ export function ExtensionsTab(props: {
 				<p className="config-im-form-hint" style={{ marginBottom: 12 }}>
 					{t("config.recommendedPackagesHint")}
 				</p>
-				{RECOMMENDED_PACKAGES.map((pkg) => (
-					<div key={pkg.name} className="config-card" style={{ marginBottom: 8 }}>
-						<div className="config-card-header">
-							<div className="config-card-info">
-								<div className="config-card-name">
-									<code>{pkg.name}</code>
-									{pkg.tags.length > 0 && (
-										<span style={{ marginLeft: 8 }}>
-											{pkg.tags.map((tag) => (
-												<span key={tag} className="skill-state enabled" style={{ marginRight: 4, fontSize: "var(--font-size-micro)" }}>{tag}</span>
-											))}
-										</span>
-									)}
+				<div className="extensions-recommended-list">
+					{RECOMMENDED_PACKAGES.map((pkg) => {
+						const alreadyInstalled = props.data.extensions.some((ext) => ext.source === pkg.installCmd);
+						return (
+						<div
+							key={pkg.name}
+							className="extensions-recommended-row"
+							onClick={() => window.open(`https://pi.dev/packages/${pkg.name}?name=${pkg.name}`, '_blank')}
+							title={`${t("config.openPackageDetail")}: ${pkg.name}`}
+						>
+							<div className="extensions-recommended-info">
+								<div className="extensions-recommended-name">
+									<strong>{pkg.name}</strong>
+									{alreadyInstalled && <span className="config-im-connected-badge" style={{ marginLeft: 8 }}>{t("config.installed")}</span>}
 								</div>
-								<div className="config-card-meta">
+								<div className="extensions-recommended-desc">
 									{pkg.description}
 								</div>
-								<div style={{ display: "flex", gap: 12, marginTop: 4, fontSize: "var(--font-size-micro)", color: "var(--color-text-tertiary)" }}>
-									{pkg.downloads && <span>📥 {pkg.downloads}</span>}
-									{pkg.npmUrl && <a href={pkg.npmUrl} target="_blank" rel="noreferrer" style={{ color: "var(--color-accent)" }}>npm</a>}
-									{pkg.repoUrl && <a href={pkg.repoUrl} target="_blank" rel="noreferrer" style={{ color: "var(--color-accent)" }}>repo</a>}
-								</div>
 							</div>
-							<div className="config-card-actions">
+							<div className="extensions-recommended-action" onClick={(e) => e.stopPropagation()}>
 								{installing === pkg.name ? (
 									<span className="config-btn" style={{ opacity: 0.6 }}>{t("config.installing")}</span>
 								) : (
 									<button
-										className="config-btn primary"
+										className="config-btn"
 										onClick={() => handleInstall(pkg)}
+										disabled={alreadyInstalled}
 									>
-										{t("config.install")}
+										{alreadyInstalled ? t("config.installed") : t("config.install")}
 									</button>
 								)}
 							</div>
 						</div>
-					</div>
-				))}
+					);
+					})}
+				</div>
 			</div>
+
+			<hr className="extensions-divider" />
 
 			{/* 已安装扩展列表 */}
 			<div className="config-section">
-				<div className="config-toolbar">
+				<h3 className="extensions-installed-title">{t("config.installedExtensions")}</h3>
+				<div className="config-toolbar" style={{ marginTop: 8 }}>
 					<div>
 						<span className="config-count">
 							{t("config.count.extensions", { count: props.data.extensions.length })}

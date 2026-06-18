@@ -518,28 +518,20 @@ function createWindow() {
 async function autoConnectFeishu() {
 	const bots = listBots();
 	if (bots.length === 0) return;
-	// 取第一个启用的 Bot
 	const bot = bots.find((b) => b.enabled);
 	if (!bot) return;
-
-	console.log("[飞书] 检测到已保存的 Bot 配置，自动连接:", bot.name);
-	try {
-		feishuBridge = new FeishuBridge(bot, agentManager, () => mainWindow, () => projectStore.list());
-		await feishuBridge.start();
-		console.log("[飞书] 自动连接成功");
-	} catch (error) {
-		console.error("[飞书] 自动连接失败:", error);
-		feishuBridge = null;
-		// 失败不阻塞启动，用户可手动连接
-	}
+	// 不再自动连接，由用户手动在配置页点击连接
+	// 避免应用重启后静默恢复连接导致用户困惑
+	console.log("[飞书] 检测到已保存的 Bot 配置:", bot.name, "(跳过自动连接，需手动连接)");
 }
 
 function registerFeishuIpc() {
 	// 连接飞书
 	ipcMain.handle(ipcChannels.feishuConnect, async (_event, input: FeishuConnectInput) => {
+		console.log("[Feishu] 收到连接请求", JSON.stringify({ appId: input.appId?.slice(0, 8) + "...", name: input.name }));
 		try {
-			// 如果已有连接，先断开
 			if (feishuBridge) {
+				console.log("[Feishu] 停止旧 bridge 状态:", JSON.stringify(feishuBridge.getStatus()));
 				feishuBridge.stop();
 			}
 
@@ -552,18 +544,23 @@ function registerFeishuIpc() {
 
 			feishuBridge = new FeishuBridge(botConfig, agentManager, () => mainWindow, () => projectStore.list());
 			await feishuBridge.start();
+			console.log("[Feishu] 连接成功，状态:", JSON.stringify(feishuBridge.getStatus()));
 			return { success: true, message: "连接成功" };
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			console.error("[Feishu] 连接失败:", message);
 			return { success: false, message };
 		}
 	});
 
 	// 断开连接
 	ipcMain.handle(ipcChannels.feishuDisconnect, async () => {
+		console.log("[Feishu] 收到断开请求");
 		if (feishuBridge) {
+			console.log("[Feishu] 停止 bridge，此前状态:", JSON.stringify(feishuBridge.getStatus()));
 			feishuBridge.stop();
 			feishuBridge = null;
+			console.log("[Feishu] bridge 已置 null");
 		}
 		return { success: true };
 	});
@@ -571,8 +568,11 @@ function registerFeishuIpc() {
 	// 查询状态
 	ipcMain.handle(ipcChannels.feishuStatusRequest, async () => {
 		if (feishuBridge) {
-			return feishuBridge.getStatus();
+			const s = feishuBridge.getStatus();
+			console.log("[Feishu] 状态查询:", JSON.stringify(s));
+			return s;
 		}
+		console.log("[Feishu] 状态查询: bridge 为 null，返回 disconnected");
 		return { status: "disconnected", activeBindings: 0 } as FeishuBridgeStatus;
 	});
 
@@ -915,6 +915,15 @@ function registerIpc() {
 			}
 			if ("useNativeTitleBar" in patch) {
 				settingsStore.notifyTitleBarChange(mainWindow);
+			}
+			if (
+				"customPiPath" in patch ||
+				"piProxyEnabled" in patch ||
+				"piProxyUrl" in patch ||
+				"piProxyBypass" in patch
+			) {
+				// pi 路径或代理变更后，预热池中的旧进程配置已过期，需清空让新 agent 重新 spawn
+				agentManager.clearWarmPool();
 			}
 			if (
 				"webServiceEnabled" in patch ||

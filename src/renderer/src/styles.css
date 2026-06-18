@@ -1469,6 +1469,39 @@ body.is-terminal-resizing {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+/* Goal 徽章 */
+.goal-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: var(--font-size-caption);
+	line-height: var(--line-height-caption);
+	padding: 1px 8px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+	color: var(--color-accent);
+	font-weight: 500;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 200px;
+	cursor: default;
+	transition: background 0.15s;
+}
+.goal-badge.goal-paused {
+	background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+	color: var(--color-warning);
+}
+.goal-badge.goal-complete {
+	background: color-mix(in srgb, var(--color-success) 12%, transparent);
+	color: var(--color-success);
+}
+.goal-status-label {
+	font-size: var(--font-size-micro);
+	font-weight: 600;
+	flex-shrink: 0;
+}
+
 .chat-header-actions {
 	display: flex;
 	gap: var(--space-2);
@@ -1495,7 +1528,6 @@ body.is-terminal-resizing {
 	flex: 0 0 auto;
 	overflow: visible;
 }
-.session-group button:not(.primary-action),
 .panel-group button:not(.active) {
 	background: transparent;
 }
@@ -1503,20 +1535,65 @@ body.is-terminal-resizing {
 	position: relative;
 	overflow: visible;
 }
-.session-dropdown-wrapper {
+
+/* ---- Session combo (合并新会话 + 下拉,类似 branch-select) ---- */
+.session-combo {
 	position: relative;
 	display: inline-flex;
 }
-.session-dropdown-trigger {
-	min-width: 28px !important;
-	padding: 0 6px !important;
+.session-combo-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: var(--control-height-md);
+	min-width: 60px;
+	border: 1px solid transparent;
+	background: var(--color-bg-panel);
+	color: var(--color-text-secondary);
+	border-radius: var(--radius-sm);
+	padding: 0 8px;
+	font-size: var(--font-size-control);
+	font-weight: 500;
+	cursor: pointer;
+	transition:
+		background 0.15s,
+		border-color 0.15s,
+		box-shadow 0.15s;
+	white-space: nowrap;
+}
+.session-combo-trigger:hover:not(:disabled) {
+	background: var(--color-bg-active);
+	border-color: color-mix(in srgb, var(--color-accent) 36%, transparent);
+	color: var(--color-text-primary);
+}
+.session-combo-trigger:focus-visible {
+	outline: 2px solid var(--color-accent);
+	outline-offset: 1px;
+}
+.session-combo-trigger:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+.session-combo-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.session-combo-chevron {
+	font-size: var(--font-size-micro);
+	color: var(--color-text-tertiary);
+	transition: transform 0.2s ease;
+	flex-shrink: 0;
+	margin-left: 2px;
 	display: flex;
 	align-items: center;
-	justify-content: center;
 }
-.session-dropdown-menu {
+.session-combo-chevron.open {
+	transform: rotate(180deg);
+}
+.session-combo-menu {
 	position: absolute;
-	top: calc(100% + 6px);
+	top: calc(100% + 4px);
 	right: 0;
 	min-width: 140px;
 	z-index: 100;
@@ -1525,9 +1602,9 @@ body.is-terminal-resizing {
 	border-radius: var(--radius-md);
 	background: var(--color-bg-panel);
 	box-shadow: var(--shadow-popover);
-	animation: session-dropdown-in 0.15s ease-out;
+	animation: session-combo-in 0.15s ease-out;
 }
-@keyframes session-dropdown-in {
+@keyframes session-combo-in {
 	from {
 		opacity: 0;
 		transform: translateY(-4px);
@@ -1537,10 +1614,11 @@ body.is-terminal-resizing {
 		transform: translateY(0);
 	}
 }
-.session-dropdown-menu button {
+.session-combo-menu button {
 	width: 100%;
 	display: flex;
 	align-items: center;
+	gap: var(--space-2);
 	min-height: 32px;
 	border: 0;
 	border-radius: var(--radius-sm);
@@ -1550,13 +1628,19 @@ body.is-terminal-resizing {
 	font-size: var(--font-size-control);
 	text-align: left;
 	cursor: pointer;
+	transition: background 0.1s;
 }
-.session-dropdown-menu button:hover:not(:disabled) {
+.session-combo-menu button:hover:not(:disabled) {
 	background: var(--color-bg-hover);
 }
-.session-dropdown-menu button:disabled {
+.session-combo-menu button:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
+}
+.session-combo-divider {
+	height: 1px;
+	background: var(--color-border-subtle);
+	margin: var(--space-1) 0;
 }
 .chat-header-actions button,
 .panel-action-row button,
@@ -6099,6 +6183,14 @@ body.is-composer-resizing .composer-resize-handle::after {
 		border-color 0.15s,
 		color 0.15s;
 }
+/* a 标签用作按钮时（如在线文档链接）补全 flex 布局 */
+a.config-btn {
+	text-decoration: none;
+	display: inline-flex;
+	align-items: center;
+	white-space: nowrap;
+	box-sizing: border-box;
+}
 
 .config-btn:hover:not(:disabled) {
 	background: var(--color-bg-hover);
@@ -6949,6 +7041,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	gap: 12px;
 	align-items: center;
 	padding: 10px 14px;
+	cursor: pointer;
 }
 
 .config-card-header:hover {
@@ -9135,6 +9228,14 @@ body.is-composer-resizing .composer-resize-handle::after {
 	color: var(--color-text-tertiary);
 }
 
+.config-field-hint {
+	display: block;
+	font-size: var(--font-size-micro);
+	color: var(--color-text-tertiary);
+	margin-top: 4px;
+	line-height: 1.5;
+}
+
 .config-input {
 	width: 100%;
 	height: var(--control-height-md);
@@ -9182,48 +9283,162 @@ body.is-composer-resizing .composer-resize-handle::after {
 	font-size: var(--font-size-caption);
 	color: var(--color-text-tertiary);
 	line-height: 1.6;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
 }
-.config-im-form-hint a {
-	color: var(--color-accent);
+.config-im-form-hint-links {
+	display: flex;
+	gap: var(--space-2);
+	flex-wrap: wrap;
+}
+.config-im-form-hint-links .config-btn.small {
+	font-size: var(--font-size-micro);
+	height: var(--control-height-xs);
+	padding: 0 var(--space-2);
 	text-decoration: none;
-}
-.config-im-form-hint a:hover {
-	text-decoration: underline;
+	display: inline-flex;
+	align-items: center;
+	color: var(--color-text-secondary);
 }
 
-/* 配置指南 */
-.config-im-guide {
+/* Bot 卡片已连接标识 */
+.config-im-connected-badge {
+	display: inline-flex;
+	align-items: center;
+	font-size: var(--font-size-micro);
+	font-weight: 500;
+	color: var(--color-accent);
+	background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+	padding: 1px 8px;
+	border-radius: 999px;
+	margin-left: var(--space-2);
+	line-height: var(--line-height-micro);
+	vertical-align: middle;
+}
+
+/* 配置指南栏（按钮 + 在线文档入口） */
+.config-im-guide-bar {
+	display: flex;
+	gap: var(--space-2);
+	align-items: center;
+	margin-top: 4px;
+}
+.config-im-guide-bar .config-btn {
+	font-size: var(--font-size-caption);
+	padding: 0 var(--space-3);
+	height: var(--control-height-md);
+	text-decoration: none;
+	display: inline-flex;
+	align-items: center;
+}
+
+/* 单 Bot 连接提示 */
+.config-im-hint {
 	font-size: var(--font-size-caption);
 	color: var(--color-text-tertiary);
-	max-width: 800px;
-}
-.config-im-guide summary {
-	cursor: pointer;
-	color: var(--color-text-secondary);
-	font-weight: 500;
-	margin-bottom: 8px;
-}
-.config-im-guide summary:hover {
-	color: var(--color-accent);
+	padding: 8px 14px;
+	background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+	border: 1px solid color-mix(in srgb, var(--color-accent) 14%, var(--color-border-subtle));
+	border-radius: var(--radius-sm);
+	line-height: 1.5;
 }
 
-.config-im-guide-content {
-	line-height: 1.8;
-	padding-left: 16px;
+/* 配置指南弹窗遮罩 */
+.config-im-guide-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 200;
+	background: color-mix(in srgb, var(--color-bg-app) 50%, transparent);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	animation: config-im-guide-fade-in 0.15s ease;
 }
-.config-im-guide-content ol,
-.config-im-guide-content ul {
+.config-im-guide-overlay.closing {
+	animation: config-im-guide-fade-out 0.15s ease;
+}
+@keyframes config-im-guide-fade-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+@keyframes config-im-guide-fade-out {
+	from { opacity: 1; }
+	to { opacity: 0; }
+}
+
+/* 配置指南弹窗 */
+.config-im-guide-modal {
+	background: var(--color-bg-panel);
+	border: 1px solid var(--color-border-default);
+	border-radius: var(--radius-lg);
+	width: 960px;
+	max-width: 92vw;
+	max-height: 85vh;
+	display: flex;
+	flex-direction: column;
+	box-shadow: 0 12px 40px color-mix(in srgb, var(--color-text-primary) 15%, transparent);
+	animation: config-im-guide-slide-in 0.18s ease-out;
+}
+.config-im-guide-overlay.closing .config-im-guide-modal {
+	animation: config-im-guide-slide-out 0.15s ease-in;
+}
+@keyframes config-im-guide-slide-in {
+	from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+	to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes config-im-guide-slide-out {
+	from { opacity: 1; transform: translateY(0) scale(1); }
+	to { opacity: 0; transform: translateY(-12px) scale(0.97); }
+}
+.config-im-guide-modal-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: var(--space-4) var(--space-5);
+	border-bottom: 1px solid var(--color-border-subtle);
+	flex-shrink: 0;
+}
+.config-im-guide-modal-header > strong {
+	font-size: var(--font-size-title);
+	font-weight: 700;
+	color: var(--color-text-primary);
+}
+.config-im-guide-modal-header .config-icon-btn {
+	width: 28px;
+	height: 28px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 0;
+	background: transparent;
+	color: var(--color-text-tertiary);
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	transition: background 0.1s;
+}
+.config-im-guide-modal-header .config-icon-btn:hover {
+	background: var(--color-bg-hover);
+}
+.config-im-guide-modal-body {
+	overflow-y: auto;
+	padding: var(--space-4) var(--space-5);
+	line-height: 1.8;
+	font-size: var(--font-size-caption);
+	color: var(--color-text-secondary);
+}
+.config-im-guide-modal-body ol,
+.config-im-guide-modal-body ul {
 	padding-left: 20px;
 	margin: 4px 0;
 }
-.config-im-guide-content a {
+.config-im-guide-modal-body a {
 	color: var(--color-accent);
 	text-decoration: none;
 }
-.config-im-guide-content a:hover {
+.config-im-guide-modal-body a:hover {
 	text-decoration: underline;
 }
-
 .config-im-guide-perms {
 	list-style: disc;
 	margin: 4px 0;
@@ -9256,6 +9471,76 @@ body.is-composer-resizing .composer-resize-handle::after {
 	background: color-mix(in srgb, var(--color-warning) 12%, transparent);
 	color: var(--color-warning);
 	font-size: var(--font-size-caption);
+}
+
+/* 推荐扩展大列表 */
+.extensions-recommended-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+.extensions-recommended-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 12px;
+	padding: 12px 14px;
+	border-bottom: 1px solid var(--color-border-subtle);
+	transition: background 0.1s;
+}
+.extensions-recommended-row:last-child {
+	border-bottom: none;
+}
+.extensions-recommended-row:hover {
+	background: var(--color-bg-hover);
+}
+
+.extensions-recommended-info {
+	flex: 1;
+	min-width: 0;
+}
+
+.extensions-recommended-name {
+	font-size: var(--font-size-control);
+	color: var(--color-text-primary);
+	margin-bottom: 2px;
+}
+
+.extensions-recommended-desc {
+	font-size: var(--font-size-caption);
+	color: var(--color-text-secondary);
+	line-height: 1.5;
+	margin-bottom: 4px;
+}
+
+.extensions-recommended-npm {
+	font-size: var(--font-size-micro);
+	color: var(--color-accent);
+	text-decoration: none;
+	word-break: break-all;
+}
+.extensions-recommended-npm:hover {
+	text-decoration: underline;
+}
+
+.extensions-recommended-action {
+	flex-shrink: 0;
+	padding-top: 2px;
+}
+
+/* 推荐与已安装之间的分隔线 */
+.extensions-divider {
+	border: none;
+	border-top: 1px solid var(--color-border-subtle);
+	margin: 24px -8px 20px;
+}
+
+/* 已安装扩展标题 */
+.extensions-installed-title {
+	font-size: var(--font-size-title);
+	font-weight: 700;
+	color: var(--color-text-primary);
+	margin: 0;
 }
 
 .extensions-search-bar {

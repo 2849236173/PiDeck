@@ -589,6 +589,8 @@ export class FeishuBridge {
 
 	private handleAgentEvent(agentId: string, event: unknown): void {
 		if (!event || typeof event !== "object") return;
+		// 只有已连接状态才处理 agent 事件，防止断连后仍同步到飞书
+		if (this.status.status !== "connected") return;
 		const typed = event as Record<string, unknown>;
 
 		const cardStream = this.streamingCards.get(agentId);

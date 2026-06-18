@@ -22,6 +22,7 @@ export default defineConfig({
       { text: "首页", link: "/" },
       { text: "快速开始", link: "/guide/getting-started" },
       { text: "功能", link: "/guide/features" },
+      { text: "贡献者", link: "/guide/contributors" },
       { text: "更新日志", link: "/changelog" },
       {
         text: "下载",
@@ -37,6 +38,7 @@ export default defineConfig({
             { text: "功能介绍", link: "/guide/features" },
             { text: "配置与 Skills", link: "/guide/settings" },
             { text: "开发与打包", link: "/guide/development" },
+            { text: "贡献者", link: "/guide/contributors" },
           ],
         },
       ],

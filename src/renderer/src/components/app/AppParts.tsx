@@ -948,6 +948,7 @@ type ActivityEvent =
 			kind: "answer";
 			id: string;
 			preview: string;
+			text: string;
 			timestamp: number;
 	  };
 
@@ -1051,6 +1052,10 @@ function buildActivityEvents(
 	showThinking: boolean,
 ): ActivityEvent[] {
 	const events: ActivityEvent[] = [];
+	/** 收集本轮所有回答文本，最终合并为一个 answer event */
+	const allAnswerTexts: string[] = [];
+
+	// 先处理所有 thinking 和 tool 事件，同时收集回答文本
 	for (const item of items) {
 		if (item.kind === "thinking-group") {
 			if (showThinking && item.text.trim()) {
@@ -1071,6 +1076,7 @@ function buildActivityEvents(
 			continue;
 		}
 		const message = item.message;
+		// 收集 thinking 事件
 		if (showThinking && message.thinking?.trim()) {
 			events.push({
 				kind: "thinking",
@@ -1080,16 +1086,39 @@ function buildActivityEvents(
 				sourceCount: 1,
 			});
 		}
+		// 收集所有回答文本（无论中间是否有 tool/thinking 隔开）
 		const answerText = getMessageDisplayText(message);
 		if (message.role === "assistant" && answerText.trim()) {
-			events.push({
-				kind: "answer",
-				id: `${message.id}-answer`,
-				preview: createAnswerPreview(answerText),
-				timestamp: message.timestamp,
-			});
+			allAnswerTexts.push(answerText);
 		}
 	}
+
+	// 将所有回答合并为一条 answer event，放在 timeline 最后
+	if (allAnswerTexts.length > 0) {
+		const mergedText = allAnswerTexts.join("\n\n");
+		const firstAnswerItem = items.find(
+			(item): item is MessageItem =>
+				item.kind === "message" &&
+				item.message.role === "assistant" &&
+				getMessageDisplayText(item.message).trim().length > 0,
+		);
+		const lastAnswerItem = [...items]
+			.reverse()
+			.find(
+				(item): item is MessageItem =>
+					item.kind === "message" &&
+					item.message.role === "assistant" &&
+					getMessageDisplayText(item.message).trim().length > 0,
+			);
+		events.push({
+			kind: "answer",
+			id: `merged-answer-${firstAnswerItem?.message.id ?? ""}-${lastAnswerItem?.message.id ?? ""}`,
+			preview: createAnswerPreview(mergedText),
+			text: mergedText,
+			timestamp: lastAnswerItem?.message.timestamp ?? firstAnswerItem?.message.timestamp ?? 0,
+		});
+	}
+
 	return events;
 }
 
@@ -1129,7 +1158,7 @@ function createToolActivityEvent(message: ChatMessage): ActivityEvent {
 function ActivityEventRow(props: { event: ActivityEvent }) {
 	const [expanded, setExpanded] = useState(false);
 	const event = props.event;
-	const canExpand = event.kind !== "answer";
+	const canExpand = event.kind !== "answer" || event.text.length > 180;
 	const tone = event.kind === "tool" ? event.tone : event.kind;
 	const label =
 		event.kind === "thinking"
@@ -1191,6 +1220,9 @@ function ActivityEventRow(props: { event: ActivityEvent }) {
 			)}
 			{expanded && event.kind === "thinking" && (
 				<pre className="activity-event-detail thinking-detail">{event.text}</pre>
+			)}
+			{expanded && event.kind === "answer" && (
+				<div className="activity-event-detail answer-detail">{event.text}</div>
 			)}
 			{expanded && event.kind === "tool" && (
 				<div className="activity-event-detail tool-event-detail">

@@ -274,6 +274,20 @@ export function App() {
     Record<string, ImageContent[]>
   >({});
   const [previewImage, setPreviewImage] = useState<ImageContent | null>(null);
+  /** Goal 状态 */
+  const [goalText, setGoalText] = useState<string>("");
+  const goalTextRef = useRef("");
+  const [goalStatus, setGoalStatus] = useState<"none" | "active" | "paused" | "complete">("none");
+  const goalStatusRef = useRef<"none" | "active" | "paused" | "complete">("none");
+  const [goalStartedAt, setGoalStartedAt] = useState(0);
+  const goalStartedAtRef = useRef(0);
+  const [goalCompletedAt, setGoalCompletedAt] = useState(0);
+  const goalIterationRef = useRef(0);
+  /** 标记是否已经在等待自动续接,防止多个异步续接冲突 */
+  const goalContinuationPendingRef = useRef(false);
+  /** 上一次 isAgentBusy 状态,用于检测 busy→idle 转换 */
+  const prevIsAgentBusyRef = useRef(false);
+
   /** 当前 agent 流式思考的实时文本,agent_end 时清空 */
   const [streamingThinking, setStreamingThinking] = useState<
     Record<string, string>
@@ -467,6 +481,7 @@ export function App() {
   >({});
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const chatPaneRef = useRef<HTMLElement | null>(null);
+  const sessionComboRef = useRef<HTMLDivElement | null>(null);
   const chatHeaderRef = useRef<HTMLElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
   const timelineRef = useRef<HTMLElement | null>(null);
@@ -1080,7 +1095,7 @@ export function App() {
     if (activeAgentId && !isPendingAgentId(activeAgentId))
       void api.agents
         .commands(activeAgentId)
-        .then(setCommands)
+        .then((cmds) => setCommands([...cmds, { name: "goal", description: "设置任务目标: /goal <目标>", source: "builtin" }]))
         .catch(() => setCommands([]));
     else setCommands([]);
   }, [activeAgentId]);
@@ -1135,6 +1150,18 @@ export function App() {
   }, [activeAgentId]);
 
   // 追踪 agent 会话开始/结束时间,计算会话时长
+  // 点击外部区域自动关闭会话组合下拉
+  useEffect(() => {
+    if (!sessionActionsOpen) return;
+    const handler = (event: MouseEvent) => {
+      if (sessionComboRef.current && !sessionComboRef.current.contains(event.target as Node)) {
+        setSessionActionsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [sessionActionsOpen]);
+
   useEffect(() => {
     for (const agent of displayAgents) {
       if (agent.id !== activeAgentId) continue;
@@ -1199,6 +1226,23 @@ export function App() {
       agentStatusByAgentRef.current[agent.id] = agent.status;
     }
   }, [displayAgents, activeAgentId, modifiedFiles, messagesByAgent]);
+
+  // 检测 goal_complete tool call → 标记 goal 完成
+  useEffect(() => {
+    if (goalStatusRef.current !== "active") return;
+    const goalAgentMessages = activeAgentId ? messagesByAgent[activeAgentId] : undefined;
+    if (!goalAgentMessages) return;
+    for (let i = goalAgentMessages.length - 1; i >= 0; i--) {
+      const message = goalAgentMessages[i];
+      if (message.role === "tool" && message.meta?.toolName === "goal_complete") {
+        goalStatusRef.current = "complete";
+        goalContinuationPendingRef.current = false;
+        setGoalStatus("complete");
+        setGoalCompletedAt(Date.now());
+        break;
+      }
+    }
+  }, [messagesByAgent, activeAgentId]);
 
   // 监听用户发送消息的编辑事件,将消息填入输入框
   useEffect(() => {
@@ -2329,6 +2373,38 @@ export function App() {
     (activeAgent.status === "running" || activeRuntimeState?.isStreaming),
   );
 
+  // 自动续接：busy → idle 时，如果 goal 仍 active 则自动发送续接
+  useEffect(() => {
+    const busy = isAgentBusy;
+    const wasBusy = prevIsAgentBusyRef.current;
+    prevIsAgentBusyRef.current = busy;
+    if (wasBusy && !busy && goalStatusRef.current === "active" && activeAgentId) {
+      const text = goalTextRef.current;
+      const iteration = goalIterationRef.current + 1;
+      goalIterationRef.current = iteration;
+      if (!goalContinuationPendingRef.current && text) {
+        goalContinuationPendingRef.current = true;
+        const continuationMsg = `[goal 自动续接 #${iteration}]
+当前目标仍未完成，请继续工作:
+<goal_objective>
+${text}
+</goal_objective>
+
+继续完成该目标。不要停止在分析、计划、TODO 或部分修改上。彻底完成后调用 goal_complete。`;
+        api.agents.prompt({
+          agentId: activeAgentId,
+          message: continuationMsg,
+          streamingBehavior: "followUp",
+        }).catch(() => {
+          goalContinuationPendingRef.current = false;
+        });
+      }
+    }
+    if (busy) {
+      goalContinuationPendingRef.current = false;
+    }
+  }, [isAgentBusy, activeAgentId, api.agents]);
+
   async function sendPrompt() {
     if (
       isAgentStarting ||
@@ -2338,6 +2414,13 @@ export function App() {
       return;
     const message = prompt;
     const images = attachedImages.length > 0 ? attachedImages : undefined;
+
+    // ── /goal 命令处理 ──
+    if (message.trim().startsWith("/goal")) {
+      handleGoalCommand(message.trim());
+      setPrompt("");
+      return;
+    }
 
     // 保存到历史记录(只保存非空的文本命令)
     if (message.trim() && !message.startsWith("!")) {
@@ -2378,6 +2461,87 @@ export function App() {
     setSuggestionsOpen(false);
     setSendBehaviorMenuOpen(false);
     await submitPromptSnapshot(activeAgentId, message, images, "followUp");
+  }
+
+  /** 处理 /goal 命令 */
+  function handleGoalCommand(input: string) {
+    const trimmed = input.replace(/^\/goal/, "").trim();
+    const first = trimmed.split(/\s+/)[0];
+
+    if (!trimmed || first === "status") {
+      if (goalStatusRef.current === "none") {
+        showToast(!activeAgentId ? t("goal.noGoal") : `Usage: /goal <objective>\nNo goal set.`, 3000);
+      } else {
+        const elapsed = goalStartedAtRef.current ? Math.floor((Date.now() - goalStartedAtRef.current) / 1000) : 0;
+        const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed / 60)}m${elapsed % 60}s` : `${elapsed}s`;
+        const tokenHint = goalIterationRef.current > 0 ? ` (续接 ${goalIterationRef.current} 次)` : "";
+        showToast(`🎯 ${goalStatusRef.current === "complete" ? "已完成" : "进行中"}: ${goalTextRef.current}\n耗时: ${elapsedStr} | 状态: ${goalStatusRef.current}${tokenHint}`, 4000);
+      }
+      return;
+    }
+
+    if (first === "clear" || first === "stop") {
+      goalStatusRef.current = "none";
+      goalTextRef.current = "";
+      goalStartedAtRef.current = 0;
+      goalIterationRef.current = 0;
+      goalContinuationPendingRef.current = false;
+      setGoalStatus("none");
+      setGoalText("");
+      setGoalStartedAt(0);
+      setGoalCompletedAt(0);
+      showToast("🎯 Goal cleared", 2000);
+      return;
+    }
+
+    if (first === "pause") {
+      if (goalStatusRef.current !== "active") {
+        showToast("No active goal to pause.", 2000);
+        return;
+      }
+      goalStatusRef.current = "paused";
+      setGoalStatus("paused");
+      goalContinuationPendingRef.current = false;
+      showToast(`🎯 Goal paused: ${goalTextRef.current}`, 3000);
+      return;
+    }
+
+    if (first === "resume") {
+      if (goalStatusRef.current !== "paused") {
+        showToast("No paused goal to resume.", 2000);
+        return;
+      }
+      goalStatusRef.current = "active";
+      setGoalStatus("active");
+      goalContinuationPendingRef.current = false;
+      void submitPromptSnapshot(activeAgentId!, `[goal 续接] 之前暂停的目标已恢复，请继续完成:
+<goal_objective>
+${goalTextRef.current}
+</goal_objective>`, undefined, "followUp");
+      showToast(`🎯 Goal resumed: ${goalTextRef.current}`, 3000);
+      return;
+    }
+
+    // /goal <objective> — 启动新目标
+    const objective = trimmed;
+    const existing = goalStatusRef.current;
+    if (existing === "active") {
+      if (!window.confirm(`当前有进行中的目标:\n${goalTextRef.current}\n\n是否替换为新目标?`)) return;
+    }
+
+    goalTextRef.current = objective;
+    goalStatusRef.current = "active";
+    goalStartedAtRef.current = Date.now();
+    goalIterationRef.current = 0;
+    goalContinuationPendingRef.current = false;
+    setGoalText(objective);
+    setGoalStatus("active");
+    setGoalStartedAt(Date.now());
+    setGoalCompletedAt(0);
+
+    // 仅将目标文本作为普通消息发送，不暴露 goal 系统指令
+    void submitPromptSnapshot(activeAgentId!, objective, undefined, "followUp");
+    showToast(`🎯 Goal started: ${objective}`, 3000);
   }
 
   async function submitPromptSnapshot(
@@ -3320,27 +3484,39 @@ export function App() {
                 )}
               </div>
               <div className="header-action-group session-group">
-                <button
-                  className="primary-action"
-                  disabled={!activeProjectId || isAgentStarting}
-                  onClick={() => createAgent()}
-                  title={t("app.newSession")}
-                >
-                  {t("app.new")}
-                </button>
-                <div className="session-dropdown-wrapper">
+                <div className="session-combo" ref={sessionComboRef}>
                   <button
-                    className="session-dropdown-trigger"
-                    disabled={!activeAgentId}
-                    title={t("app.sessionActions")}
-                    onClick={() =>
-                      activeAgentId && setSessionActionsOpen((open) => !open)
-                    }
+                    className="session-combo-trigger"
+                    disabled={!activeProjectId || isAgentStarting}
+                    title={t("app.newSession")}
+                    onClick={() => {
+                      if (activeAgentId) {
+                        setSessionActionsOpen((open) => !open);
+                      } else {
+                        createAgent();
+                      }
+                    }}
                   >
-                    <ChevronDown size={14} />
+                    <Plus size={14} />
+                    <span className="session-combo-label">{t("app.new")}</span>
+                    {activeAgentId && (
+                      <span className={`session-combo-chevron${sessionActionsOpen ? " open" : ""}`}>
+                        <ChevronDown size={12} />
+                      </span>
+                    )}
                   </button>
                   {sessionActionsOpen && activeAgentId && (
-                    <div className="session-dropdown-menu">
+                    <div className="session-combo-menu">
+                      <button
+                        onClick={() => {
+                          createAgent();
+                          setSessionActionsOpen(false);
+                        }}
+                      >
+                        <Plus size={14} />
+                        <span>{t("app.newSession")}</span>
+                      </button>
+                      <div className="session-combo-divider" />
                       <button
                         disabled={activeAgent?.status !== "running"}
                         onClick={() => {
