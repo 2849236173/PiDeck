@@ -33,6 +33,8 @@ import { createPreviewApi } from "./previewApi";
 import { createBrowserApi } from "./browserApi";
 import { ConfigModal } from "./ConfigModal";
 import { TerminalDock } from "./components/terminal/TerminalDock";
+import { FeishuLinkIndicator } from "./components/feishu/FeishuLinkIndicator";
+import { useFeishuBridge } from "./hooks/useFeishuBridge";
 import { CloseIconButton } from "./components/ui/IconButton";
 import { getComposerEnterIntent } from "./composerBehavior";
 import { getVisibleAgentsForProject } from "./agentListDisplay";
@@ -116,7 +118,7 @@ const isLanWeb =
 const api =
   window.piDesktop ?? (isLanWeb ? createBrowserApi() : createPreviewApi());
 // 输入框默认高度增加,提供更好的输入体验,适合多行输入和代码片段
-const COMPOSER_MIN_HEIGHT = 260;
+const COMPOSER_MIN_HEIGHT = 120;
 const COMPOSER_DEFAULT_TERMINAL_HEIGHT = 220;
 const COMPOSER_MIN_TIMELINE_HEIGHT = 160;
 const SIDEBAR_SESSION_PAGE_SIZE = 5;
@@ -265,6 +267,9 @@ export function App() {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [thinkingPickerOpen, setThinkingPickerOpen] = useState(false);
   const [sendBehaviorMenuOpen, setSendBehaviorMenuOpen] = useState(false);
+  const [sessionFeishuBotId, setSessionFeishuBotId] = useState<
+    string | undefined
+  >(undefined);
   const [sessionActionsOpen, setSessionActionsOpen] = useState(false);
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
   const [promptByAgent, setPromptByAgent] = useState<Record<string, string>>(
@@ -507,6 +512,19 @@ export function App() {
   const projectDragPreventClickRef = useRef(false);
 
   // ===== 飞书桥接 =====
+
+  const feishu = useFeishuBridge();
+
+  // 当活跃 Agent 切换时，加载该 Agent 指定的飞书 Bot
+  useEffect(() => {
+    if (!activeAgentId) {
+      setSessionFeishuBotId(undefined);
+      return;
+    }
+    feishu.getSessionBot(activeAgentId).then((botId) => {
+      setSessionFeishuBotId(botId);
+    });
+  }, [activeAgentId]);
 
   const activeProject = projects.find(
     (project) => project.id === activeProjectId,
@@ -3812,6 +3830,23 @@ ${goalTextRef.current}
               onPickModel={openModelPicker}
               onPickThinking={() => setThinkingPickerOpen(true)}
               onCompact={compactAgent}
+              feishuIndicator={
+                <FeishuLinkIndicator
+                  status={feishu.status}
+                  bots={feishu.bots}
+                  activeAgentId={activeAgentId}
+                  activeBotId={feishu.activeBotId}
+                  sessionBotId={sessionFeishuBotId}
+                  isConnected={feishu.isConnected}
+                  connecting={feishu.connecting}
+                  onConnectByBot={feishu.connectByBot}
+                  onDisconnect={feishu.disconnect}
+                  onSetSessionBot={async (agentId: string, botId: string | null) => {
+                    await feishu.setSessionBot(agentId, botId);
+                    setSessionFeishuBotId(botId ?? undefined);
+                  }}
+                />
+              }
             />
             <textarea
               ref={composerTextareaRef}

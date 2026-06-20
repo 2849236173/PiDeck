@@ -86,6 +86,7 @@ type FeishuApiRaw = {
 	disconnect?: () => Promise<unknown>;
 	botAdd?: (input: { appId: string; appSecret: string; name?: string; defaultUserOpenId?: string }) => Promise<{ success: boolean; bot?: FeishuBotConfig; error?: string }>;
 	botRemove?: (botId: string) => Promise<boolean>;
+	botSecret?: (botId: string) => Promise<string>;
 	testConnection?: (appId: string, appSecret: string) => Promise<FeishuTestResult>;
 	bindingRemove?: (chatId: string) => Promise<boolean>;
 	botConfig?: (botId: string, patch: Partial<FeishuBotConfig>) => Promise<FeishuBotConfig | undefined>;
@@ -99,15 +100,13 @@ export function ImTab(_props: Props) {
 	const [error, setError] = useState<string | null>(null);
 	const [showAddForm, setShowAddForm] = useState(false);
 	const [visibleBots, setVisibleBots] = useState(5);
-	const [visibleBindings, setVisibleBindings] = useState(5);
+	const [visibleBindingsByBot, setVisibleBindingsByBot] = useState<Record<string, number>>({});
 	const [appId, setAppId] = useState("");
 	const [appSecret, setAppSecret] = useState("");
 	const [botName, setBotName] = useState("");
 	const [adding, setAdding] = useState(false);
 	const [testResult, setTestResult] = useState<FeishuTestResult | null>(null);
 	const [testing, setTesting] = useState(false);
-	const [connectingBotId, setConnectingBotId] = useState<string | null>(null);
-	const [connectedBotId, setConnectedBotId] = useState<string | null>(null);
 	const [expandedBotIds, setExpandedBotIds] = useState<Set<string>>(new Set());
 	const [addFormOpenId, setAddFormOpenId] = useState("");
 	const [editingOpenIdBotId, setEditingOpenIdBotId] = useState<string | null>(null);
@@ -116,6 +115,8 @@ export function ImTab(_props: Props) {
 	const [guideOpen, setGuideOpen] = useState(false);
 	const [copiedScope, setCopiedScope] = useState(false);
 	const [copiedEvents, setCopiedEvents] = useState(false);
+	const [copiedCredential, setCopiedCredential] = useState<string | null>(null);
+	const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
 	const [guideAnimating, setGuideAnimating] = useState(false);
 
 	const api = (window as unknown as { piDesktop?: { feishu?: FeishuApiRaw } }).piDesktop?.feishu;
@@ -191,32 +192,6 @@ export function ImTab(_props: Props) {
 		}
 	}, [api, appId, appSecret, botName, addFormOpenId, loadData]);
 
-	const handleConnectBot = useCallback(async (botId: string) => {
-		if (!api) return;
-		setConnectingBotId(botId);
-		setError(null);
-		try {
-			const result = await api.connectByBot!(botId);
-			if (result.success) {
-				setConnectedBotId(botId);
-				await loadData();
-			} else {
-				setError(result.message || t("config.im.connectFailed"));
-			}
-		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
-		} finally {
-			setConnectingBotId(null);
-		}
-	}, [api, loadData]);
-
-	const handleDisconnectBot = useCallback(async () => {
-		if (!api) return;
-		await api.disconnect!();
-		setConnectedBotId(null);
-		await loadData();
-	}, [api, loadData]);
-
 	const handleRemoveBot = useCallback(async (botId: string) => {
 		if (!api) return;
 		await api.botRemove!(botId);
@@ -236,8 +211,33 @@ export function ImTab(_props: Props) {
 		await loadData();
 	}, [api, loadData]);
 
+	const handleCopyValue = useCallback(async (key: string, value: string) => {
+		await navigator.clipboard.writeText(value);
+		setCopiedCredential(key);
+		setTimeout(() => setCopiedCredential(null), 1600);
+	}, []);
 
-	const isConnected = status.status === "connected";
+	const handleLoadSecret = useCallback(async (botId: string) => {
+		if (!api?.botSecret) return "";
+		const cached = revealedSecrets[botId];
+		if (cached) return cached;
+		const secret = await api.botSecret(botId);
+		setRevealedSecrets((prev) => ({ ...prev, [botId]: secret }));
+		return secret;
+	}, [api, revealedSecrets]);
+
+	const handleCopySecret = useCallback(async (botId: string) => {
+		const secret = await handleLoadSecret(botId);
+		if (secret) await handleCopyValue(`secret:${botId}`, secret);
+	}, [handleCopyValue, handleLoadSecret]);
+
+	const handleRevealSecret = useCallback(async (botId: string) => {
+		await handleLoadSecret(botId);
+	}, [handleLoadSecret]);
+
+	const getVisibleBindingsForBot = useCallback((botId: string) => visibleBindingsByBot[botId] ?? 10, [visibleBindingsByBot]);
+
+	const isConnected = bindings.length > 0;
 	const statusLabel = t(`config.im.status.${status.status}` as any) || status.status;
 
 	if (loading) {
@@ -247,18 +247,16 @@ export function ImTab(_props: Props) {
 	return (
 		<div className="config-im-tab">
 			{/* ── 全局连接状态提示 ── */}
-			{isConnected && connectedBotId && (
+			{isConnected && (
 				<div className="config-im-status-bar">
-					<span className={`config-im-status-dot ${status.status}`} />
+					<span className="config-im-status-dot connected" />
 					<div className="config-im-status-info">
 						<div className="config-im-status-title">
-							{t("config.im.connectedWith", { name: bots.find(b => b.id === connectedBotId)?.name ?? "" })}
+							{t("config.im.linkedAgentsCount", { count: bindings.length })}
 						</div>
-						{status.activeBindings > 0 && (
-							<div className="config-im-status-meta">
-								{t("config.im.activeBindings", { count: status.activeBindings })}
-							</div>
-						)}
+						<div className="config-im-status-meta">
+							{t("config.im.activeBindings", { count: bindings.length })}
+						</div>
 						{status.errorMessage && (
 							<div className="config-im-status-error">{status.errorMessage}</div>
 						)}
@@ -384,83 +382,95 @@ export function ImTab(_props: Props) {
 				)}
 
 				{bots.slice(0, visibleBots).map((bot) => {
-					const isThisConnected = connectedBotId === bot.id;
-					const isConnectingThis = connectingBotId === bot.id;
+					const botBindings = bindings.filter((binding) => binding.botId === bot.id);
+					const isThisConnected = botBindings.length > 0;
 					const isEditingOpenId = editingOpenIdBotId === bot.id;
+					const isExpanded = expandedBotIds.has(bot.id);
+					const visibleBindingCount = getVisibleBindingsForBot(bot.id);
+					const visibleBotBindings = botBindings.slice(0, visibleBindingCount);
+					const secretValue = revealedSecrets[bot.id];
 					return (
-					<div key={bot.id} className={`config-card${isThisConnected ? " connected" : ""}`}>
-						{/* 点击整行切换展开/收起 */}
-						<div
-							className="config-card-header"
-							onClick={() => setExpandedBotIds((prev) => {
-								const next = new Set(prev);
-								if (next.has(bot.id)) next.delete(bot.id);
-								else next.add(bot.id);
-								return next;
-							})}
-						>
-							<div className="config-card-info">
-								<div className="config-card-name">
-									{bot.name}
-									{isThisConnected && <span className="config-im-connected-badge">{t("config.im.connected")}</span>}
+						<div key={bot.id} className={`config-card config-im-bot-card${isThisConnected ? " connected" : ""}`}>
+							<div
+								className="config-card-header config-im-bot-header"
+								onClick={() => setExpandedBotIds((prev) => {
+									const next = new Set(prev);
+									if (next.has(bot.id)) next.delete(bot.id);
+									else next.add(bot.id);
+									return next;
+								})}
+							>
+								<div className="config-card-info">
+									<div className="config-card-name">
+										<span className="config-im-expand-caret">{isExpanded ? "▾" : "▸"}</span>
+										{bot.name}
+										{isThisConnected && <span className="config-im-connected-badge">{t("config.im.connected")}</span>}
+									</div>
+									<div className="config-card-meta">
+										{t("config.im.expandHint")} · {t("config.im.appId")}: {bot.appId.slice(0, 14)}… · {t("config.im.linkedAgentsCount", { count: botBindings.length })}
+									</div>
 								</div>
-								<div className="config-card-meta">
-									App ID: {bot.appId.slice(0, 14)}...
-								</div>
-							</div>
-							<div className="config-card-actions" onClick={(e) => e.stopPropagation()}>
-								{isThisConnected ? (
+								<div className="config-card-actions" onClick={(e) => e.stopPropagation()}>
 									<button
 										className="config-btn"
-										onClick={handleDisconnectBot}
-										disabled={connectingBotId !== null}
+										onClick={() => {
+											setExpandedBotIds((prev) => {
+												const next = new Set(prev);
+												if (next.has(bot.id)) next.delete(bot.id);
+												else next.add(bot.id);
+												return next;
+											});
+										}}
 									>
-										{t("config.im.disconnect")}
+										{isExpanded ? t("common.collapse") : t("common.details")}
 									</button>
-								) : (
-									<button
-										className="config-btn primary"
-										onClick={() => handleConnectBot(bot.id)}
-										disabled={connectingBotId !== null}
-									>
-										{isConnectingThis ? t("config.im.connecting") : t("config.im.connect")}
+									<button className="config-btn danger-fill" onClick={() => setDeleteConfirmBotId(bot.id)}>
+										{t("common.delete")}
 									</button>
-								)}
-								<button
-									className="config-btn"
-									onClick={(e) => {
-										e.stopPropagation();
-										setExpandedBotIds((prev) => {
-											const next = new Set(prev);
-											if (next.has(bot.id)) next.delete(bot.id);
-											else next.add(bot.id);
-											return next;
-										});
-									}}
-								>
-									{expandedBotIds.has(bot.id) ? t("common.collapse") : t("common.details")}
-								</button>
-								<button
-									className="config-btn danger-fill"
-									onClick={(e) => { e.stopPropagation(); setDeleteConfirmBotId(bot.id); }}
-								>
-									{t("common.delete")}
-								</button>
+								</div>
 							</div>
-						</div>
-						{expandedBotIds.has(bot.id) && (
-							<div className="config-card-details" onClick={(e) => e.stopPropagation()}>
-								<div className="config-detail-row">
-									<span className="config-detail-label">{t("config.im.botId")}</span>
-									<span className="config-detail-value">{bot.id}</span>
-								</div>
-								<div className="config-detail-row">
-									<span className="config-detail-label">{t("config.im.status")}</span>
-									<span className="config-detail-value">{bot.enabled ? "✅ " + t("common.enabled") : "❌ " + t("common.disabled")}</span>
-								</div>
-								<div className="config-detail-row">
-									<span className="config-detail-label">{t("config.im.openId")}</span>
-									<div className="config-detail-value" style={{ flex: 1 }}>
+							{isExpanded && (
+								<div className="config-card-details config-im-bot-details" onClick={(e) => e.stopPropagation()}>
+									<div className="config-im-bot-detail-section">
+										<div className="config-im-section-title">{t("config.im.appCredentials")}</div>
+										<div className="config-im-credential-grid">
+											<div className="config-im-credential-card">
+												<span>{t("config.im.appId")}</span>
+												<code>{bot.appId}</code>
+												<button className="config-btn small" onClick={() => handleCopyValue(`appid:${bot.id}`, bot.appId)}>
+													{copiedCredential === `appid:${bot.id}` ? t("common.copied") : t("common.copy")}
+												</button>
+											</div>
+											<div className="config-im-credential-card">
+												<span>{t("config.im.appSecret")}</span>
+												<code>{secretValue || t("config.im.secretHidden")}</code>
+												<div className="config-im-credential-actions">
+													<button className="config-btn small" onClick={() => handleCopySecret(bot.id)}>
+														{copiedCredential === `secret:${bot.id}` ? t("common.copied") : t("common.copy")}
+													</button>
+													<button
+														className="config-btn small"
+														onClick={() => {
+															if (secretValue) {
+																setRevealedSecrets((prev) => {
+																	const next = { ...prev };
+																	delete next[bot.id];
+																	return next;
+																});
+															} else {
+															void handleRevealSecret(bot.id);
+															}
+														}}
+													>
+														{secretValue ? t("config.im.hideSecret") : t("config.im.revealSecret")}
+													</button>
+												</div>
+											</div>
+										</div>
+									</div>
+
+									<div className="config-im-bot-detail-section">
+										<div className="config-im-section-title">{t("config.im.openId")}</div>
 										{isEditingOpenId ? (
 											<div className="config-im-openid-edit">
 												<input
@@ -474,85 +484,55 @@ export function ImTab(_props: Props) {
 												<button className="config-btn small" onClick={() => setEditingOpenIdBotId(null)}>{t("common.cancel")}</button>
 											</div>
 										) : (
-											<span>
-												{bot.defaultUserOpenId ? (
-													<code>{bot.defaultUserOpenId}</code>
-												) : (
-													<span className="config-im-openid-empty">{t("config.im.openIdEmpty")}</span>
-												)}
-												<button
-													className="config-btn small"
-													onClick={() => { setEditingOpenIdBotId(bot.id); setEditOpenIdValue(bot.defaultUserOpenId || ""); }}
-													style={{ marginLeft: 8 }}
-												>
-													{t("common.edit")}
+											<div className="config-im-openid-line">
+												{bot.defaultUserOpenId ? <code>{bot.defaultUserOpenId}</code> : <span className="config-im-openid-empty">{t("config.im.openIdEmpty")}</span>}
+												<button className="config-btn small" onClick={() => { setEditingOpenIdBotId(bot.id); setEditOpenIdValue(bot.defaultUserOpenId || ""); }}>
+													{t("config.im.editOpenId")}
 												</button>
-											</span>
+											</div>
+										)}
+									</div>
+
+									<div className="config-im-bot-detail-section">
+										<div className="config-im-section-title">{t("config.im.linkedAgents", { count: botBindings.length })}</div>
+										{botBindings.length === 0 ? (
+											<div className="config-empty config-im-inline-empty">{t("config.im.noBotBindings")}</div>
+										) : (
+											<div className="config-im-binding-list">
+												{visibleBotBindings.map((binding) => (
+													<div key={binding.chatId} className="config-im-binding-row">
+														<div className="config-im-binding-avatar">{binding.chatType === "p2p" ? "💬" : "👥"}</div>
+														<div className="config-im-binding-info">
+															<div className="config-im-binding-title">{binding.groupName || binding.chatId.slice(0, 10)}</div>
+															<div className="config-im-binding-meta">
+																{t("config.im.agentId")}: {binding.sessionId.slice(0, 8)} · {t("config.im.chat")}: {binding.chatId.slice(0, 10)} · {new Date(binding.createdAt).toLocaleString()}
+															</div>
+														</div>
+														<button className="config-btn danger-fill small" onClick={() => handleRemoveBinding(binding.chatId)}>
+															{t("config.im.disconnect")}
+														</button>
+													</div>
+												))}
+												{botBindings.length > visibleBindingCount && (
+													<button
+														className="config-btn small config-im-show-more"
+														onClick={() => setVisibleBindingsByBot((prev) => ({ ...prev, [bot.id]: Math.min((prev[bot.id] ?? 10) + 10, botBindings.length) }))}
+													>
+														{t("config.im.showMoreAgents")} ({botBindings.length - visibleBindingCount})
+													</button>
+												)}
+											</div>
 										)}
 									</div>
 								</div>
-								{bot.defaultWorkspaceId && (
-									<div className="config-detail-row">
-										<span className="config-detail-label">{t("config.im.defaultWorkspace")}</span>
-										<span className="config-detail-value">{bot.defaultWorkspaceId}</span>
-									</div>
-								)}
-								{bot.defaultModelId && (
-									<div className="config-detail-row">
-										<span className="config-detail-label">{t("config.im.defaultModel")}</span>
-										<span className="config-detail-value">{bot.defaultModelId}</span>
-									</div>
-								)}
-							</div>
-						)}
-					</div>
-				);
+							)}
+						</div>
+					);
 				})}
 				{bots.length > visibleBots && (
 					<button className="config-btn small" style={{ marginTop: 4 }} onClick={() => setVisibleBots((v) => Math.min(v + 5, bots.length))}>
 						{t("common.showMore")} ({bots.length - visibleBots})
 					</button>
-				)}
-			</div>
-
-			{/* ── 已关联的 Agent ── */}
-			<div className="config-section">
-				<div className="config-toolbar">
-					<span className="config-count">{t("config.im.botBindings", { count: bindings.length })}</span>
-				</div>
-
-				{bindings.length === 0 ? (
-					<div className="config-empty">{t("config.im.noBindings")}</div>
-				) : (
-					<>
-						{bindings.slice(0, visibleBindings).map((binding) => (
-							<div key={binding.chatId} className="config-card config-binding-card">
-								<div className="config-card-header">
-									<div className="config-card-info">
-										<div className="config-card-name">
-											{binding.chatType === "p2p" ? "💬" : "👥"} {binding.groupName || binding.chatId.slice(0, 10)}
-										</div>
-										<div className="config-card-meta">
-											{t("config.im.session")}: {binding.sessionId.slice(0, 8)} | {new Date(binding.createdAt).toLocaleString()}
-										</div>
-									</div>
-									<div className="config-card-actions">
-										<button
-											className="config-btn danger-fill"
-											onClick={() => handleRemoveBinding(binding.chatId)}
-										>
-											{t("common.delete")}
-										</button>
-									</div>
-								</div>
-							</div>
-						))}
-						{bindings.length > visibleBindings && (
-							<button className="config-btn small" style={{ marginTop: 4 }} onClick={() => setVisibleBindings((v) => Math.min(v + 5, bindings.length))}>
-								{t("common.showMore")} ({bindings.length - visibleBindings})
-							</button>
-						)}
-					</>
 				)}
 			</div>
 

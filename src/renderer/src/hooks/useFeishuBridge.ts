@@ -18,6 +18,7 @@ import type {
 type PiDesktopFeishuApi = {
 	connect: (input: FeishuConnectInput) => Promise<{ success: boolean; message: string }>;
 	disconnect: () => Promise<{ success: boolean }>;
+	connectByBot: (botId: string) => Promise<{ success: boolean; message: string }>;
 	statusRequest: () => Promise<FeishuBridgeStatus>;
 	onStatus: (callback: (status: FeishuBridgeStatus) => void) => () => void;
 	botsList: () => Promise<FeishuBotConfig[]>;
@@ -30,6 +31,8 @@ type PiDesktopFeishuApi = {
 	bindingUpdate: (chatId: string, patch: Partial<FeishuChatBinding>) => Promise<FeishuChatBinding | undefined>;
 	onMessages: (callback: (message: FeishuChatMessage) => void) => () => void;
 	onBindingsChanged: (callback: (bindings: FeishuChatBinding[]) => void) => () => void;
+	sessionBotGet: (agentId: string) => Promise<string | null>;
+	sessionBotSet: (agentId: string, botId: string | null) => Promise<void>;
 };
 
 function getApi(): PiDesktopFeishuApi | undefined {
@@ -44,6 +47,10 @@ export function useFeishuBridge() {
 	const [connecting, setConnecting] = useState(false);
 	const [testing, setTesting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	/** 当前连接的 Bot ID，从 status 的 botId 或通过 activeBotId 跟踪 */
+	const [activeBotId, setActiveBotId] = useState<string | undefined>(undefined);
+	/** Agent → Bot 映射缓存 */
+	const [sessionBotMap, setSessionBotMap] = useState<Record<string, string>>({});
 
 	const api = getApi();
 
@@ -89,6 +96,36 @@ export function useFeishuBridge() {
 		});
 	}, [api]);
 
+	/**
+	 * 读取某个 Agent 的 Bot 分配
+	 */
+	const getSessionBot = useCallback(async (agentId: string): Promise<string | undefined> => {
+		if (!api) return undefined;
+		// 先查缓存
+		if (sessionBotMap[agentId]) return sessionBotMap[agentId];
+		const botId = await api.sessionBotGet(agentId);
+		if (botId) {
+			setSessionBotMap((prev) => ({ ...prev, [agentId]: botId }));
+		}
+		return botId ?? undefined;
+	}, [api, sessionBotMap]);
+
+	/**
+	 * 设置某个 Agent 使用的 Bot ID
+	 */
+	const setSessionBot = useCallback(async (agentId: string, botId: string | null) => {
+		if (!api) return;
+		await api.sessionBotSet(agentId, botId);
+		setSessionBotMap((prev) => {
+			if (botId) {
+				return { ...prev, [agentId]: botId };
+			}
+			const next = { ...prev };
+			delete next[agentId];
+			return next;
+		});
+	}, [api]);
+
 	const connect = useCallback(async (input: FeishuConnectInput) => {
 		if (!api) return { success: false, message: "API 未就绪" };
 		setConnecting(true);
@@ -112,10 +149,43 @@ export function useFeishuBridge() {
 		}
 	}, [api]);
 
+	/**
+	 * 使用已保存的 Bot 配置连接（自动解密 Secret）
+	 */
+	const connectByBot = useCallback(async (botId: string) => {
+		if (!api) return { success: false, message: "API 未就绪" };
+		setConnecting(true);
+		setError(null);
+		try {
+			const result = await api.connectByBot(botId);
+			if (result.success) {
+				setActiveBotId(botId);
+				const [s, b, bi] = await Promise.all([
+					api.statusRequest(),
+					api.botsList(),
+					api.bindingsList(),
+				]);
+				setStatus(s);
+				setBots(b);
+				setBindings(bi);
+			} else {
+				setError(result.message);
+			}
+			return result;
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			setError(msg);
+			return { success: false, message: msg };
+		} finally {
+			setConnecting(false);
+		}
+	}, [api]);
+
 	const disconnect = useCallback(async () => {
 		if (!api) return;
 		await api.disconnect();
 		setBindings([]);
+		setActiveBotId(undefined);
 	}, [api]);
 
 	const addBot = useCallback(async (input: FeishuConnectInput) => {
@@ -132,9 +202,12 @@ export function useFeishuBridge() {
 		const ok = await api.botRemove(botId);
 		if (ok) {
 			setBots((prev) => prev.filter((b) => b.id !== botId));
+			if (activeBotId === botId) {
+				setActiveBotId(undefined);
+			}
 		}
 		return ok;
-	}, [api]);
+	}, [api, activeBotId]);
 
 	const updateBotConfig = useCallback(async (botId: string, patch: Partial<FeishuBotConfig>) => {
 		if (!api) return undefined;
@@ -186,7 +259,9 @@ export function useFeishuBridge() {
 		isConnected,
 		isConnecting,
 		hasConfig,
+		activeBotId,
 		connect,
+		connectByBot,
 		disconnect,
 		addBot,
 		removeBot,
@@ -194,6 +269,8 @@ export function useFeishuBridge() {
 		testConnection,
 		removeBinding,
 		refreshBindings,
+		getSessionBot,
+		setSessionBot,
 		clearError: () => setError(null),
 	};
 }

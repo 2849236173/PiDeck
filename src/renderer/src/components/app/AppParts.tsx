@@ -279,6 +279,8 @@ export function ComposerToolbar(props: {
 	onPickModel: () => void;
 	onPickThinking: () => void;
 	onCompact: () => void;
+	/** 在思考按钮后插入的额外指示器（如飞书链接状态） */
+	feishuIndicator?: ReactNode;
 }) {
 	const ctxPercent = props.state?.contextPercent;
 	const showCompact = ctxPercent != null && ctxPercent > 30;
@@ -299,6 +301,7 @@ export function ComposerToolbar(props: {
 			<button onClick={props.onPickThinking} disabled={props.disabled}>
 				{t("app.think")}: {thinkingDisplay}
 			</button>
+			{props.feishuIndicator}
 			{showCompact && (
 				<button
 					className={

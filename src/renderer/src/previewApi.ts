@@ -502,12 +502,15 @@ export function createPreviewApi(): PiDesktopApi {
 			botAdd: async () => ({ success: false, error: "预览模式不支持" }),
 			botRemove: async () => false,
 			botConfig: async () => undefined,
+			botSecret: async () => "",
 			testConnection: async () => ({ success: false, message: "预览模式不支持" }),
 			bindingsList: async () => [],
 			bindingRemove: async () => false,
 			bindingUpdate: async () => undefined,
 			onMessages: () => () => {},
 			onBindingsChanged: () => () => {},
+			sessionBotGet: async () => null,
+			sessionBotSet: async () => {},
 		},
 	};
 }

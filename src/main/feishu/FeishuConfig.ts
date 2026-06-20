@@ -144,6 +144,44 @@ export function getDecryptedBotAppSecret(botId: string): string {
 	return decryptSecret(bot.appSecret);
 }
 
+// ===== 会话-Bot 分配持久化 =====
+
+/**
+ * 为每个 Agent 分配一个指定的飞书 Bot。
+ * 如果未分配，默认使用连接中的 Bot。
+ */
+const SESSION_BOT_MAP_PATH = join(getConfigDir(), "feishu-session-bot.json");
+
+function readSessionBotMap(): Record<string, string> {
+	try {
+		if (!existsSync(SESSION_BOT_MAP_PATH)) return {};
+		return JSON.parse(readFileSync(SESSION_BOT_MAP_PATH, "utf-8"));
+	} catch {
+		return {};
+	}
+}
+
+function writeSessionBotMap(map: Record<string, string>): void {
+	writeFileSync(SESSION_BOT_MAP_PATH, JSON.stringify(map, null, 2), "utf-8");
+}
+
+/** 获取某个 Agent 指定的 Bot ID，如果未指定返回 undefined */
+export function getSessionBotId(agentId: string): string | undefined {
+	const map = readSessionBotMap();
+	return map[agentId];
+}
+
+/** 设置/清除某个 Agent 使用的 Bot ID。传 undefined 或空字符串清除分配。 */
+export function setSessionBotId(agentId: string, botId: string | undefined): void {
+	const map = readSessionBotMap();
+	if (botId) {
+		map[agentId] = botId;
+	} else {
+		delete map[agentId];
+	}
+	writeSessionBotMap(map);
+}
+
 // ===== 绑定持久化 =====
 
 export type FeishuChatBindingPersist = {

@@ -62,6 +62,8 @@ import {
 	removeBot as removeFeishuBot,
 	updateBot as updateFeishuBot,
 	getDecryptedBotAppSecret,
+	getSessionBotId,
+	setSessionBotId,
 } from "./feishu/FeishuConfig";
 import type { FeishuChatBinding } from "../shared/types";
 
@@ -617,6 +619,11 @@ function registerFeishuIpc() {
 		return updated;
 	});
 
+	// 返回解密后的 Secret，仅用于用户主动复制/查看凭证。
+	ipcMain.handle(ipcChannels.feishuBotSecret, async (_event, botId: string) => {
+		return getDecryptedBotAppSecret(botId);
+	});
+
 	// 测试连接
 	ipcMain.handle(ipcChannels.feishuTestConnection, async (_event, appId: string, appSecret: string) => {
 		// 创建临时 bridge 实例来测试连接
@@ -676,6 +683,16 @@ function registerFeishuIpc() {
 			const message = error instanceof Error ? error.message : String(error);
 			return { success: false, message };
 		}
+	});
+
+	// 获取 Agent 绑定的飞书 Bot ID
+	ipcMain.handle(ipcChannels.feishuSessionBotGet, async (_event, agentId: string) => {
+		return getSessionBotId(agentId) ?? null;
+	});
+
+	// 设置 Agent 使用的飞书 Bot ID
+	ipcMain.handle(ipcChannels.feishuSessionBotSet, async (_event, agentId: string, botId: string | null) => {
+		setSessionBotId(agentId, botId ?? undefined);
 	});
 }
 

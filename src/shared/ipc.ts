@@ -114,6 +114,7 @@ export const ipcChannels = {
 	feishuBotAdd: "feishu:bot-add",
 	feishuBotRemove: "feishu:bot-remove",
 	feishuBotConfig: "feishu:bot-config",
+	feishuBotSecret: "feishu:bot-secret",
 	feishuTestConnection: "feishu:test-connection",
 	feishuBindingsList: "feishu:bindings-list",
 	feishuBindingRemove: "feishu:binding-remove",
@@ -124,4 +125,8 @@ export const ipcChannels = {
 	feishuConnectByBot: "feishu:connect-by-bot",
 	/** Pi 创建会话时触发飞书自动拉群 */
 	feishuAutoGroup: "feishu:auto-group",
+	/** 获取指定 Agent 绑定的飞书 Bot ID */
+	feishuSessionBotGet: "feishu:session-bot-get",
+	/** 设置指定 Agent 使用的飞书 Bot ID */
+	feishuSessionBotSet: "feishu:session-bot-set",
 } as const;

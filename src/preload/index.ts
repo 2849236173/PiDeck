@@ -475,6 +475,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.feishuBotRemove, botId) as Promise<boolean>,
 		botConfig: (botId: string, patch: Partial<FeishuBotConfig>) =>
 			ipcRenderer.invoke(ipcChannels.feishuBotConfig, botId, patch) as Promise<FeishuBotConfig | undefined>,
+		botSecret: (botId: string) =>
+			ipcRenderer.invoke(ipcChannels.feishuBotSecret, botId) as Promise<string>,
 		testConnection: (appId: string, appSecret: string) =>
 			ipcRenderer.invoke(ipcChannels.feishuTestConnection, appId, appSecret) as Promise<FeishuTestResult>,
 		bindingsList: () =>
@@ -487,6 +489,10 @@ const api = {
 			subscribe(ipcChannels.feishuMessages, callback),
 		onBindingsChanged: (callback: (bindings: FeishuChatBinding[]) => void) =>
 			subscribe(ipcChannels.feishuBindingsChanged, callback),
+		sessionBotGet: (agentId: string) =>
+			ipcRenderer.invoke(ipcChannels.feishuSessionBotGet, agentId) as Promise<string | null>,
+		sessionBotSet: (agentId: string, botId: string | null) =>
+			ipcRenderer.invoke(ipcChannels.feishuSessionBotSet, agentId, botId) as Promise<void>,
 	},
 };
 
