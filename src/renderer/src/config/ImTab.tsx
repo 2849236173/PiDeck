@@ -118,6 +118,7 @@ export function ImTab(_props: Props) {
 	const [copiedCredential, setCopiedCredential] = useState<string | null>(null);
 	const [revealedSecrets, setRevealedSecrets] = useState<Record<string, string>>({});
 	const [guideAnimating, setGuideAnimating] = useState(false);
+	const [connecting, setConnecting] = useState(false);
 
 	const api = (window as unknown as { piDesktop?: { feishu?: FeishuApiRaw } }).piDesktop?.feishu;
 
@@ -467,6 +468,50 @@ export function ImTab(_props: Props) {
 												</div>
 											</div>
 										</div>
+									</div>
+
+									<div className="config-im-bot-detail-section">
+										<div className="config-im-section-title">{t("config.im.connection")}</div>
+										{isThisConnected ? (
+											<div className="config-im-openid-line">
+												<span className="config-im-connected-badge">{t("config.im.connected")}</span>
+												<button
+													className="config-btn small danger"
+													disabled={connecting}
+													onClick={async () => {
+														setConnecting(true);
+														try {
+															await api?.disconnect?.();
+															await loadData();
+														} finally {
+															setConnecting(false);
+														}
+													}}
+												>
+													{connecting ? t("config.im.connecting") : t("config.im.disconnect")}
+												</button>
+											</div>
+										) : (
+											<div className="config-im-openid-line">
+												<button
+													className="config-btn primary small"
+													disabled={connecting}
+													onClick={async () => {
+														setConnecting(true);
+														try {
+															await api?.connectByBot?.(bot.id);
+															await loadData();
+														} catch (e) {
+															setError(e instanceof Error ? e.message : String(e));
+														} finally {
+															setConnecting(false);
+														}
+													}}
+												>
+													{connecting ? t("config.im.connecting") : t("config.im.connect")}
+												</button>
+											</div>
+										)}
 									</div>
 
 									<div className="config-im-bot-detail-section">
