@@ -10042,23 +10042,24 @@ a.config-btn {
 }
 
 .config-im-credential-grid {
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
 }
 
 .config-im-credential-card {
 	display: flex;
-	flex-direction: column;
-	gap: 6px;
+	align-items: center;
+	gap: 8px;
 	min-width: 0;
-	padding: 10px;
-	border: 1px solid var(--color-border-subtle);
-	border-radius: var(--radius-md);
+	padding: 6px 8px;
+	border-radius: var(--radius-sm);
 	background: var(--color-bg-muted);
 }
 
 .config-im-credential-card > span {
+	flex-shrink: 0;
+	width: 72px;
 	font-size: var(--font-size-micro);
 	font-weight: 600;
 	color: var(--color-text-tertiary);
@@ -10066,7 +10067,7 @@ a.config-btn {
 
 .config-im-credential-card code,
 .config-im-openid-line code {
-	display: block;
+	flex: 1;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -10076,11 +10077,16 @@ a.config-btn {
 	color: var(--color-text-primary);
 }
 
+.config-im-credential-card .config-btn.small {
+	flex-shrink: 0;
+	min-width: auto;
+}
+
 .config-im-credential-actions,
 .config-im-openid-line {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 4px;
 	min-width: 0;
 }
 
@@ -10150,7 +10156,7 @@ a.config-btn {
 
 @media (max-width: 860px) {
 	.config-im-credential-grid {
-		grid-template-columns: 1fr;
+		flex-direction: column;
 	}
 }
 .logs-toolbar {
