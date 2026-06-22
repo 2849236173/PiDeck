@@ -18,6 +18,10 @@ All notable changes to PiDeck are documented here.
   for more accurate auto-discovery
 - **Fork/switch session improvements**: File viewer and diff tools enhanced
   with Git workspace change tracking
+- **Feishu streaming card v4**: Real-time activity feed, lightning confirmation,
+  and parallel startup for session mirrors
+- **Feishu remote control**: Bridge-based remote agent control via Feishu bot
+- **Feishu maintenance guide**: Architecture, implementation and operation docs
 
 ### ✨ UI Polish
 
@@ -36,6 +40,8 @@ All notable changes to PiDeck are documented here.
   message no longer pushes it to the top of the list
 - **Rapid double-click on history**: Main-process lock prevents concurrent
   agent creation for the same session file
+- **Feishu streaming card rendering**: Fixed results not displaying in Feishu
+  streaming card messages
 
 ## v0.6.1 - 2026-06-16
 
