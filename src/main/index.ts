@@ -1663,6 +1663,7 @@ app.whenReady().then(async () => {
 		(id) => projectStore.get(id),
 		() => mainWindow,
 		settingsStore,
+		configManager,
 	);
 	webServiceManager = new WebServiceManager({
 		listProjects: () => projectStore.list(),

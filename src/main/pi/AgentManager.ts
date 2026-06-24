@@ -17,6 +17,7 @@ import { ipcChannels } from "../../shared/ipc";
 import { PiProcess } from "./PiProcess";
 import { formatBashToolMessage } from "./bashResult";
 import type { SettingsStore } from "../settings/SettingsStore";
+import type { ConfigManager } from "../config/ConfigManager";
 
 export class AgentManager {
 	private readonly agents = new Map<string, AgentRuntime>();
@@ -39,6 +40,7 @@ export class AgentManager {
 		private readonly getProject: (id: string) => Project | undefined,
 		private readonly getWindow: () => BrowserWindow | null,
 		private readonly settingsStore: SettingsStore,
+		private readonly configManager: ConfigManager,
 	) {}
 
 	list() {
@@ -170,6 +172,9 @@ export class AgentManager {
 		};
 
 		if (input.sessionPath) await this.repairAssistantUsage(input.sessionPath);
+		// 新建 Agent 和历史会话恢复都走此入口；启动前落盘 trust.json，确保项目级 AGENTS.md/扩展不仅本次 --approve 生效，
+		// 也能出现在 Trust 设置页并在后续会话中自动加载。
+		await this.configManager.ensureTrustedDirectory(project.path);
 
 		// 代理环境变量只能在子进程启动前注入；设置变更后通过 restart/new agent 创建新的进程快照。
 		// 每个 Agent 独立启动 pi RPC，避免复用进程时 session、事件监听和配置快照串线。

@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { normalize, join } from "node:path";
 import { homedir } from "node:os";
 import { net } from "electron";
 import type { ConfigFileDiagnostic, ConfigFileReadResult } from "../../shared/types";
@@ -97,6 +97,29 @@ export class ConfigManager {
 
 	async getTrustConfig(): Promise<ConfigFileReadResult<Record<string, boolean>>> {
 		return this.readJsonFile<Record<string, boolean>>("trust.json", {});
+	}
+
+	async ensureTrustedDirectory(directoryPath: string): Promise<void> {
+		const normalizedPath = normalize(directoryPath);
+		const trustConfig = await this.getTrustConfig();
+		if (trustConfig.diagnostic) return;
+
+		const existingEntry = Object.entries(trustConfig.parsed).find(
+			([path]) => this.normalizeTrustPathKey(path) === this.normalizeTrustPathKey(normalizedPath),
+		);
+		if (existingEntry) return;
+
+		// 启动/恢复 Agent 前主动信任项目目录，避免 pi 只因 --approve 信任本次运行而不落盘。
+		// 若用户已用不同大小写/分隔符写过同一路径，或显式设为 false，则不覆盖，尊重用户的 trust.json 决策。
+		await this.writeJsonFile("trust.json", {
+			...trustConfig.parsed,
+			[normalizedPath]: true,
+		});
+	}
+
+	private normalizeTrustPathKey(path: string) {
+		const normalized = normalize(path).replace(/[\\/]+$/, "");
+		return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 	}
 
 	// ── 保存（可视化表单） ────────────────────────────────
