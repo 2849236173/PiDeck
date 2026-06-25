@@ -16,6 +16,7 @@ import {
 	ChevronRight,
 	GitBranch,
 	Brain,
+	FileText,
 	Folder,
 	Globe2,
 	MessageCircle,
@@ -24,7 +25,9 @@ import {
 	Pin,
 	Plus,
 	RefreshCw,
+	Search,
 	Settings2,
+	Terminal,
 	UploadCloud,
 	Wrench,
 	X,
@@ -901,324 +904,696 @@ export function groupToolMessages(messages: ChatMessage[]): RenderMessage[] {
 	return result;
 }
 
-export const ThinkingGroup = memo(function ThinkingGroup(props: {
-	group: ThinkingGroupItem;
-	showThinking?: boolean;
+// ============================================================
+// 会话时间线渲染组件（借鉴 opencode 扁平 timeline 风格重写）
+// 设计要点：
+// - 助手内容去掉气泡，改为左对齐扁平排版，用左侧竖线聚合一轮对话
+// - 工具调用做成独立可折叠卡片，trigger 行 + 展开内容，内联在 timeline 里
+// - 用户消息保留右对齐气泡，但收窄并去掉头像，操作栏 hover 显隐
+// - 思考过程做成轻量折叠卡片，不再占用大块气泡空间
+// ============================================================
+
+/** 按工具名选择语义图标：read→文件、edit→铅笔、bash→终端、grep→搜索等，未匹配回退扳手。 */
+function toolIcon(toolName: string): ReactNode {
+	const key = toolName.toLowerCase();
+	if (key.includes("read") || key.includes("view")) return <FileText size={14} />;
+	if (key.includes("write") || key.includes("edit") || key.includes("apply_patch") || key.includes("patch"))
+		return <Pencil size={14} />;
+	if (key.includes("bash") || key.includes("shell") || key.includes("terminal")) return <Terminal size={14} />;
+	if (key.includes("grep") || key.includes("search")) return <Search size={14} />;
+	if (key.includes("glob") || key.includes("list") || key.includes("ls")) return <Folder size={14} />;
+	if (key.includes("task") || key.includes("subagent") || key.includes("agent")) return <Network size={14} />;
+	if (key.includes("web") || key.includes("fetch")) return <Globe2 size={14} />;
+	if (key.includes("todo")) return <Check size={14} />;
+	return <Wrench size={14} />;
+}
+
+/** 从工具消息 meta 中提取副标题（文件路径或命令），让 trigger 行能体现工具作用对象。
+ *  pi 的工具参数放在 meta.args 里（如 read 的 path、bash 的 command、edit 的 filePath），
+ *  这里同时兼容历史平铺 meta.path/command/file 的写法。 */
+function getToolSubtitle(message: ChatMessage): string {
+	const meta = message.meta;
+	if (!meta) return "";
+	// 优先从 args 取参数（pi 工具事件的标准结构）
+	const args = meta.args as Record<string, unknown> | undefined;
+	if (args && typeof args === "object") {
+		for (const key of ["filePath", "file_path", "path", "file", "command", "pattern", "query"]) {
+			const v = args[key];
+			if (typeof v === "string" && v) return v;
+		}
+	}
+	// 兼容历史平铺写法
+	const path = meta.path;
+	if (typeof path === "string" && path) return path;
+	const command = meta.command;
+	if (typeof command === "string" && command) return command;
+	const file = meta.file;
+	if (typeof file === "string" && file) return file;
+	return "";
+}
+
+/**
+ * 识别模型主动触发的 skill：pi 系统提示会指示 LLM 用 read 工具读取 SKILL.md 来加载 skill，
+ * 所以 toolName==="read" 且 path 以 SKILL.md 结尾时，视为 skill 调用，返回 skill 名（父目录名）。
+ * 这是模型侧的 skill 触发，与用户侧 /skill:name 展开成 <skill> 块不同。
+ */
+function getReadSkillName(message: ChatMessage): string | undefined {
+	const meta = message.meta;
+	if (!meta) return;
+	const toolName = typeof meta.toolName === "string" ? meta.toolName : "";
+	if (toolName.toLowerCase() !== "read") return;
+	const args = meta.args as Record<string, unknown> | undefined;
+	if (!args || typeof args !== "object") return;
+	const rawPath = String(args.path ?? args.filePath ?? args.file_path ?? "");
+	if (!rawPath) return;
+	// 取最后一段文件名与父目录名，跨平台分隔符兼容
+	const segs = rawPath.split(/[\\/]/).filter(Boolean);
+	const fileName = segs[segs.length - 1] ?? "";
+	if (fileName.toUpperCase() !== "SKILL.MD") return;
+	return segs[segs.length - 2] ?? fileName;
+}
+
+/** 计算工具的语气色：running 黄、error 红、非零退出 warning、其余 ok。 */
+function getToolTone(message: ChatMessage): "running" | "error" | "warning" | "ok" {
+	const status = getToolStatus(message);
+	const exitCode = getToolExitCode(message);
+	if (status === "running") return "running";
+	if (status === "error" || message.meta?.isError === true) return "error";
+	if (typeof exitCode === "number" && exitCode !== 0) return "warning";
+	return "ok";
+}
+
+/** pi 内置工具名集合，用于与 MCP / 扩展工具区分。 */
+const BUILT_IN_TOOLS = new Set(["bash", "edit", "find", "grep", "ls", "read", "write"]);
+
+/**
+ * 识别工具来源类型：
+ * - mcp-proxy：toolName 为 mcp（pi-mcp-adapter 代理模式，LLM 通过单一 mcp 工具调用具体 server/tool）
+ * - mcp-direct：toolName 形如 {server}_{tool} 且非内置工具（directTools 模式，server 名去掉 -mcp 后缀）
+ * - builtin：pi 内置工具（bash/edit/find/grep/ls/read/write）
+ * - extension：其余带下划线或自定义命名的扩展工具
+ */
+function getToolKind(toolName: string): "mcp-proxy" | "mcp-direct" | "builtin" | "extension" {
+	const key = toolName.toLowerCase();
+	if (key === "mcp") return "mcp-proxy";
+	if (BUILT_IN_TOOLS.has(key)) return "builtin";
+	// directTools 模式：server_tool，server 名通常含字母/连字符，tool 名也是标识符
+	if (/^[a-z][a-z0-9-]*_[a-z][a-z0-9_-]*$/i.test(toolName)) return "mcp-direct";
+	return "extension";
+}
+
+/** 从 MCP direct 工具名中拆出 server 名（chrome_devtools_navigate → chrome）。 */
+function getMcpServerName(toolName: string): string {
+	const idx = toolName.indexOf("_");
+	return idx > 0 ? toolName.slice(0, idx) : toolName;
+}
+
+/** 给工具返回展示标签：MCP 代理/直连/内置/扩展，用于 ToolCard trigger 的 kind 徽标。 */
+function getToolKindLabel(toolName: string): string {
+	const kind = getToolKind(toolName);
+	if (kind === "mcp-proxy") return "MCP";
+	if (kind === "mcp-direct") return `MCP·${getMcpServerName(toolName)}`;
+	return "";
+}
+
+/** 单个工具调用卡片：trigger 行（图标+工具名+副标题+状态+耗时）+ 展开后详情。 */
+export const ToolCard = memo(function ToolCard(props: {
+	message: ChatMessage;
+	defaultOpen?: boolean;
 }) {
-	const [expanded, setExpanded] = useState(false);
-	if (!props.showThinking || !props.group.text.trim()) return null;
-
-	const previewLen = 220;
-	const needsTruncate = props.group.text.length > previewLen;
-	const previewText =
-		expanded || !needsTruncate
-			? props.group.text
-			: `${props.group.text.slice(0, previewLen)}...`;
-
+	const [expanded, setExpanded] = useState(props.defaultOpen ?? false);
+	const status = getToolStatus(props.message);
+	const toolName = getToolName(props.message);
+	const detailText = getToolDetailText(props.message);
+	const tone = getToolTone(props.message);
+	const subtitle = getToolSubtitle(props.message);
+	const kindLabel = getToolKindLabel(toolName);
+	// 模型用 read 工具读取 SKILL.md 来加载 skill：识别后以 skill 徽标样式渲染，
+	// 让用户看到模型主动调用了哪个 skill（区别于普通文件读取）
+	const skillName = getReadSkillName(props.message);
+	const isSkillRead = Boolean(skillName);
+	const statusLabel =
+		status === "running"
+			? t("tool.statusRunning")
+			: status === "error"
+				? t("tool.statusError")
+				: t("tool.statusDone");
+	const [copied, setCopied] = useState(false);
+	const handleCopy = () => {
+		navigator.clipboard.writeText(detailText);
+		setCopied(true);
+		setTimeout(() => setCopied(false), 2000);
+	};
 	return (
-		<section className="thinking-block thinking-group-block">
+		<section
+			className={`tool-card tone-${tone}${isSkillRead ? " tool-card--skill" : ""}`}
+			data-status={status}
+			data-tool-kind={isSkillRead ? "skill" : getToolKind(toolName)}
+			data-message-id={props.message.id}
+		>
 			<button
-				className="thinking-header"
-				onClick={() => setExpanded((value) => !value)}
+				className="tool-card-trigger"
+				onClick={() => setExpanded((v) => !v)}
+				aria-expanded={expanded}
 			>
-				<Brain size={14} />
-				<span>{t("thinking.title")}</span>
-				<small>{formatTime(props.group.endedAt)}</small>
-				<em>{expanded ? t("common.collapse") : t("common.expand")}</em>
+				<span className="tool-card-icon">
+					{isSkillRead ? <Brain size={14} /> : toolIcon(toolName)}
+				</span>
+				<span className="tool-card-name">
+					{isSkillRead ? `skill:${skillName}` : toolName}
+				</span>
+				{!isSkillRead && kindLabel && (
+					<span className="tool-card-kind">{kindLabel}</span>
+				)}
+				{subtitle && (
+					<span className="tool-card-subtitle" title={subtitle}>
+						{subtitle}
+					</span>
+				)}
+				<span className="tool-card-status">
+					{status === "running" && <span className="tool-card-spinner" aria-hidden="true" />}
+					{statusLabel}
+				</span>
+				<ChevronDown
+					size={14}
+					className={`tool-card-chevron${expanded ? " open" : ""}`}
+				/>
 			</button>
-			{expanded && <div className="thinking-content">{previewText}</div>}
+			{expanded && (
+				<div className="tool-card-content">
+					<pre className="tool-card-detail">{detailText}</pre>
+					<button
+						className="tool-card-copy"
+						onClick={handleCopy}
+						title={t("tool.copyDetail")}
+					>
+						{copied ? `${t("common.copy")} ✓` : t("common.copy")}
+					</button>
+				</div>
+			)}
 		</section>
 	);
 });
 
-type RunActivityItem = MessageItem | ToolGroupItem | ThinkingGroupItem;
-
-type ActivityEvent =
-	| {
-			kind: "thinking";
-			id: string;
-			text: string;
-			timestamp: number;
-			sourceCount: number;
-	  }
-	| {
-			kind: "tool";
-			id: string;
-			message: ChatMessage;
-			name: string;
-			status: "running" | "done" | "error";
-			tone: "running" | "ok" | "warning" | "error";
-			statusLabel: string;
-			detailText: string;
-			timestamp: number;
-	  }
-	| {
-			kind: "answer";
-			id: string;
-			preview: string;
-			text: string;
-			timestamp: number;
-	  };
-
-function RunActivity(props: {
-	items: RunActivityItem[];
-	showThinking?: boolean;
+/** 工具组卡片：一轮里多个工具调用聚合，收起时显示数量+chip 条，展开后列出每个 ToolCard。
+ *  避免工具多时刷屏，同时保留逐个工具的详情查看能力。 */
+export const ToolGroupCard = memo(function ToolGroupCard(props: {
+	group: ToolGroupItem;
 }) {
-	const events = buildActivityEvents(props.items, Boolean(props.showThinking));
-	const toolEvents = events.filter((event) => event.kind === "tool");
-	const thinkingEvents = events.filter((event) => event.kind === "thinking");
-	const answerEvents = events.filter((event) => event.kind === "answer");
-	const hasProcessEvents = toolEvents.length > 0 || thinkingEvents.length > 0;
-	const runningCount = toolEvents.filter((event) => event.tone === "running").length;
-	const warningCount = toolEvents.filter(
-		(event) => event.tone === "warning" || event.tone === "error",
-	).length;
-	const visibleTools = toolEvents.slice(0, 8);
-	const hiddenToolCount = toolEvents.length - visibleTools.length;
-	const defaultExpanded =
-		runningCount > 0 || warningCount > 0 || answerEvents.length === 0;
-	const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
-	const expanded = manualExpanded ?? defaultExpanded;
-	const toggleExpanded = () =>
-		setManualExpanded((value) => !(value ?? defaultExpanded));
-
-	if (!hasProcessEvents) return null;
-
+	const [expanded, setExpanded] = useState(false);
+	const messages = props.group.messages;
+	// 组内任一工具仍在运行即视为整组进行中
+	const running = messages.some((m) => getToolStatus(m) === "running");
+	const hasError = messages.some(
+		(m) => getToolStatus(m) === "error" || m.meta?.isError === true,
+	);
+	const tone = running ? "running" : hasError ? "error" : "ok";
+	const first = messages[0]?.timestamp ?? 0;
+	const last = messages[messages.length - 1]?.timestamp ?? 0;
+	const duration = last > first ? last - first : 0;
+	const showDuration = !running && duration > 100;
+	const visibleChips = messages.slice(0, 6);
+	const hiddenCount = messages.length - visibleChips.length;
 	return (
-		<section
-			className={[
-				"run-activity",
-				expanded ? "expanded" : "",
-				runningCount > 0 ? "running" : "",
-				warningCount > 0 ? "has-warning" : "",
-			]
-				.filter(Boolean)
-				.join(" ")}
-		>
+		<section className={`tool-group-card tone-${tone}`} data-message-id={props.group.id}>
 			<button
-				className="run-activity-header"
-				onClick={toggleExpanded}
+				className="tool-group-card-trigger"
+				onClick={() => setExpanded((v) => !v)}
 				aria-expanded={expanded}
 			>
-				<ChevronRight
-					size={14}
-					className={expanded ? "run-activity-chevron open" : "run-activity-chevron"}
-				/>
-				<Wrench size={14} />
-				<span className="run-activity-title">{t("activity.title")}</span>
-				<span className="run-activity-summary">
-					{thinkingEvents.length > 0 && (
-						<b>{t("activity.thinkingCount", { count: thinkingEvents.length })}</b>
-					)}
-					{toolEvents.length > 0 && (
-						<b>{t("activity.toolCount", { count: toolEvents.length })}</b>
-					)}
-					{answerEvents.length > 0 && (
-						<b>{t("activity.answerCount", { count: answerEvents.length })}</b>
-					)}
-					{warningCount > 0 && (
-						<b className="warning">
-							{t("activity.warningCount", { count: warningCount })}
-						</b>
-					)}
-					{runningCount > 0 && (
-						<b className="running">{t("activity.running")}</b>
-					)}
+				<span className="tool-group-card-dot" />
+				<span className="tool-group-card-title">
+					{running ? t("tool.running") : t("tool.done")}
 				</span>
+				<strong>
+					{messages.length}
+					{t("tool.countSuffix")}
+				</strong>
+				{showDuration && (
+					<span className="tool-group-card-duration">{formatDuration(duration)}</span>
+				)}
 				<em>{expanded ? t("common.collapse") : t("common.details")}</em>
+				<ChevronDown
+					size={14}
+					className={`tool-group-card-chevron${expanded ? " open" : ""}`}
+				/>
 			</button>
-			{!expanded && toolEvents.length > 0 && (
-				<div className="run-activity-strip">
-					{visibleTools.map((event) => (
-						<button
-							key={event.id}
-							className={`activity-tool-chip ${event.tone}`}
-							title={`${event.name} · ${event.statusLabel}`}
-							onClick={() => setManualExpanded(true)}
-						>
-							{event.name}
-						</button>
-					))}
-					{hiddenToolCount > 0 && (
-						<span className="activity-tool-chip muted">+{hiddenToolCount}</span>
+			{!expanded && (
+				<div className="tool-group-card-strip">
+					{visibleChips.map((m) => {
+						// skill read 在收起状态的 chip 也显示为 skill:name，便于一眼看到模型调用了哪些 skill
+						const sn = getReadSkillName(m);
+						return (
+							<span
+								key={m.id}
+								className={`tool-group-card-chip${sn ? " skill" : ""}`}
+							>
+								{sn ? `skill:${sn}` : getToolName(m)}
+							</span>
+						);
+					})}
+					{hiddenCount > 0 && (
+						<span className="tool-group-card-chip muted">+{hiddenCount}</span>
 					)}
 				</div>
 			)}
 			{expanded && (
-				<div className="run-activity-timeline">
-					{events.map((event) => (
-						<ActivityEventRow key={event.id} event={event} />
+				<div className="tool-group-card-list">
+					{messages.map((m) => (
+						<ToolCard key={m.id} message={m} defaultOpen />
 					))}
 				</div>
 			)}
 		</section>
 	);
-}
+});
 
-function buildActivityEvents(
-	items: RunActivityItem[],
-	showThinking: boolean,
-): ActivityEvent[] {
-	const events: ActivityEvent[] = [];
-	for (const item of items) {
-		if (item.kind === "thinking-group") {
-			if (showThinking && item.text.trim()) {
-				events.push({
-					kind: "thinking",
-					id: item.id,
-					text: item.text,
-					timestamp: item.endedAt,
-					sourceCount: item.messages.length,
-				});
-			}
-			continue;
-		}
-		if (item.kind === "tool-group") {
-			for (const message of item.messages) {
-				events.push(createToolActivityEvent(message));
-			}
-			continue;
-		}
-		const message = item.message;
-		if (showThinking && message.thinking?.trim()) {
-			events.push({
-				kind: "thinking",
-				id: `${message.id}-thinking`,
-				text: stripAnsi(message.thinking),
-				timestamp: message.timestamp,
-				sourceCount: 1,
-			});
-		}
-		const answerText = getMessageDisplayText(message);
-		if (message.role === "assistant" && answerText.trim()) {
-			events.push({
-				kind: "answer",
-				id: `${message.id}-answer`,
-				preview: createAnswerPreview(answerText),
-				text: answerText,
-				timestamp: message.timestamp,
-			});
-		}
-	}
-	return events;
-}
-
-function createToolActivityEvent(message: ChatMessage): ActivityEvent {
-	const status = getToolStatus(message);
-	const exitCode = getToolExitCode(message);
-	const isToolError = status === "error" || message.meta?.isError === true;
-	const tone =
-		status === "running"
-			? "running"
-			: isToolError
-				? "error"
-				: typeof exitCode === "number" && exitCode !== 0
-					? "warning"
-					: "ok";
-	const statusLabel =
-		status === "running"
-			? t("tool.statusRunning")
-			: isToolError
-				? t("tool.statusError")
-				: typeof exitCode === "number"
-					? t("activity.exitCode", { code: exitCode })
-					: t("tool.statusDone");
-	return {
-		kind: "tool",
-		id: message.id,
-		message,
-		name: getToolName(message),
-		status,
-		tone,
-		statusLabel,
-		detailText: getToolDetailText(message),
-		timestamp: message.timestamp,
-	};
-}
-
-function ActivityEventRow(props: { event: ActivityEvent }) {
+/** 思考过程折叠卡片：默认收起，展开后显示完整推理文本（超长时提供截断展开）。 */
+export const ThinkingBlock = memo(function ThinkingBlock(props: {
+	text: string;
+	endedAt?: number;
+	showThinking?: boolean;
+}) {
 	const [expanded, setExpanded] = useState(false);
-	const event = props.event;
-	const canExpand = event.kind !== "answer" || event.text.length > 180;
-	const tone = event.kind === "tool" ? event.tone : event.kind;
-	const label =
-		event.kind === "thinking"
-			? t("activity.thinking")
-			: event.kind === "tool"
-				? t("activity.tool")
-				: t("activity.answer");
-	const title =
-		event.kind === "thinking"
-			? t("thinking.title")
-			: event.kind === "tool"
-				? event.name
-				: event.preview;
-	const meta =
-		event.kind === "thinking"
-			? event.sourceCount > 1
-				? t("activity.thinkingParts", { count: event.sourceCount })
-				: t("activity.thinking")
-			: event.kind === "tool"
-				? event.statusLabel
-				: t("activity.answerMarker");
-	const eventContent = (
-		<>
-			<span className="activity-event-kind">
-				{event.kind === "thinking" ? (
-					<Brain size={13} />
-				) : event.kind === "tool" ? (
-					<Wrench size={13} />
-				) : (
-					<Check size={13} />
-				)}
-				{label}
-			</span>
-			<strong title={title}>{title}</strong>
-			<small title={meta}>
-				{formatTime(event.timestamp)} · {meta}
-			</small>
-			{canExpand && (
-				<em>{expanded ? t("common.collapse") : t("common.details")}</em>
-			)}
-		</>
-	);
-
+	if (!props.showThinking || !props.text.trim()) return null;
+	const previewLen = 220;
+	const needsTruncate = props.text.length > previewLen;
+	const previewText =
+		expanded || !needsTruncate
+			? props.text
+			: `${props.text.slice(0, previewLen)}...`;
 	return (
-		<div className={`activity-event ${event.kind} ${tone}`}>
-			<span className="activity-event-rail" aria-hidden="true">
-				<span className="activity-event-dot" />
+		<section className="thinking-card">
+			<button
+				className="thinking-card-trigger"
+				onClick={() => setExpanded((v) => !v)}
+				aria-expanded={expanded}
+			>
+				<Brain size={14} />
+				<span>{t("thinking.title")}</span>
+				{props.endedAt ? <small>{formatTime(props.endedAt)}</small> : null}
+				<em>{expanded ? t("common.collapse") : t("common.expand")}</em>
+				<ChevronDown
+					size={14}
+					className={`thinking-card-chevron${expanded ? " open" : ""}`}
+				/>
+			</button>
+			{expanded && <div className="thinking-card-content">{previewText}</div>}
+		</section>
+	);
+});
+
+/** 流式等待指示器：思考中/响应中，三点脉动 + 文案。 */
+export function ThinkingIndicator(props: {
+	thinking?: string;
+	showThinking?: boolean;
+}) {
+	const hasThinking =
+		props.showThinking && props.thinking && props.thinking.length > 0;
+	return (
+		<div
+			className="thinking-indicator"
+			data-kind={hasThinking ? "thinking" : "responding"}
+		>
+			<span className="thinking-indicator-dots" aria-hidden="true">
+				<span />
+				<span />
+				<span />
 			</span>
-			{canExpand ? (
-				<button
-					className="activity-event-main"
-					onClick={() => setExpanded((value) => !value)}
-					aria-expanded={expanded}
-				>
-					{eventContent}
-				</button>
-			) : (
-				<div className="activity-event-main static">{eventContent}</div>
-			)}
-			{expanded && event.kind === "thinking" && (
-				<pre className="activity-event-detail thinking-detail">{event.text}</pre>
-			)}
-			{expanded && event.kind === "answer" && (
-				<div className="activity-event-detail answer-detail">{event.text}</div>
-			)}
-			{expanded && event.kind === "tool" && (
-				<div className="activity-event-detail tool-event-detail">
-					<pre>{event.detailText}</pre>
-					<button
-						onClick={() => navigator.clipboard.writeText(event.detailText)}
-						title={t("tool.copyDetail")}
-					>
-						{t("common.copy")}
-					</button>
-				</div>
-			)}
+			<span className="thinking-indicator-label">
+				{hasThinking ? t("thinking.streaming") : t("thinking.responding")}
+			</span>
 		</div>
 	);
 }
+
+/** 助手正文：扁平 markdown 渲染，无气泡包裹，全宽排版，支持内嵌图片。
+ *  路径链接化用 remark 插件在 mdast 层处理（见底部 remarkLinkifyPaths），不再前置改写原始字符串。 */
+export function AssistantText(props: {
+	text: string;
+	images?: ImageContent[];
+	onPreviewImage: (image: ImageContent) => void;
+	onOpenExternal: (url: string) => void;
+	onOpenFile?: (path: string) => void;
+}) {
+	// 统一在此处清理 ANSI 转义码与 <thinking> 标签，调用方可直接传原始消息文本
+	const cleanText = stripThinkingTags(stripAnsi(props.text));
+	return (
+		<div className="assistant-text markdown-body">
+			{props.images && props.images.length > 0 && (
+				<div className="message-images">
+					{props.images.map((img, index) => (
+						<img
+							key={index}
+							src={`data:${img.mimeType};base64,${img.data}`}
+							alt={t("app.imageAlt", { index: index + 1 })}
+							className="message-image"
+							onClick={() => props.onPreviewImage(img)}
+						/>
+					))}
+				</div>
+			)}
+			<ReactMarkdown
+				remarkPlugins={[remarkGfm, remarkLinkifyPaths]}
+				urlTransform={markdownUrlTransform}
+				components={{
+					pre: CodeBlock,
+					a: (linkProps) => (
+						<MarkdownLink
+							{...linkProps}
+							onOpenExternal={props.onOpenExternal}
+							onOpenFile={props.onOpenFile}
+						/>
+					),
+				}}
+			>
+				{cleanText}
+			</ReactMarkdown>
+		</div>
+	);
+}
+
+/** 一轮 AI 回答的扁平容器：左侧竖线聚合，内含思考/工具/正文/文件摘要。
+ *  替代旧的 AgentRun + ChatBubble 助手分支 + RunActivity 三层结构。 */
+export const TurnRow = memo(function TurnRow(props: {
+	run: AgentRunItem;
+	onPreviewImage: (image: ImageContent) => void;
+	showThinking?: boolean;
+	onOpenExternal: (url: string) => void;
+	onOpenFile?: (path: string) => void;
+	onDiffFile?: (path: string) => void;
+	onResendUserMessage?: (message: ChatMessage) => void;
+	fileSummariesByMessage?: Record<string, SessionModifiedFile[]>;
+}) {
+	const { run } = props;
+	const isComplete = run.endedAt > 0;
+	const duration = isComplete && run.startedAt > 0 ? run.endedAt - run.startedAt : 0;
+	const showDuration = isComplete && duration > 100;
+
+	// 合并本轮所有 assistant 文本与思考（保持原 AgentRun 的合并语义：同一轮多段回答拼成一整篇）
+	const assistantMessages = run.items.filter(
+		(item): item is MessageItem =>
+			item.kind === "message" && item.message.role === "assistant",
+	);
+	const textParts: string[] = [];
+	const thinkingParts: string[] = [];
+	const allImages: ImageContent[] = [];
+	for (const item of assistantMessages) {
+		const txt = stripThinkingTags(stripAnsi(item.message.text)).trim();
+		if (txt) textParts.push(txt);
+		if (item.message.thinking?.trim())
+			thinkingParts.push(stripAnsi(item.message.thinking));
+		if (item.message.images) allImages.push(...item.message.images);
+	}
+	const mergedText = textParts.join("\n\n");
+	const mergedThinking = thinkingParts.join("\n\n");
+
+	// 独立思考组：未伴随正文的纯 thinking 消息
+	const standaloneThinking = run.items.filter(
+		(item): item is ThinkingGroupItem => item.kind === "thinking-group",
+	);
+	// 工具组
+	const toolGroups = run.items.filter(
+		(item): item is ToolGroupItem => item.kind === "tool-group",
+	);
+	// 文件摘要关联到本轮第一条 assistant 消息
+	const fileSummary =
+		props.fileSummariesByMessage?.[assistantMessages[0]?.message.id];
+
+	const [copied, setCopied] = useState(false);
+	const handleCopy = () => {
+		if (!mergedText) return;
+		navigator.clipboard.writeText(mergedText);
+		setCopied(true);
+		setTimeout(() => setCopied(false), 2000);
+	};
+
+	// 本轮没有任何可渲染内容时不输出空容器
+	const hasContent =
+		mergedText ||
+		mergedThinking ||
+		standaloneThinking.length > 0 ||
+		toolGroups.length > 0 ||
+		allImages.length > 0;
+	if (!hasContent) return null;
+
+	return (
+		<article className="turn-row" data-message-id={run.id}>
+			<div className="turn-row-rail" aria-hidden="true" />
+			<div className="turn-row-body">
+				<div className="turn-row-meta">
+					<span className="turn-row-agent">pi</span>
+					<time>{formatTime(run.endedAt)}</time>
+					{showDuration && (
+						<span className="turn-row-duration">{formatDuration(duration)}</span>
+					)}
+				</div>
+				{/* 思考过程：独立思考组在前 */}
+				{props.showThinking &&
+					standaloneThinking.map((g) => (
+						<ThinkingBlock
+							key={g.id}
+							text={g.text}
+							endedAt={g.endedAt}
+							showThinking={props.showThinking}
+						/>
+					))}
+				{/* 工具调用组 */}
+				{toolGroups.map((g) => (
+					<ToolGroupCard key={g.id} group={g} />
+				))}
+				{/* 助手正文 */}
+				{mergedText && (
+					<AssistantText
+						text={mergedText}
+						images={allImages}
+						onPreviewImage={props.onPreviewImage}
+						onOpenExternal={props.onOpenExternal}
+						onOpenFile={props.onOpenFile}
+					/>
+				)}
+				{/* 合并的思考内联展示（仅当没有独立思考组时附在正文后） */}
+				{props.showThinking &&
+					mergedThinking &&
+					standaloneThinking.length === 0 && (
+						<ThinkingBlock
+							text={mergedThinking}
+							endedAt={run.endedAt}
+							showThinking={props.showThinking}
+						/>
+					)}
+				{/* 操作栏：hover/focus 显隐，复制整轮回答 */}
+				{mergedText && (
+					<div className="turn-row-actions">
+						<button
+							className="turn-row-action-btn"
+							onClick={handleCopy}
+							aria-label={t("common.copy")}
+						>
+							{copied ? `${t("common.copy")} ✓` : t("common.copy")}
+						</button>
+					</div>
+				)}
+				{/* 本轮修改文件摘要 */}
+				{fileSummary && fileSummary.length > 0 && (
+					<SessionFileSummary
+						files={fileSummary}
+						onOpenFile={props.onOpenFile}
+						onDiffFile={props.onDiffFile}
+					/>
+				)}
+			</div>
+		</article>
+	);
+});
+
+/**
+ * 从用户消息文本中提取 pi 展开后的 <skill name="..." location="...">...</skill> 块。
+ * pi 在发送 /skill:name 时会把 skill 内容展开成该 XML 块注入用户消息，
+ * 这里在展示层把它们识别出来，渲染成 skill 徽标，并把原始 XML 从正文里剥除。
+ * 返回 { skills, text }：skills 为 skill 名列表，text 为移除 skill 块后的正文。
+ */
+function extractSkillBlocks(text: string): { skills: string[]; text: string } {
+	const skills: string[] = [];
+	// 非贪婪匹配 skill 块；name/location 属性顺序与引号样式兼容 pi 实际输出
+	const re = /<skill\s+name="([^"]+)"[^>]*>[\s\S]*?<\/skill>/gi;
+	const cleaned = text.replace(re, (_m, name: string) => {
+		if (name) skills.push(name);
+		return "";
+	});
+	return { skills, text: cleaned.trim() };
+}
+
+/** 用户消息：右对齐气泡 + 附件 + hover 显隐操作栏（复制/编辑/重发）。 */
+export const UserBubble = memo(function UserBubble(props: {
+	message: ChatMessage;
+	onPreviewImage: (image: ImageContent) => void;
+	onOpenFile?: (path: string) => void;
+	onResendUserMessage?: (message: ChatMessage) => void;
+}) {
+	const { message } = props;
+	const [copied, setCopied] = useState(false);
+	// 提取 pi 展开后的 <skill> 块：渲染为 skill 徽标，并从正文里剥除 XML
+	const { skills, text: bodyText } = extractSkillBlocks(stripAnsi(message.text));
+	const cleanText = bodyText;
+	// 投递策略标签：steer(下次调用前插入) / followUp(停止后排队)
+	const deliveryBehavior = message.meta?.streamingBehavior as
+		| "steer"
+		| "followUp"
+		| undefined;
+	const deliveryLabel =
+		deliveryBehavior === "steer"
+			? t("app.messageDeliverySteer")
+			: deliveryBehavior === "followUp"
+				? t("app.messageDeliveryFollowUp")
+				: null;
+	const handleCopy = () => {
+		navigator.clipboard.writeText(cleanText);
+		setCopied(true);
+		setTimeout(() => setCopied(false), 2000);
+	};
+	const handleEdit = () => {
+		// 编辑只把原消息放回输入框，不自动发送，方便用户二次加工
+		document.querySelector<HTMLTextAreaElement>(".composer-box textarea")?.focus();
+		window.dispatchEvent(
+			new CustomEvent("user-message-edit", { detail: { text: message.text } }),
+		);
+	};
+	return (
+		<article className="user-turn" data-message-id={message.id}>
+			{skills.length > 0 && (
+				<div className="user-turn-skills">
+					{skills.map((name) => (
+						<span key={name} className="user-turn-skill-badge" title={`/${name}`}>
+							<span className="user-turn-skill-icon">/</span>
+							{name}
+						</span>
+					))}
+				</div>
+			)}
+			{message.images && message.images.length > 0 && (
+				<div className="user-turn-attachments">
+					{message.images.map((img, index) => (
+						<img
+							key={index}
+							src={`data:${img.mimeType};base64,${img.data}`}
+							alt={t("app.imageAlt", { index: index + 1 })}
+							className="user-turn-attachment"
+							onClick={() => props.onPreviewImage(img)}
+						/>
+					))}
+				</div>
+			)}
+			{cleanText && (
+				<div className="user-turn-bubble">
+					<div className="user-turn-text">
+						{renderChipText(cleanText, props.onOpenFile)}
+					</div>
+				</div>
+			)}
+			<div className="user-turn-meta">
+				{deliveryLabel && (
+					<span
+						className={`user-turn-delivery${
+							deliveryBehavior === "followUp" ? " follow-up" : " steer"
+						}`}
+						title={
+							deliveryBehavior === "followUp"
+								? t("app.messageDeliveryFollowUpTitle")
+								: t("app.messageDeliverySteerTitle")
+						}
+					>
+						{deliveryLabel}
+					</span>
+				)}
+				<time>{formatTime(message.timestamp)}</time>
+			</div>
+			<div className="user-turn-actions">
+				<button className="user-turn-action-btn" onClick={handleCopy}>
+					{copied ? `${t("common.copy")} ✓` : t("common.copy")}
+				</button>
+				<button className="user-turn-action-btn" onClick={handleEdit}>
+					{t("common.edit")}
+				</button>
+				<button
+					className="user-turn-action-btn"
+					onClick={() => props.onResendUserMessage?.(message)}
+					title={t("app.resendTitle")}
+				>
+					{t("app.resend")}
+				</button>
+			</div>
+		</article>
+	);
+});
+
+/**
+ * remark 插件：把助手正文里的裸文件路径转换成可点击的 file:// 链接。
+ *
+ * 以前用对原始 markdown 字符串做正则替换的 linkifyFilePaths，缺点是会把
+ * ```代码块``` 里的路径字符串也改写掉（例如 AI 给出的 path: "D:\..." 示例
+ * 被替换成 [D:\...](file://...) 破坏代码块），且 file:// 经 encodeURIComponent
+ * 后反斜杠全被编码，链接既不可用又渲染异常。
+ *
+ * 改为在 mdast 层遍历，只处理 type === "text" 的叶子节点，天然跳过
+ * code / inlineCode / link 内的文本，从根上消除双重处理与代码块破坏。
+ * URL 用 file:// + encodeURIComponent 编码路径，MarkdownLink 里解码还原。
+ */
+const FILE_PATH_RE =
+	/(?:[A-Z]:[\\/][^\s<>"'`|?*\n\[\]()]+|(?:\.\.?\/|\/)[^\s<>"'`|?*\n\[\]()]+|(?:[a-zA-Z_][a-zA-Z0-9_-]*[\\/])+[^\s<>"'`|?*\n\[\]()]+)\.[a-zA-Z0-9]+/g;
+
+const remarkLinkifyPaths = () => {
+	return (tree: any) => {
+		// 遍历 mdast，仅替换 text 叶子节点；code/inlineCode/link 等节点不被处理。
+		// 文本节点无 children，所以先用 __segs 标记待拆分节点，由父节点遍历时展开。
+		const visit = (node: any) => {
+			if (!node || typeof node !== "object") return;
+			const type: string = node.type;
+			if (type === "code" || type === "inlineCode" || type === "link") return;
+			if (type === "text" && typeof node.value === "string") {
+				const text: string = node.value;
+				FILE_PATH_RE.lastIndex = 0;
+				const segs: any[] = [];
+				let last = 0;
+				let m: RegExpExecArray | null;
+				let touched = false;
+				while ((m = FILE_PATH_RE.exec(text)) !== null) {
+					const start = m.index;
+					const end = start + m[0].length;
+					if (start > last) segs.push({ type: "text", value: text.slice(last, start) });
+					segs.push({
+						type: "link",
+						url: `file://${encodeURIComponent(m[0])}`,
+						children: [{ type: "text", value: m[0] }],
+					});
+					last = end;
+					touched = true;
+				}
+				if (touched) {
+					if (last < text.length) segs.push({ type: "text", value: text.slice(last) });
+					node.__segs = segs;
+				}
+				return;
+			}
+			const children: any[] | undefined = node.children;
+			if (Array.isArray(children)) {
+				const next: any[] = [];
+				for (const child of children) {
+					visit(child);
+					if (child && (child as any).__segs) {
+						const segs = (child as any).__segs;
+						delete (child as any).__segs;
+						next.push(...segs);
+					} else {
+						next.push(child);
+					}
+				}
+				node.children = next;
+			}
+		};
+		visit(tree);
+	};
+};
 
 function getToolStatus(message: ChatMessage): "running" | "done" | "error" {
 	const status = String(message.meta?.status ?? "done");
@@ -1251,273 +1626,6 @@ function getToolExitCode(message: ChatMessage) {
 	}
 	return undefined;
 }
-
-function getMessageDisplayText(message: ChatMessage) {
-	return stripThinkingTags(stripAnsi(message.text));
-}
-
-function createAnswerPreview(text: string) {
-	const collapsed = text.replace(/\s+/g, " ").trim();
-	return collapsed.length > 180 ? `${collapsed.slice(0, 180)}...` : collapsed;
-}
-
-export function ThinkingBubble(props: { thinking?: string; showThinking?: boolean }) {
-	const hasThinking =
-		props.showThinking && props.thinking && props.thinking.length > 0;
-	const [expanded, setExpanded] = useState(false);
-	const previewLen = 200;
-	const needsTruncate = (props.thinking?.length ?? 0) > previewLen;
-	const displayText =
-		expanded || !needsTruncate
-			? (props.thinking ?? "")
-			: (props.thinking ?? "").slice(0, previewLen) + "...";
-
-	return (
-		<article className="chat-message assistant thinking-message">
-			<div className="msg-avatar">P</div>
-			<div className="msg-content">
-				<div className="msg-name">
-					<span>pi</span>
-					<time>{hasThinking ? t("thinking.streaming") : t("thinking.responding")}</time>
-				</div>
-				{hasThinking && (
-					<div className="thinking-block streaming">
-						<div className="thinking-header">
-							<Brain size={14} />
-							<span>{t("thinking.title")}</span>
-						</div>
-						<div className="thinking-content">{displayText}</div>
-						{needsTruncate && (
-							<button
-								className="thinking-toggle"
-								onClick={() => setExpanded((v) => !v)}
-							>
-								{expanded ? t("common.collapse") : t("thinking.expandAll")}
-							</button>
-						)}
-					</div>
-				)}
-				{!hasThinking && (
-					<div className="msg-bubble typing-bubble">
-						<span /> <span /> <span />
-					</div>
-				)}
-			</div>
-		</article>
-	);
-}
-
-
-export const ToolGroup = memo(function ToolGroup(props: {
-	group: ToolGroupItem;
-	index?: number;
-	total?: number;
-}) {
-	const [expanded, setExpanded] = useState(false);
-	// 工具消息按 toolCallId 原地更新;最后一条仍为 running 时,表示当前工具组还没收尾。
-	const running =
-		props.group.messages.length > 0 &&
-		props.group.messages[props.group.messages.length - 1].meta?.status ===
-			"running";
-
-	// 移除错误判断 - 工具调用成功就是成功，不管命令结果
-	const errorCount = 0;
-	const failed = false;
-
-	const visibleChips = props.group.messages.slice(0, 6);
-	const hiddenCount = props.group.messages.length - visibleChips.length;
-
-	// 计算进度
-	const showProgress = props.index !== undefined && props.total !== undefined && props.total > 1;
-	const progressText = showProgress ? `${(props.index ?? 0) + 1}/${props.total ?? 0}` : '';
-
-	// 计算时长
-	const firstTimestamp = props.group.messages[0]?.timestamp ?? 0;
-	const lastTimestamp = props.group.messages[props.group.messages.length - 1]?.timestamp ?? 0;
-	const duration = lastTimestamp > firstTimestamp ? lastTimestamp - firstTimestamp : 0;
-	const showDuration = !running && duration > 100; // 只显示已完成且超过 100ms 的
-
-	return (
-		<article
-			className={`tool-group ${running ? "running streaming" : "done"}`}
-			data-message-id={props.group.id}
-		>
-			<button
-				className="tool-group-header"
-				onClick={() => setExpanded((value) => !value)}
-			>
-				<span className="tool-status-dot" />
-				{showProgress && (
-					<span className="tool-progress">{progressText}</span>
-				)}
-				<span className="tool-group-title">
-					{running ? t("tool.running") : t("tool.done")}
-				</span>
-				<strong>
-					{props.group.messages.length}
-					{t("tool.countSuffix")}
-					{showDuration && ` · ${formatDuration(duration)}`}
-				</strong>
-				<em>{expanded ? t("common.collapse") : t("common.details")}</em>
-			</button>
-			{expanded ? (
-				<div className="tool-group-list">
-					{props.group.messages.map((message) => (
-						<ToolSummary key={message.id} message={message} />
-					))}
-				</div>
-			) : (
-				<div className="tool-compact-row">
-					{visibleChips.map((message) => (
-						<ToolChip
-							key={message.id}
-							message={message}
-							onClick={() => setExpanded(true)}
-						/>
-					))}
-					{hiddenCount > 0 && (
-						<span className="tool-chip muted">+{hiddenCount}</span>
-					)}
-				</div>
-			)}
-		</article>
-	);
-});
-
-function ToolChip(props: { message: ChatMessage; onClick?: () => void }) {
-	const status = String(props.message.meta?.status ?? "done");
-	const toolName = String(props.message.meta?.toolName ?? props.message.text);
-	return (
-		<button
-			className={`tool-chip ${status}`}
-			title={props.message.text}
-			onClick={props.onClick}
-		>
-			{toolName}
-		</button>
-	);
-}
-
-function ToolSummary(props: { message: ChatMessage }) {
-	const [expanded, setExpanded] = useState(false);
-	const status = String(props.message.meta?.status ?? "done");
-	const toolName = String(props.message.meta?.toolName ?? props.message.text);
-	const statusLabel =
-		status === "running"
-			? t("tool.statusRunning")
-			: status === "error"
-				? t("tool.statusError")
-				: t("tool.statusDone");
-	const detailText =
-		typeof props.message.meta?.detailText === "string"
-			? props.message.meta.detailText
-			: JSON.stringify(props.message.meta ?? {}, null, 2);
-	return (
-		<div className={`tool-summary ${status}`}>
-			<div
-				className="tool-summary-main"
-				onClick={() => setExpanded((value) => !value)}
-				style={{ cursor: 'pointer' }}
-			>
-				<strong>{toolName}</strong>
-				<small>
-					{statusLabel} · {formatTime(props.message.timestamp)}
-				</small>
-			</div>
-			<div className="tool-summary-actions">
-				<button onClick={() => setExpanded((value) => !value)}>
-					{expanded ? t("common.collapse") : t("common.details")}
-				</button>
-				<button
-					onClick={() => navigator.clipboard.writeText(detailText)}
-					title={t("tool.copyDetail")}
-				>
-					{t("common.copy")}
-				</button>
-			</div>
-			{expanded && <pre className="tool-detail">{detailText}</pre>}
-		</div>
-	);
-}
-
-export const AgentRun = memo(function AgentRun(props: {
-	run: AgentRunItem;
-	onPreviewImage: (image: ImageContent) => void;
-	showThinking?: boolean;
-	onOpenExternal: (url: string) => void;
-	onOpenFile?: (path: string) => void;
-	onDiffFile?: (path: string) => void;
-	onResendUserMessage?: (message: ChatMessage) => void;
-	fileSummariesByMessage?: Record<string, SessionModifiedFile[]>;
-}) {
-	const activityItems = props.run.items;
-	const messageItems = props.run.items.filter(
-		(item): item is MessageItem => item.kind === "message",
-	);
-	const isComplete = props.run.endedAt > 0;
-
-	return (
-		<article className="agent-run" data-message-id={props.run.id}>
-			<div className="msg-avatar">P</div>
-			<div className="agent-run-content">
-				<div className="msg-name">
-					<span>pi</span>
-					<time>{formatTime(props.run.endedAt)}</time>
-					{isComplete && props.run.startedAt > 0 && (
-						<span className="agent-run-duration">
-							⏱ {formatDuration(props.run.endedAt - props.run.startedAt)}
-						</span>
-					)}
-				</div>
-				<RunActivity
-					items={activityItems}
-					showThinking={props.showThinking}
-				/>
-				<div className="agent-run-stack">
-					{/* 合并本轮所有 assistant 消息为一个气泡 */}
-					{(() => {
-						const textParts: string[] = [];
-						const thinkingParts: string[] = [];
-						const assistantMessages = messageItems.filter(
-							(item): item is MessageItem => item.message.role === "assistant",
-						);
-						if (assistantMessages.length === 0) return null;
-						const firstMsg = assistantMessages[0]!;
-						for (const item of assistantMessages) {
-							const t = item.message.text.trim();
-							if (t) textParts.push(t);
-							if (item.message.thinking?.trim()) thinkingParts.push(item.message.thinking);
-						}
-						if (textParts.length === 0) return null;
-						const merged: ChatMessage = {
-							...firstMsg.message,
-							text: textParts.join("\n\n"),
-							thinking: thinkingParts.join("\n\n") || firstMsg.message.thinking,
-							id: assistantMessages.map((m) => m.message.id).join("|"),
-						};
-						const fileSummary = props.fileSummariesByMessage?.[assistantMessages[0]!.message.id];
-						return (
-							<div className="agent-run-message-stack">
-								<ChatBubble
-									message={merged}
-									onPreviewImage={props.onPreviewImage}
-									onOpenExternal={props.onOpenExternal}
-									onOpenFile={props.onOpenFile}
-									onResendUserMessage={props.onResendUserMessage}
-									showThinking={false}
-									compact
-								/>
-								{fileSummary && fileSummary.length > 0 && (
-									<SessionFileSummary files={fileSummary} onOpenFile={props.onOpenFile} onDiffFile={props.onDiffFile} />
-								)}
-							</div>
-						);
-					})()}
-				</div>
-			</div>
-		</article>
-	);
-});
 
 export function ImagePreviewModal(props: {
 	image: ImageContent;
@@ -1589,183 +1697,6 @@ function renderChipText(text: string, onOpenFile?: (path: string) => void): Reac
 	return nodes;
 }
 
-export const ChatBubble = memo(function ChatBubble(props: {
-	message: ChatMessage;
-	onPreviewImage: (image: ImageContent) => void;
-	showThinking?: boolean;
-	onOpenExternal: (url: string) => void;
-	onOpenFile?: (path: string) => void;
-	onResendUserMessage?: (message: ChatMessage) => void;
-	compact?: boolean;
-}) {
-	const { message } = props;
-	const [expanded, setExpanded] = useState(false);
-	const isUser = message.role === "user";
-	const isTool = message.role === "tool";
-	const isAssistant = message.role === "assistant";
-	const hasThinking =
-		isAssistant &&
-		props.showThinking &&
-		message.thinking &&
-		message.thinking.length > 0;
-	const [thinkingExpanded, setThinkingExpanded] = useState(false);
-	const thinkingPreviewLen = 200;
-	const thinkingNeedsTruncate =
-		(message.thinking?.length ?? 0) > thinkingPreviewLen;
-	const thinkingDisplayText =
-		thinkingExpanded || !thinkingNeedsTruncate
-			? (message.thinking ?? "")
-			: (message.thinking ?? "").slice(0, thinkingPreviewLen) + "...";
-	const label = message.role === "assistant" ? "pi" : message.role;
-	const deliveryBehavior =
-		message.role === "user" ? message.meta?.streamingBehavior : undefined;
-	const deliveryLabel =
-		deliveryBehavior === "steer"
-			? t("app.messageDeliverySteer")
-			: deliveryBehavior === "followUp"
-				? t("app.messageDeliveryFollowUp")
-				: null;
-	const detailText =
-		typeof message.meta?.detailText === "string"
-			? message.meta.detailText
-			: JSON.stringify(message.meta ?? {}, null, 2);
-	// 过滤 ANSI 转义码,pi 终端输出的颜色序列在桌面 UI 中无意义
-	const cleanText = stripThinkingTags(stripAnsi(message.text));
-	const cleanDetail = stripAnsi(detailText);
-	return (
-		<article
-			data-message-id={message.id}
-			className={[
-				isUser ? "chat-message mine" : `chat-message ${message.role}`,
-				props.compact ? "compact-message" : "",
-			]
-				.filter(Boolean)
-				.join(" ")}
-		>
-			<div className="msg-avatar">
-				{isUser ? t("app.userAvatar") : label.slice(0, 1).toUpperCase()}
-			</div>
-			<div className="msg-content">
-				<div className="msg-name">
-					<span>{label}</span>
-					<time>
-						{deliveryLabel && (
-							<span
-								className={`message-delivery-badge ${deliveryBehavior === "followUp" ? "follow-up" : "steer"}`}
-								title={
-									deliveryBehavior === "followUp"
-										? t("app.messageDeliveryFollowUpTitle")
-										: t("app.messageDeliverySteerTitle")
-								}
-							>
-								{deliveryLabel}
-							</span>
-						)}
-						{formatTime(message.timestamp)}
-					</time>
-				</div>
-				<div className={`msg-bubble ${isUser ? "" : "markdown-body"}`}>
-					{/* 思考内容展示:可折叠,默认收起长文本 */}
-					{hasThinking && (
-						<div className="thinking-block">
-							<div
-								className="thinking-header"
-								onClick={() => setThinkingExpanded((v) => !v)}
-							>
-								<Brain size={14} />
-								<span>{t("thinking.title")}</span>
-								<em>{thinkingExpanded ? t("common.collapse") : t("common.expand")}</em>
-							</div>
-							{thinkingExpanded && (
-								<div className="thinking-content">{thinkingDisplayText}</div>
-							)}
-						</div>
-					)}
-					{/* 显示消息中附加的图片 */}
-					{message.images && message.images.length > 0 && (
-						<div className="message-images">
-							{message.images.map((img, index) => (
-								<img
-									key={index}
-									src={`data:${img.mimeType};base64,${img.data}`}
-									alt={t("app.imageAlt", { index: index + 1 })}
-									className="message-image"
-									onClick={() => props.onPreviewImage(img)}
-								/>
-							))}
-						</div>
-					)}
-					{/* 用户消息使用纯文本显示,避免特殊字符被 markdown 解释导致渲染异常 */}
-					{isUser ? (
-						<div className="user-message-text">{renderChipText(cleanText, props.onOpenFile)}</div>
-					) : (
-						<ReactMarkdown
-							remarkPlugins={[remarkGfm]}
-							urlTransform={markdownUrlTransform}
-							components={{
-								pre: CodeBlock,
-								a: (linkProps) => (
-									<MarkdownLink
-										{...linkProps}
-										onOpenExternal={props.onOpenExternal}
-										onOpenFile={props.onOpenFile}
-									/>
-								),
-							}}
-						>
-							{linkifyFilePaths(cleanText)}
-						</ReactMarkdown>
-					)}
-					{expanded && <pre className="tool-detail">{cleanDetail}</pre>}
-				</div>
-				<div className="msg-actions">
-					<button
-						onClick={() =>
-							navigator.clipboard.writeText(
-								expanded && isTool ? cleanDetail : cleanText,
-							)
-						}
-					>
-						{t("common.copy")}
-					</button>
-					{isTool && (
-						<button onClick={() => setExpanded((value) => !value)}>
-							{expanded ? t("common.collapse") : t("common.details")}
-						</button>
-					)}
-					{isUser && (
-						<>
-							<button
-								onClick={() => {
-									const text = message.text;
-									// 编辑只把原消息放回输入框,不自动发送,方便用户二次加工。
-									document
-										.querySelector<HTMLTextAreaElement>(".composer-box textarea")
-										?.focus();
-									// 触发自定义事件让 App 层处理编辑
-									window.dispatchEvent(
-										new CustomEvent("user-message-edit", {
-											detail: { text },
-										}),
-									);
-								}}
-							>
-								{t("common.edit")}
-							</button>
-							<button
-								onClick={() => props.onResendUserMessage?.(message)}
-								title={t("app.resendTitle")}
-							>
-								{t("app.resend")}
-							</button>
-						</>
-					)}
-				</div>
-			</div>
-		</article>
-	);
-});
-
 function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
 	const text = extractText(props.children);
 	return (
@@ -1812,53 +1743,6 @@ function MarkdownLink(
 		}
 	};
 	return <a {...anchorProps} onClick={handleClick} />;
-}
-
-/**
- * 将文本中的文件路径转换为可点击的 Markdown 链接。
- * 只处理 Markdown 链接之外的裸路径，避免把 `[path](file://...)` 二次改写成非法嵌套链接。
- */
-function linkifyFilePaths(text: string): string {
-	const protectedRanges = collectMarkdownLinkRanges(text);
-	// 支持常见文件路径：Windows 盘符路径、Unix 绝对路径、./ 或 ../ 相对路径、src/file.ts 这类项目相对路径。
-	// 排除 Markdown 控制字符和 URL 常见字符，防止匹配到已有链接语法或普通 http(s) 地址。
-	const filePathRegex = /(?:['"`])?(?:(?:[A-Z]:\\|[A-Z]:\/|\.\.?\/|\/)[^\s<>"'`|?*\n\[\]()]+|(?:[a-zA-Z_][a-zA-Z0-9_-]*[\\/])+[^\s<>"'`|?*\n\[\]()]+)\.[a-zA-Z0-9]+(?:['"`])?/g;
-	const replacements: Array<{ start: number; end: number; value: string }> = [];
-
-	for (const match of text.matchAll(filePathRegex)) {
-		const start = match.index ?? 0;
-		const end = start + match[0].length;
-		if (protectedRanges.some((range) => start >= range.start && end <= range.end)) continue;
-
-		let path = match[0].trim();
-		if (/^['"`]/.test(path)) path = path.slice(1);
-		if (/['"`]$/.test(path)) path = path.slice(0, -1);
-		if (!path) continue;
-
-		replacements.push({
-			start,
-			end,
-			value: `[${path}](file://${encodeURIComponent(path)})`,
-		});
-	}
-
-	let result = text;
-	// 从后向前替换，避免前面的替换改变后续匹配下标。
-	for (const item of replacements.reverse()) {
-		result = `${result.slice(0, item.start)}${item.value}${result.slice(item.end)}`;
-	}
-	return result;
-}
-
-/** 收集 Markdown inline link 的范围，用于保护已存在链接不被文件路径自动链接逻辑破坏。 */
-function collectMarkdownLinkRanges(text: string): Array<{ start: number; end: number }> {
-	const ranges: Array<{ start: number; end: number }> = [];
-	const linkRegex = /\[[^\]\n]+\]\([^\)\n]+\)/g;
-	for (const match of text.matchAll(linkRegex)) {
-		const start = match.index ?? 0;
-		ranges.push({ start, end: start + match[0].length });
-	}
-	return ranges;
 }
 
 function extractText(node: ReactNode): string {
@@ -3500,7 +3384,8 @@ export function SettingsModal(props: {
 										value={String(Math.round(props.settings.rpcTimeout / 1000))}
 										description={t("settings.rpcTimeoutDesc")}
 										onChange={(value) => {
-											const seconds = Math.max(30, parseInt(value) || 600);
+											// 防止用户设置过小的超时导致 RPC 调用频繁超时，最低 600 秒
+											const seconds = Math.max(600, parseInt(value) || 600);
 											props.onChange({ rpcTimeout: seconds * 1000 });
 										}}
 									/>

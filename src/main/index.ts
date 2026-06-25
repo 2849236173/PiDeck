@@ -1721,6 +1721,14 @@ app.whenReady().then(async () => {
 		)
 		.catch(() => undefined);
 
+	// 启动后异步检查 RPC 超时时间，如果小于 600 秒则自动修正为 600 秒
+	// 避免用户配置的过小超时（如 30 秒）导致启动或命令执行频繁超时
+	setTimeout(() => {
+		void settingsStore.ensureRpcTimeoutMinimum().catch((error) => {
+			void appLogger.warn("settings", "Failed to ensure rpcTimeout minimum", error);
+		});
+	}, 0);
+
 	// macOS dock 点击或任务栏点击时恢复窗口
 	app.on("activate", () => {
 		if (mainWindow) {

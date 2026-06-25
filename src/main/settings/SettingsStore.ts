@@ -97,6 +97,16 @@ export class SettingsStore {
     window.webContents.send("settings:apply-window", this.get());
   }
 
+  /**
+   * 检查 rpcTimeout 是否小于 600 秒（600000ms），若是则自动提升至 600 秒。
+   * 在应用启动后异步执行，避免用户配置的过小超时导致 RPC 调用频繁超时。
+   */
+  async ensureRpcTimeoutMinimum() {
+    if (this.settings.rpcTimeout < 600_000) {
+      await this.update({ rpcTimeout: 600_000 });
+    }
+  }
+
   private async save() {
     await mkdir(app.getPath("userData"), { recursive: true });
     await writeFile(this.filePath, JSON.stringify(this.settings, null, 2), "utf8");

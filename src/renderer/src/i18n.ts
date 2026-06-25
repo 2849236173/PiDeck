@@ -840,7 +840,7 @@ const zhCN = {
     "关闭当前窗口并重新打开桌面版，适合应用标题栏或底层设置变更。",
   "settings.restartNotice": "标题栏设置保存后需要重启 PiDeck 生效。",
   "settings.rpcTimeout": "RPC 超时时间（秒）",
-  "settings.rpcTimeoutDesc": "Agent 执行命令的最长等待时间，默认 600 秒（10 分钟），最小 30 秒",
+  "settings.rpcTimeoutDesc": "Agent 执行命令的最长等待时间，默认 600 秒（10 分钟），最小 600 秒",
   "settings.sendShortcut.ctrl": "Ctrl/⌘ + Enter 发送，Enter 换行",
   "settings.sendShortcut.enter": "Enter 发送，Ctrl/Shift+Enter 换行",
   "settings.sendShortcut.shift": "Shift + Enter 发送，Enter 换行",
@@ -1810,7 +1810,7 @@ const enUS: Record<TranslationKey, string> = {
   "settings.restartNotice":
     "Title bar changes take effect after restarting PiDeck.",
   "settings.rpcTimeout": "RPC timeout (seconds)",
-  "settings.rpcTimeoutDesc": "Maximum wait time for agent command execution. Default is 600 seconds (10 minutes), minimum is 30 seconds.",
+  "settings.rpcTimeoutDesc": "Maximum wait time for agent command execution. Default is 600 seconds (10 minutes), minimum is 600 seconds.",
   "settings.sendShortcut.ctrl": "Ctrl/⌘ + Enter sends, Enter inserts a newline",
   "settings.sendShortcut.enter":
     "Enter sends, Ctrl/Shift+Enter inserts a newline",

@@ -54,10 +54,8 @@ import { useMessagePagination } from "./hooks/useMessagePagination";
 import { useSessionLoader } from "./hooks/useSessionLoader";
 import { LazyWrapper } from "./hooks/useLazyComponent";
 import {
-  AgentRun,
   AgentContextMenu,
   BranchSelector,
-  ChatBubble,
   CodexImportModal,
   ClaudeImportModal,
   OpenCodeImportModal,
@@ -80,10 +78,13 @@ import {
   SessionStatus,
   SessionFileSummary,
   SettingsModal,
-  ThinkingBubble,
-  ThinkingGroup,
   ThinkingPicker,
-  ToolGroup,
+  TurnRow,
+  UserBubble,
+  AssistantText,
+  ToolGroupCard,
+  ThinkingBlock,
+  ThinkingIndicator,
   applySuggestion,
   buildOutline,
   buildSuggestionItems,
@@ -4099,7 +4100,7 @@ ${goalTextRef.current}
             <div className="message-list">
               {renderedMessages.map((item) =>
                 item.kind === "agent-run" ? (
-                  <AgentRun
+                  <TurnRow
                     key={item.id}
                     run={item}
                     onPreviewImage={setPreviewImage}
@@ -4111,36 +4112,43 @@ ${goalTextRef.current}
                     fileSummariesByMessage={turnFileSummaryByMessage}
                   />
                 ) : item.kind === "tool-group" ? (
-                  <ToolGroup key={item.id} group={item} />
+                  <ToolGroupCard key={item.id} group={item} />
                 ) : item.kind === "thinking-group" ? (
-                  <ThinkingGroup
+                  <ThinkingBlock
                     key={item.id}
-                    group={item}
+                    text={item.text}
+                    endedAt={item.endedAt}
                     showThinking={settings.showThinking}
+                  />
+                ) : item.message.role === "user" ? (
+                  <UserBubble
+                    key={item.message.id}
+                    message={item.message}
+                    onPreviewImage={setPreviewImage}
+                    onOpenFile={openFilePath}
+                    onResendUserMessage={resendUserMessage}
                   />
                 ) : (
                   <Fragment key={item.message.id}>
-                    <ChatBubble
-                      message={item.message}
+                    <AssistantText
+                      text={item.message.text}
+                      images={item.message.images}
                       onPreviewImage={setPreviewImage}
                       onOpenExternal={(url) => api.app.openExternal(url)}
                       onOpenFile={openFilePath}
-                      onResendUserMessage={resendUserMessage}
-                      showThinking={settings.showThinking}
                     />
-                    {item.message.role === "assistant" &&
-                      turnFileSummaryByMessage[item.message.id]?.length > 0 && (
-                        <SessionFileSummary
-                          files={turnFileSummaryByMessage[item.message.id]}
-                          onOpenFile={openFilePath}
-                          onDiffFile={diffFilePath}
-                        />
-                      )}
+                    {turnFileSummaryByMessage[item.message.id]?.length > 0 && (
+                      <SessionFileSummary
+                        files={turnFileSummaryByMessage[item.message.id]}
+                        onOpenFile={openFilePath}
+                        onDiffFile={diffFilePath}
+                      />
+                    )}
                   </Fragment>
                 ),
               )}
               {isAwaitingAssistant && (
-                <ThinkingBubble
+                <ThinkingIndicator
                   thinking={activeThinking}
                   showThinking={settings.showThinking}
                 />

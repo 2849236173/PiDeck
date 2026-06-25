@@ -80,28 +80,40 @@ function overlapsUrl(
 }
 
 /**
- * 将 prompt 字符串解析为 chip 列表。
- * /command：前置须为空白/起始/([，命令名内无空白无 /
- * @path：前置非字母数字（避免 email@host），路径内允许 / 不允许空白与 @
- * 重叠时保留先出现的。
+ * 将 prompt 字符串解析为 chip 列表（展示层，比输入时的 detectTrigger 更严格）。
+ *
+ * 收紧规则（避免任意输入被误识别为引用）：
+ * - 触发符 @ / 必须出现在行首或空白之后，
+ *   这样 "a/b""user@host""hello/world" 等文本中的 / @ 不会被识别为 chip。
+ * - /skill：skill 名只允许字母开头 + 字母数字/连字符（skill 命名规范），
+ *   且 token 后一字符不能是 /（排除 /usr/bin 这类路径）。
+ * - @path：路径内允许 / . _ -，不允许空白与 @。
+ *
+ * 注意：输入时唤出引用菜单的 detectTrigger 仍保留更宽松的前置（允许字母数字前插），
+ * 因为那是交互层；这里只负责把最终文本里真正的引用片段渲染成 chip。
  * URL 中的路径段（如 https://example.com/foo）不会被识别为 chip。
  */
 export function parseRichInputChips(text: string): RichInputChip[] {
 	const chips: RichInputChip[] = [];
 	const urlSpans = findUrlSpans(text);
 
-	const slashRe = /(^|[^:/])(\/[^\s/]+)/g;
+	// /skill：前置行首或空白；slash 命令整体 = 命令名 + 可选的 :参数名（如 /skill:writing-plans、/template:doc）。
+	// 冒号后须字母开头 + 字母数字/连字符，避免匹配 /a:b:c 这种异常文本。
+	// 后一字符若为 /，说明是路径（如 /usr/bin），不当作 skill。
+	const slashRe = /(^|\s)(\/[a-zA-Z][a-zA-Z0-9_-]*(?::[a-zA-Z][a-zA-Z0-9_-]*)?)/g;
 	let m: RegExpExecArray | null;
 	while ((m = slashRe.exec(text)) !== null) {
 		const start = m.index + m[1].length;
 		const end = start + m[2].length;
+		if (text[end] === "/") continue;
 		if (!overlapsUrl(start, end, urlSpans)) {
 			chips.push({ start, end, raw: m[2], kind: "skill", label: m[2].slice(1) });
 		}
 		if (m.index === slashRe.lastIndex) slashRe.lastIndex++;
 	}
 
-	const atRe = /(^|[^:/])(@[^\s@]+)/g;
+	// @path：前置行首或空白；路径内无空白无 @
+	const atRe = /(^|\s)(@[^\s@]+)/g;
 	while ((m = atRe.exec(text)) !== null) {
 		const start = m.index + m[1].length;
 		const end = start + m[2].length;
