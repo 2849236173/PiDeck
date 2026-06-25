@@ -147,7 +147,7 @@ let previewSettings: AppSettings = {
 
 	// 桌面宠物默认关闭
 	petEnabled: false,
-	petId: "wangcai",
+	petId: "clawd",
 	petAlwaysOnTop: true,
 	petScale: 0.8,
 	petPatrolEnabled: true,
@@ -525,8 +525,8 @@ export function createPreviewApi(): PiDesktopApi {
 		pet: {
 			onState: noop,
 			list: async () => [
-				{ id: "wangcai", displayName: "Wangcai", source: "petdex", spritesheetUrl: "" },
-			],
+			{ id: "clawd", displayName: "Clawd", source: "builtin", spritesheetUrl: "" },
+		],
 			setEnabled: async () => undefined,
 			setId: async () => undefined,
 			moveWindow: async () => undefined,
@@ -538,7 +538,7 @@ export function createPreviewApi(): PiDesktopApi {
 			onCaps: noop,
 			testNotify: async () => undefined,
 			tease: async () => undefined,
-			getCurrent: async () => ({ id: "wangcai", displayName: "Wangcai", source: "petdex", spritesheetUrl: "" }),
+			getCurrent: async () => ({ id: "clawd", displayName: "Clawd", source: "builtin", spritesheetUrl: "" }),
 		},
 		terminal: {
 			list: async (agentId) =>
