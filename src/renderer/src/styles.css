@@ -1634,14 +1634,18 @@ body.is-terminal-resizing {
 	min-width: 60px;
 	padding: 0 var(--space-2);
 	font-size: var(--font-size-control);
-	font-weight: 500;
+	font-weight: 600;
 	line-height: var(--line-height-control);
+	color: var(--color-text-secondary);
 }
 .header-action-group .session-combo-label,
 .header-action-group .file-action-trigger > span:first-child {
 	display: inline-flex;
 	align-items: center;
+	font-size: inherit;
+	font-weight: inherit;
 	line-height: var(--line-height-control);
+	color: inherit;
 }
 .header-action-group .session-combo-chevron,
 .header-action-group .file-action-trigger > svg {
@@ -1651,7 +1655,7 @@ body.is-terminal-resizing {
 	width: 12px;
 	height: 12px;
 	margin-left: 0;
-	color: var(--color-text-tertiary);
+	color: var(--color-text-secondary);
 	flex: 0 0 12px;
 }
 .file-action-menu,
