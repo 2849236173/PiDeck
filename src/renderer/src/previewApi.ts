@@ -123,6 +123,7 @@ let previewSettings: AppSettings = {
 	showNativeMenu: false,
 	sendShortcut: "enter-send",
 	theme: "system",
+	lightBackground: "white",
 	language: "system",
 	piEnvironmentChecked: true,
 	closeToTray: true,

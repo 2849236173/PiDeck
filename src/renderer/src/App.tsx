@@ -153,24 +153,48 @@ function countContentLines(value: unknown) {
 function getToolChangedLineCount(toolName: string, args: any) {
   // 会话结束摘要只能使用 renderer 已收到的工具参数,不能重新 diff 工作区;
   // 这里按编辑/写入工具的输入估算"本次触达行数",避免把用户在会话外的改动也计入。
-  if (/edit/i.test(toolName)) {
+  if (/edit|patch/i.test(toolName)) {
     const edits = Array.isArray(args?.edits) ? args.edits : undefined;
     if (edits) {
       return edits.reduce((total: number, edit: any) => {
-        const oldLines = countContentLines(edit?.oldText);
-        const newLines = countContentLines(edit?.newText);
+        const oldLines = countContentLines(edit?.oldText ?? edit?.old_text);
+        const newLines = countContentLines(edit?.newText ?? edit?.new_text);
         return total + Math.max(oldLines, newLines);
       }, 0);
     }
     return Math.max(
-      countContentLines(args?.oldText),
-      countContentLines(args?.newText),
+      countContentLines(args?.oldText ?? args?.old_text),
+      countContentLines(args?.newText ?? args?.new_text),
     );
   }
   if (/write|create/i.test(toolName)) {
-    return countContentLines(args?.content ?? args?.text ?? args?.data);
+    return countContentLines(args?.content ?? args?.text ?? args?.data ?? args?.body);
   }
   return 0;
+}
+
+function getToolFilePath(args: any) {
+  return typeof args?.filePath === "string"
+    ? args.filePath
+    : typeof args?.file_path === "string"
+      ? args.file_path
+      : typeof args?.path === "string"
+        ? args.path
+        : typeof args?.targetPath === "string"
+          ? args.targetPath
+          : typeof args?.target_path === "string"
+            ? args.target_path
+            : typeof args?.outputPath === "string"
+              ? args.outputPath
+              : typeof args?.output_path === "string"
+                ? args.output_path
+                : typeof args?.file === "string"
+                  ? args.file
+                  : typeof args?.fileName === "string"
+                    ? args.fileName
+                    : typeof args?.filename === "string"
+                      ? args.filename
+                      : undefined;
 }
 
 function displayProjectDirectoryName(project: Project) {
@@ -483,6 +507,7 @@ export function App() {
     showNativeMenu: false,
     sendShortcut: "enter-send",
     theme: "system",
+    lightBackground: "white",
     language: "system",
     piEnvironmentChecked: false,
     closeToTray: true,
@@ -730,12 +755,13 @@ export function App() {
             : "light"
           : settings.theme;
       document.documentElement.dataset.theme = resolvedTheme;
+      document.documentElement.dataset.lightBackground = settings.lightBackground;
     };
     applyTheme();
     if (settings.theme !== "system" || !media) return;
     media.addEventListener?.("change", applyTheme);
     return () => media.removeEventListener?.("change", applyTheme);
-  }, [settings.theme]);
+  }, [settings.theme, settings.lightBackground]);
 
   /** 当前会话中 agent 修改过的文件(从 tool 消息 meta 中提取) */
   // 优化:只在消息数量变化时才重新计算,减少不必要的遍历
@@ -749,17 +775,8 @@ export function App() {
       const args: any = msg.meta?.args;
       const status: string = String(msg.meta?.status ?? "done");
       // 只收集文件写入/编辑类的工具调用，作为右侧 Files 与会话结束摘要的统一数据源。
-      if (!toolName || !/write|edit|create/i.test(toolName)) continue;
-      const filePath =
-        typeof args?.filePath === "string"
-          ? args.filePath
-          : typeof args?.path === "string"
-            ? args.path
-            : typeof args?.file === "string"
-              ? args.file
-              : typeof args?.fileName === "string"
-                ? args.fileName
-                : undefined;
+      if (!toolName || !/write|edit|create|patch/i.test(toolName)) continue;
+      const filePath = getToolFilePath(args);
       if (!filePath) continue;
       const previous = byPath.get(filePath);
       // 同一路径再次被修改时移动到 Map 末尾，右侧修改清单才能按"最新修改"展示。
@@ -1841,12 +1858,13 @@ export function App() {
     setDiffViewFile(path);
   }
 
-  function diffFilePath(path: string) {
+  function diffFilePath(path: string, originalContent?: string) {
     setDiffViewMode("diff");
     setDiffViewFile(path);
-    // 从当前 modifiedFiles 中查找是否有缓存的原始内容，传递给差异编辑器作为对比基准。
+    // 会话卡片传入的是工具执行前缓存的原始内容，提交后 Git 工作区可能已清空，
+    // 因此优先使用会话级快照；文件边栏不传该值时仍回退到当前会话累计修改记录。
     const modified = modifiedFiles.find((f) => f.path === path);
-    setDiffViewOriginalContent(modified?.originalContent ?? "");
+    setDiffViewOriginalContent(originalContent ?? modified?.originalContent ?? "");
   }
 
   async function refreshSessionHistory(projectId = sessionsProjectId) {

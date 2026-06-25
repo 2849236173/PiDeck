@@ -8,6 +8,7 @@ const defaultSettings: AppSettings = {
   showNativeMenu: false,
   sendShortcut: "enter-send",
   theme: "system",
+  lightBackground: "white",
   language: "system",
   piEnvironmentChecked: false,
   closeToTray: true,

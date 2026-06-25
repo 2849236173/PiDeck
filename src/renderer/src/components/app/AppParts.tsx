@@ -2,14 +2,20 @@ import {
 	isValidElement,
 	memo,
 	useEffect,
+	useId,
 	useRef,
 	useState,
 	type CSSProperties,
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
 } from "react";
+import { toPng } from "html-to-image";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import rehypeKatex from "rehype-katex";
+import mermaid from "mermaid";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import "katex/dist/katex.min.css";
 import {
 	Check,
 	ChevronDown,
@@ -72,6 +78,127 @@ export type SessionModifiedFile = {
 	/** 工具执行前的文件原始内容，用于历史会话恢复时展示差异对比。 */
 	originalContent?: string;
 };
+
+type DiffFileHandler = (path: string, originalContent?: string) => void;
+
+function countToolContentLines(value: unknown) {
+	if (typeof value !== "string" || !value) return 0;
+	return value.split(/\r\n|\r|\n/).length;
+}
+
+const FILE_PATH_KEYS = [
+	"filePath",
+	"file_path",
+	"path",
+	"targetPath",
+	"target_path",
+	"outputPath",
+	"output_path",
+	"file",
+	"fileName",
+	"filename",
+] as const;
+
+function getPathField(input: unknown) {
+	if (!input || typeof input !== "object") return undefined;
+	const record = input as Record<string, unknown>;
+	for (const key of FILE_PATH_KEYS) {
+		const value = record[key];
+		if (typeof value === "string" && value.trim()) return value;
+	}
+	return undefined;
+}
+
+function collectPathFields(input: unknown) {
+	const paths = new Set<string>();
+	const primary = getPathField(input);
+	if (primary) paths.add(primary);
+	const record = input && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
+	const nestedLists = [record?.edits, record?.files, record?.paths, record?.items];
+	for (const list of nestedLists) {
+		if (!Array.isArray(list)) continue;
+		for (const item of list) {
+			if (typeof item === "string" && item.trim()) paths.add(item);
+			const nestedPath = getPathField(item);
+			if (nestedPath) paths.add(nestedPath);
+		}
+	}
+	return [...paths];
+}
+
+function editChangedLineCount(edit: any) {
+	const oldLines = countToolContentLines(edit?.oldText ?? edit?.old_text);
+	const newLines = countToolContentLines(edit?.newText ?? edit?.new_text);
+	return Math.max(oldLines, newLines);
+}
+
+function getToolChangedLineCountForPath(toolName: string, args: any, path: string) {
+	// 会话卡片只基于当前轮工具参数估算触达行数，不读取 Git 工作区，
+	// 避免提交后工作区清空导致历史会话修改摘要消失。
+	if (/edit|patch/i.test(toolName)) {
+		const edits = Array.isArray(args?.edits) ? args.edits : undefined;
+		if (edits) {
+			const pathScopedEdits = edits.filter((edit: any) => {
+				const editPath = getPathField(edit);
+				return !editPath || editPath === path;
+			});
+			return pathScopedEdits.reduce(
+				(total: number, edit: any) => total + editChangedLineCount(edit),
+				0,
+			);
+		}
+		return Math.max(
+			countToolContentLines(args?.oldText ?? args?.old_text),
+			countToolContentLines(args?.newText ?? args?.new_text),
+		);
+	}
+	if (/write|create/i.test(toolName)) {
+		return countToolContentLines(args?.content ?? args?.text ?? args?.data ?? args?.body);
+	}
+	return 0;
+}
+
+function isFileMutationTool(toolName: string) {
+	return /write|edit|create|patch/i.test(toolName);
+}
+
+function mergeModifiedFiles(
+	base: SessionModifiedFile[] | undefined,
+	fallback: SessionModifiedFile[],
+) {
+	const byPath = new Map<string, SessionModifiedFile>();
+	for (const file of fallback) byPath.set(file.path, file);
+	// 固化摘要通常包含运行结束时的准确累计结果；放到后面覆盖兜底结果。
+	for (const file of base ?? []) byPath.set(file.path, file);
+	return Array.from(byPath.values());
+}
+
+function collectModifiedFilesFromToolMessages(messages: ChatMessage[]) {
+	const byPath = new Map<string, SessionModifiedFile>();
+	for (const message of messages) {
+		const toolName = message.meta?.toolName;
+		if (typeof toolName !== "string" || !isFileMutationTool(toolName)) continue;
+		const args = message.meta?.args;
+		const filePaths = collectPathFields(args);
+		for (const filePath of filePaths) {
+			const previous = byPath.get(filePath);
+			if (previous) byPath.delete(filePath);
+			byPath.set(filePath, {
+				path: filePath,
+				toolName,
+				status: String(message.meta?.status ?? "done"),
+				changedLines:
+					(previous?.changedLines ?? 0) +
+					getToolChangedLineCountForPath(toolName, args, filePath),
+				originalContent:
+					previous?.originalContent ??
+					(message.meta?.originalContent as string | undefined) ??
+					"",
+			});
+		}
+	}
+	return Array.from(byPath.values());
+}
 
 export function EnvironmentDialog(props: {
 	status: PiInstallStatus | null;
@@ -774,6 +901,77 @@ export type AgentRunItem = {
 
 export type RenderMessage = MessageItem | ToolGroupItem | ThinkingGroupItem | AgentRunItem;
 
+async function copyElementAsPng(element: HTMLElement) {
+	// 截图复制依赖浏览器 ClipboardItem PNG 支持；失败时由调用方提示/回退，不影响文本复制。
+	const dataUrl = await toPng(element, {
+		cacheBust: true,
+		pixelRatio: Math.min(2, window.devicePixelRatio || 1),
+		backgroundColor: getComputedStyle(document.documentElement).getPropertyValue("--color-bg-panel") || undefined,
+		filter: (node) =>
+			!(node instanceof HTMLElement) ||
+			(!node.classList.contains("turn-row-actions") &&
+				!node.classList.contains("user-turn-actions") &&
+				!node.classList.contains("copy-menu-popover")),
+	});
+	const blob = await (await fetch(dataUrl)).blob();
+	await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+}
+
+function CopyMenu(props: {
+	text: string;
+	markdown: string;
+	targetRef: React.RefObject<HTMLElement | null>;
+	className?: string;
+}) {
+	const [open, setOpen] = useState(false);
+	const [copied, setCopied] = useState<string | null>(null);
+	const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
+	const triggerRef = useRef<HTMLButtonElement | null>(null);
+	const copy = async (kind: "text" | "markdown" | "image") => {
+		try {
+			if (kind === "text") await navigator.clipboard.writeText(props.text);
+			if (kind === "markdown") await navigator.clipboard.writeText(props.markdown);
+			if (kind === "image" && props.targetRef.current) await copyElementAsPng(props.targetRef.current);
+			setCopied(kind);
+			setOpen(false);
+			window.setTimeout(() => setCopied(null), 1800);
+		} catch {
+			setCopied(null);
+		}
+	};
+	const toggleOpen = () => {
+		const rect = triggerRef.current?.getBoundingClientRect();
+		if (rect) {
+			setMenuStyle({
+				position: "fixed",
+				top: rect.bottom + 4,
+				left: Math.min(window.innerWidth - 156, Math.max(8, rect.right - 148)),
+			});
+		}
+		setOpen((value) => !value);
+	};
+	return (
+		<div className={`copy-menu ${props.className ?? ""}`}>
+			<button
+				ref={triggerRef}
+				className="copy-menu-trigger"
+				type="button"
+				onClick={toggleOpen}
+				aria-expanded={open}
+			>
+				{copied ? `${t("common.copy")} ✓` : t("common.copy")}
+			</button>
+			{open && (
+				<div className="copy-menu-popover" style={menuStyle}>
+					<button type="button" onClick={() => void copy("text")}>{t("copy.asText")}</button>
+					<button type="button" onClick={() => void copy("markdown")}>{t("copy.asMarkdown")}</button>
+					<button type="button" onClick={() => void copy("image")}>{t("copy.asImage")}</button>
+				</div>
+			)}
+		</div>
+	);
+}
+
 export function groupToolMessages(messages: ChatMessage[]): RenderMessage[] {
 	const result: RenderMessage[] = [];
 	let currentTools: ChatMessage[] = [];
@@ -1095,75 +1293,17 @@ export const ToolCard = memo(function ToolCard(props: {
 	);
 });
 
-/** 工具组卡片：一轮里多个工具调用聚合，收起时显示数量+chip 条，展开后列出每个 ToolCard。
- *  避免工具多时刷屏，同时保留逐个工具的详情查看能力。 */
+/** 工具组直接平铺为工具列表；每个 ToolCard 自己默认折叠，避免外层再占一行。 */
 export const ToolGroupCard = memo(function ToolGroupCard(props: {
 	group: ToolGroupItem;
 }) {
-	const [expanded, setExpanded] = useState(false);
-	const messages = props.group.messages;
-	// 组内任一工具仍在运行即视为整组进行中
-	const running = messages.some((m) => getToolStatus(m) === "running");
-	const hasError = messages.some(
-		(m) => getToolStatus(m) === "error" || m.meta?.isError === true,
-	);
-	const tone = running ? "running" : hasError ? "error" : "ok";
-	const first = messages[0]?.timestamp ?? 0;
-	const last = messages[messages.length - 1]?.timestamp ?? 0;
-	const duration = last > first ? last - first : 0;
-	const showDuration = !running && duration > 100;
-	const visibleChips = messages.slice(0, 6);
-	const hiddenCount = messages.length - visibleChips.length;
 	return (
-		<section className={`tool-group-card tone-${tone}`} data-message-id={props.group.id}>
-			<button
-				className="tool-group-card-trigger"
-				onClick={() => setExpanded((v) => !v)}
-				aria-expanded={expanded}
-			>
-				<span className="tool-group-card-dot" />
-				<span className="tool-group-card-title">
-					{running ? t("tool.running") : t("tool.done")}
-				</span>
-				<strong>
-					{messages.length}
-					{t("tool.countSuffix")}
-				</strong>
-				{showDuration && (
-					<span className="tool-group-card-duration">{formatDuration(duration)}</span>
-				)}
-				<em>{expanded ? t("common.collapse") : t("common.details")}</em>
-				<ChevronDown
-					size={14}
-					className={`tool-group-card-chevron${expanded ? " open" : ""}`}
-				/>
-			</button>
-			{!expanded && (
-				<div className="tool-group-card-strip">
-					{visibleChips.map((m) => {
-						// skill read 在收起状态的 chip 也显示为 skill:name，便于一眼看到模型调用了哪些 skill
-						const sn = getReadSkillName(m);
-						return (
-							<span
-								key={m.id}
-								className={`tool-group-card-chip${sn ? " skill" : ""}`}
-							>
-								{sn ? `skill:${sn}` : getToolName(m)}
-							</span>
-						);
-					})}
-					{hiddenCount > 0 && (
-						<span className="tool-group-card-chip muted">+{hiddenCount}</span>
-					)}
-				</div>
-			)}
-			{expanded && (
-				<div className="tool-group-card-list">
-					{messages.map((m) => (
-						<ToolCard key={m.id} message={m} defaultOpen />
-					))}
-				</div>
-			)}
+		<section className="tool-group-card flat" data-message-id={props.group.id}>
+			<div className="tool-group-card-list">
+				{props.group.messages.map((message) => (
+					<ToolCard key={message.id} message={message} />
+				))}
+			</div>
 		</section>
 	);
 });
@@ -1254,10 +1394,12 @@ export function AssistantText(props: {
 				</div>
 			)}
 			<ReactMarkdown
-				remarkPlugins={[remarkGfm, remarkLinkifyPaths]}
+				remarkPlugins={[remarkGfm, remarkMath, remarkLinkifyPaths]}
+				rehypePlugins={[rehypeKatex]}
 				urlTransform={markdownUrlTransform}
 				components={{
 					pre: CodeBlock,
+					span: MathSpan,
 					a: (linkProps) => (
 						<MarkdownLink
 							{...linkProps}
@@ -1281,7 +1423,7 @@ export const TurnRow = memo(function TurnRow(props: {
 	showThinking?: boolean;
 	onOpenExternal: (url: string) => void;
 	onOpenFile?: (path: string) => void;
-	onDiffFile?: (path: string) => void;
+	onDiffFile?: DiffFileHandler;
 	onResendUserMessage?: (message: ChatMessage) => void;
 	fileSummariesByMessage?: Record<string, SessionModifiedFile[]>;
 }) {
@@ -1316,17 +1458,18 @@ export const TurnRow = memo(function TurnRow(props: {
 	const toolGroups = run.items.filter(
 		(item): item is ToolGroupItem => item.kind === "tool-group",
 	);
-	// 文件摘要关联到本轮第一条 assistant 消息
-	const fileSummary =
-		props.fileSummariesByMessage?.[assistantMessages[0]?.message.id];
+	// 优先使用运行结束时固化到 assistant 消息的摘要；若本轮没有 assistant 文本或历史 id 对不上，
+	// 则直接从本轮 tool 消息兜底提取，保证纯工具调用（如 write）也能在卡片里展示。
+	const toolMessages = run.items.flatMap((item) =>
+		item.kind === "tool-group" ? item.messages : [],
+	);
+	const fallbackFileSummary = collectModifiedFilesFromToolMessages(toolMessages);
+	const fileSummary = mergeModifiedFiles(
+		props.fileSummariesByMessage?.[assistantMessages[0]?.message.id],
+		fallbackFileSummary,
+	);
 
-	const [copied, setCopied] = useState(false);
-	const handleCopy = () => {
-		if (!mergedText) return;
-		navigator.clipboard.writeText(mergedText);
-		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
-	};
+	const rowRef = useRef<HTMLElement | null>(null);
 
 	// 本轮没有任何可渲染内容时不输出空容器
 	const hasContent =
@@ -1338,7 +1481,7 @@ export const TurnRow = memo(function TurnRow(props: {
 	if (!hasContent) return null;
 
 	return (
-		<article className="turn-row" data-message-id={run.id}>
+		<article ref={rowRef} className="turn-row" data-message-id={run.id}>
 			<div className="turn-row-rail" aria-hidden="true" />
 			<div className="turn-row-body">
 				<div className="turn-row-meta">
@@ -1385,13 +1528,7 @@ export const TurnRow = memo(function TurnRow(props: {
 				{/* 操作栏：hover/focus 显隐，复制整轮回答 */}
 				{mergedText && (
 					<div className="turn-row-actions">
-						<button
-							className="turn-row-action-btn"
-							onClick={handleCopy}
-							aria-label={t("common.copy")}
-						>
-							{copied ? `${t("common.copy")} ✓` : t("common.copy")}
-						</button>
+						<CopyMenu text={mergedText} markdown={mergedText} targetRef={rowRef} />
 					</div>
 				)}
 				{/* 本轮修改文件摘要 */}
@@ -1432,7 +1569,7 @@ export const UserBubble = memo(function UserBubble(props: {
 	onResendUserMessage?: (message: ChatMessage) => void;
 }) {
 	const { message } = props;
-	const [copied, setCopied] = useState(false);
+	const rowRef = useRef<HTMLElement | null>(null);
 	// 提取 pi 展开后的 <skill> 块：渲染为 skill 徽标，并从正文里剥除 XML
 	const { skills, text: bodyText } = extractSkillBlocks(stripAnsi(message.text));
 	const cleanText = bodyText;
@@ -1447,11 +1584,6 @@ export const UserBubble = memo(function UserBubble(props: {
 			: deliveryBehavior === "followUp"
 				? t("app.messageDeliveryFollowUp")
 				: null;
-	const handleCopy = () => {
-		navigator.clipboard.writeText(cleanText);
-		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
-	};
 	const handleEdit = () => {
 		// 编辑只把原消息放回输入框，不自动发送，方便用户二次加工
 		document.querySelector<HTMLTextAreaElement>(".composer-box textarea")?.focus();
@@ -1460,7 +1592,7 @@ export const UserBubble = memo(function UserBubble(props: {
 		);
 	};
 	return (
-		<article className="user-turn" data-message-id={message.id}>
+		<article ref={rowRef} className="user-turn" data-message-id={message.id}>
 			{skills.length > 0 && (
 				<div className="user-turn-skills">
 					{skills.map((name) => (
@@ -1509,9 +1641,7 @@ export const UserBubble = memo(function UserBubble(props: {
 				<time>{formatTime(message.timestamp)}</time>
 			</div>
 			<div className="user-turn-actions">
-				<button className="user-turn-action-btn" onClick={handleCopy}>
-					{copied ? `${t("common.copy")} ✓` : t("common.copy")}
-				</button>
+				<CopyMenu text={cleanText} markdown={message.text} targetRef={rowRef} />
 				<button className="user-turn-action-btn" onClick={handleEdit}>
 					{t("common.edit")}
 				</button>
@@ -1697,8 +1827,34 @@ function renderChipText(text: string, onOpenFile?: (path: string) => void): Reac
 	return nodes;
 }
 
+function MathSpan(props: React.HTMLAttributes<HTMLSpanElement>) {
+	const { className, children, ...spanProps } = props;
+	const ref = useRef<HTMLSpanElement | null>(null);
+	const isDisplayMath = /\bkatex-display\b/.test(className ?? "");
+	if (!isDisplayMath) return <span className={className} {...spanProps}>{children}</span>;
+	const copyMath = () => {
+		const annotation = ref.current?.querySelector('annotation[encoding="application/x-tex"]');
+		const source = annotation?.textContent || extractText(children);
+		void navigator.clipboard.writeText(`$$\n${source}\n$$`);
+	};
+	return (
+		<span className="math-copy-wrap">
+			<span ref={ref} className={className} {...spanProps}>{children}</span>
+			<button className="math-copy-btn" type="button" onClick={copyMath}>{t("common.copy")}</button>
+		</span>
+	);
+}
+
 function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
-	const text = extractText(props.children);
+	const child = Array.isArray(props.children) ? props.children[0] : props.children;
+	const codeProps = isValidElement(child)
+		? (child.props as { className?: string; children?: ReactNode })
+		: undefined;
+	const languageClass = codeProps?.className ?? "";
+	const text = extractText(codeProps?.children ?? props.children);
+	if (/\blanguage-mermaid\b/i.test(languageClass)) {
+		return <MermaidDiagram chart={text} />;
+	}
 	return (
 		<div className="code-block-wrap">
 			<button
@@ -1708,6 +1864,91 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
 				{t("code.copy")}
 			</button>
 			<pre {...props}>{props.children}</pre>
+		</div>
+	);
+}
+
+function normalizeMermaidChart(chart: string) {
+	// Mermaid flowchart 的方括号节点 label 未加引号时，`foo(bar)` 里的括号会被解析成形状语法。
+	// 模型常输出 `A[api.call(arg)]` 这种写法，这里仅把含括号的普通方括号 label 自动转成 quoted label。
+	return chart.replace(
+		/(\b[A-Za-z][\w-]*\s*)\[([^\]\n"]*[()][^\]\n"]*)\]/g,
+		(_match, prefix: string, label: string) =>
+			`${prefix}["${label.replace(/"/g, "\\\"")}"]`,
+	);
+}
+
+function MermaidDiagram(props: { chart: string }) {
+	const reactId = useId();
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [zoom, setZoom] = useState(1);
+
+	useEffect(() => {
+		let disposed = false;
+		const chart = normalizeMermaidChart(props.chart);
+		const renderId = `pi-mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+		// Mermaid 图由模型输出生成，使用 strict 安全级别并禁用 startOnLoad，
+		// 避免库扫描整个页面或执行不受控的链接/脚本行为。
+		mermaid.initialize({
+			startOnLoad: false,
+			securityLevel: "strict",
+			theme: document.documentElement.dataset.theme === "dark" ? "dark" : "default",
+		});
+		mermaid
+			.render(renderId, chart)
+			.then(({ svg }) => {
+				if (disposed || !containerRef.current) return;
+				containerRef.current.innerHTML = svg;
+				setError(null);
+			})
+			.catch((err: unknown) => {
+				if (disposed) return;
+				setError(err instanceof Error ? err.message : String(err));
+			});
+		return () => {
+			disposed = true;
+		};
+	}, [props.chart, reactId]);
+
+	return (
+		<div className="mermaid-block">
+			{error ? (
+				<MermaidMarkdownFallback chart={props.chart} error={error} />
+			) : (
+				<>
+					<div className="mermaid-toolbar" aria-label="Mermaid diagram controls">
+						<button type="button" onClick={() => navigator.clipboard.writeText(`\`\`\`mermaid\n${props.chart}\n\`\`\``)}>{t("common.copy")}</button>
+						<button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - 0.1))}>−</button>
+						<span>{Math.round(zoom * 100)}%</span>
+						<button type="button" onClick={() => setZoom((value) => Math.min(2.5, value + 0.1))}>＋</button>
+						<button type="button" onClick={() => setZoom(1)}>100%</button>
+					</div>
+					<div className="mermaid-viewport">
+						<div
+							ref={containerRef}
+							className="mermaid-diagram"
+							style={{ transform: `scale(${zoom})`, "--mermaid-zoom": zoom } as CSSProperties}
+						/>
+					</div>
+				</>
+			)}
+		</div>
+	);
+}
+
+function MermaidMarkdownFallback(props: { chart: string; error: string }) {
+	const markdown = `\`\`\`mermaid\n${props.chart}\n\`\`\``;
+	return (
+		<div className="code-block-wrap mermaid-fallback">
+			<button
+				className="code-copy"
+				onClick={() => navigator.clipboard.writeText(markdown)}
+			>
+				{t("code.copy")}
+			</button>
+			<pre>{markdown}</pre>
+			<small className="mermaid-error-message">Mermaid render failed: {props.error}</small>
 		</div>
 	);
 }
@@ -2079,7 +2320,7 @@ export function DrawerContent(props: {
 	onCopySession: (session: SessionSummary) => void | Promise<void>;
 	onExportSession: (session: SessionSummary) => void | Promise<void>;
 	onDeleteSession: (session: SessionSummary) => void | Promise<void>;
-	onDiffFile?: (path: string) => void;
+	onDiffFile?: DiffFileHandler;
 	onOpenFile?: (path: string) => void;
 	onViewFile?: (path: string) => void;
 }) {
@@ -2157,13 +2398,13 @@ const MODIFIED_FILES_PREVIEW_LIMIT = 5;
 
 function FilesPanel(props: {
 	files: FileTreeNode[];
-	/** 当前会话中 agent 修改过的文件 */
+	/** Git 工作区中对比 HEAD 有变更的文件；会话卡片的修改摘要不使用该数据源。 */
 	modifiedFiles: SessionModifiedFile[];
 	expandedDirs: Set<string>;
 	onToggleDirectory: (path: string) => void;
 	onFileContextMenu: (node: FileTreeNode, x: number, y: number) => void;
 	onRefreshFiles: () => void;
-	onDiffFile?: (path: string) => void;
+	onDiffFile?: DiffFileHandler;
 	onOpenFile?: (path: string) => void;
 	onViewFile?: (path: string) => void;
 }) {
@@ -2186,7 +2427,10 @@ function FilesPanel(props: {
 			</div>
 			{props.modifiedFiles.length > 0 && (
 				<div className="modified-files-section">
-					<div className="modified-files-header">{t("drawer.gitChangedFiles")}</div>
+					<div className="modified-files-header">
+						<span>{t("drawer.gitChangedFiles")}</span>
+						<small>{t("drawer.gitChangedFilesDesc")}</small>
+					</div>
 					{visibleModifiedFiles.map((file) => {
 						const fileName = file.path.split(/[/\\]/).pop() ?? file.path;
 						const isRunning = file.status === "running";
@@ -2264,7 +2508,7 @@ function FilesPanel(props: {
 export function SessionFileSummary(props: {
 	files: SessionModifiedFile[];
 	onOpenFile?: (path: string) => void;
-	onDiffFile?: (path: string) => void;
+	onDiffFile?: DiffFileHandler;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	const totalLines = props.files.reduce(
@@ -2293,7 +2537,7 @@ export function SessionFileSummary(props: {
 								className="session-file-summary-row"
 								type="button"
 								title={file.path}
-								onClick={() => props.onDiffFile?.(file.path)}
+								onClick={() => props.onDiffFile?.(file.path, file.originalContent)}
 							>
 								<span className="session-file-summary-name">{fileName}</span>
 								<span
@@ -3257,6 +3501,13 @@ export function SettingsModal(props: {
 		{ value: "light", label: t("settings.themeLight") },
 		{ value: "dark", label: t("settings.themeDark") },
 	];
+	const lightBackgroundOptions = [
+		{ value: "white", label: t("settings.lightBackgroundWhite") },
+		{ value: "warm", label: t("settings.lightBackgroundWarm") },
+		{ value: "paper", label: t("settings.lightBackgroundPaper") },
+		{ value: "blue", label: t("settings.lightBackgroundBlue") },
+		{ value: "green", label: t("settings.lightBackgroundGreen") },
+	];
 	const languageOptions = [
 		{ value: "system", label: t("settings.languageSystem") },
 		{ value: "zh-CN", label: t("settings.languageZh") },
@@ -3272,6 +3523,7 @@ export function SettingsModal(props: {
 		{ value: "external", label: t("settings.linkOpenMode.external") },
 		{ value: "internal", label: t("settings.linkOpenMode.internal") },
 	];
+	const lightBackgroundDisabled = props.settings.theme === "dark";
 
 	return (
 		<div className="modal-backdrop">
@@ -3313,6 +3565,23 @@ export function SettingsModal(props: {
 										onChange={(value) =>
 											props.onChange({
 												theme: value as AppSettings["theme"],
+											})
+										}
+									/>
+									<SelectField
+										className="setting-field"
+										label={t("settings.lightBackground")}
+										description={
+											lightBackgroundDisabled
+												? t("settings.lightBackgroundDisabledDesc")
+												: t("settings.lightBackgroundDesc")
+										}
+										disabled={lightBackgroundDisabled}
+										value={props.settings.lightBackground}
+										options={lightBackgroundOptions}
+										onChange={(value) =>
+											props.onChange({
+												lightBackground: value as AppSettings["lightBackground"],
 											})
 										}
 									/>
