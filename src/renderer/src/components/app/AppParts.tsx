@@ -12,10 +12,17 @@ import {
 import { toPng } from "html-to-image";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import rehypeKatex from "rehype-katex";
-import mermaid from "mermaid";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
+
+// Mermaid 库体积数 MB，仅在真正出现 mermaid 代码块时才动态加载，
+// 避免随渲染进程常驻、放大内存占用并在流式期间抢占主线程。
+let mermaidModulePromise: Promise<typeof import("mermaid")> | null = null;
+function loadMermaid() {
+	if (!mermaidModulePromise) mermaidModulePromise = import("mermaid");
+	return mermaidModulePromise;
+}
 import {
 	Check,
 	ChevronDown,
@@ -69,6 +76,8 @@ import type {
 	SessionSummary,
 } from "../../../../shared/types";
 import { parseRichInputChips, type RichInputChip } from "./RichInput";
+/** 复用 petdex 标准网格规格，在主设置面板里为宠物选择器渲染单格动画预览 */
+import { GRID_COLS, CELL_W, CELL_H, MODE_ROW, MODE_FRAMES } from "../../pet/PetSpriteSheet";
 
 export type DrawerPanel = "files" | "sessions";
 
@@ -1392,53 +1401,161 @@ export function ThinkingIndicator(props: {
 	);
 }
 
-/** 助手正文：扁平 markdown 渲染，无气泡包裹，全宽排版，支持内嵌图片。
- *  路径链接化用 remark 插件在 mdast 层处理（见底部 remarkLinkifyPaths），不再前置改写原始字符串。 */
-export function AssistantText(props: {
-	text: string;
-	images?: ImageContent[];
-	onPreviewImage: (image: ImageContent) => void;
-	onOpenExternal: (url: string) => void;
-	onOpenFile?: (path: string) => void;
+/** 宠物选择预览：给定宠物清单项，用 <canvas> 解码其 spritesheet 并循环播放
+ *  对应 mode 行（默认 idle）的网格帧，让用户在选择宠物时即时看到动画效果，
+ *  不必切换真实宠物窗。失败时降级为空占位，不阻塞设置面板。 */
+function PetChooserPreview(props: {
+	pet?: PetManifest;
+	mode?: string;
 }) {
-	// 统一在此处清理 ANSI 转义码与 <thinking> 标签，调用方可直接传原始消息文本
-	const cleanText = stripThinkingTags(stripAnsi(props.text));
+	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+	const imgRef = useRef<HTMLImageElement | null>(null);
+	const rafRef = useRef<number | null>(null);
+
+	useEffect(() => {
+		const pet = props.pet;
+		const canvas = canvasRef.current;
+		if (!pet || !pet.spritesheetUrl || !canvas) {
+			const ctx = canvas!.getContext("2d");
+			ctx?.clearRect(0, 0, canvas!.width, canvas!.height);
+			return;
+		}
+
+		// 复用 petdex 标准网格规格（8 列 × 9 行，单格 192×208）
+		const mode = props.mode && props.mode !== "__auto" ? props.mode : "idle";
+		const row = MODE_ROW[mode] ?? 0;
+		const frameCount = MODE_FRAMES[mode] ?? 6;
+		const cols = GRID_COLS;
+		const cellW = CELL_W;
+		const cellH = CELL_H;
+
+		// 解码 spritesheet；成功后用 rAF 按帧定时绘制单格，避免每帧重新解码。
+		const img = new Image();
+		img.src = pet.spritesheetUrl;
+		let disposed = false;
+		const start = () => {
+			if (disposed) return;
+			imgRef.current = img;
+			let frame = 0;
+			let last = performance.now();
+			const FPS = 8;
+			let acc = 0;
+			const tick = (now: number) => {
+				rafRef.current = requestAnimationFrame(tick);
+				acc += now - last;
+				last = now;
+				if (acc < 1000 / FPS) return;
+				acc = 0;
+				if (frameCount <= 0) return;
+				frame = (frame + 1) % frameCount;
+				const ctx = canvas.getContext("2d");
+				if (!ctx) return;
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+				// 仅绘制当前帧对应的单格，按 canvas 尺寸等比缩放，避免拉伸出框。
+				ctx.drawImage(img, frame * cellW, row * cellH, cellW, cellH, 0, 0, canvas.width, canvas.height);
+			};
+			rafRef.current = requestAnimationFrame(tick);
+		};
+		img.decode().then(start).catch(() => undefined);
+
+		return () => {
+			disposed = true;
+			if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+			rafRef.current = null;
+			imgRef.current = null;
+		};
+	}, [props.pet, props.mode]);
+
 	return (
-		<div className="assistant-text markdown-body">
-			{props.images && props.images.length > 0 && (
-				<div className="message-images">
-					{props.images.map((img, index) => (
-						<img
-							key={index}
-							src={`data:${img.mimeType};base64,${img.data}`}
-							alt={t("app.imageAlt", { index: index + 1 })}
-							className="message-image"
-							onClick={() => props.onPreviewImage(img)}
-						/>
-					))}
-				</div>
-			)}
-			<ReactMarkdown
-				remarkPlugins={[remarkGfm, remarkMath, remarkLinkifyPaths]}
-				rehypePlugins={[rehypeKatex]}
-				urlTransform={markdownUrlTransform}
-				components={{
-					pre: CodeBlock,
-					span: MathSpan,
-					a: (linkProps) => (
-						<MarkdownLink
-							{...linkProps}
-							onOpenExternal={props.onOpenExternal}
-							onOpenFile={props.onOpenFile}
-						/>
-					),
-				}}
-			>
-				{cleanText}
-			</ReactMarkdown>
+		<div className="pet-chooser-preview">
+			<canvas ref={canvasRef} width={CELL_W} height={CELL_H} aria-hidden="true" />
 		</div>
 	);
 }
+
+/** 助手正文：扁平 markdown 渲染，无气泡包裹，全宽排版，支持内嵌图片。
+ *  路径链接化用 remark 插件在 mdast 层处理（见底部 remarkLinkifyPaths），不再前置改写原始字符串。 */
+/** 流式输出期间的轻量代码块：不加载 mermaid、不跑数学/语法高亮，只展示原始文本，
+ *  避免未闭合的 ```mermaid 围栏触发 mermaid.initialize/render 挤占主线程。 */
+function StreamingCodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
+	const child = Array.isArray(props.children) ? props.children[0] : props.children;
+	const codeProps = isValidElement(child)
+		? (child.props as { className?: string; children?: ReactNode })
+		: undefined;
+	const text = extractText(codeProps?.children ?? props.children);
+	return (
+		<div className="code-block-wrap">
+			<button className="code-copy" onClick={() => navigator.clipboard.writeText(text)}>
+				{t("code.copy")}
+			</button>
+			<pre {...props}>{props.children}</pre>
+		</div>
+	);
+}
+
+export const AssistantText = memo(
+	function AssistantText(props: {
+		text: string;
+		images?: ImageContent[];
+		onPreviewImage: (image: ImageContent) => void;
+		onOpenExternal: (url: string) => void;
+		onOpenFile?: (path: string) => void;
+		/** 当前消息是否正在流式追加。为 true 时走轻量渲染路径，跳过 KaTeX 数学解析与
+		 *  mermaid 图渲染，避免每个 token 都对不断增长的全量正文调用重型插件导致主线程卡死。 */
+		isStreaming?: boolean;
+	}) {
+		// 统一在此处清理 ANSI 转义码与 <thinking> 标签，调用方可直接传原始消息文本
+		const cleanText = stripThinkingTags(stripAnsi(props.text));
+		// 流式期间用轻量管线（仅 GFM + 路径链接化），回答结束后切回含数学/图表的完整渲染。
+		const streaming = Boolean(props.isStreaming);
+		return (
+			<div className="assistant-text markdown-body">
+				{props.images && props.images.length > 0 && (
+					<div className="message-images">
+						{props.images.map((img, index) => (
+							<img
+								key={index}
+								src={`data:${img.mimeType};base64,${img.data}`}
+								alt={t("app.imageAlt", { index: index + 1 })}
+								className="message-image"
+								onClick={() => props.onPreviewImage(img)}
+							/>
+						))}
+					</div>
+				)}
+				<ReactMarkdown
+					remarkPlugins={
+						streaming
+							? [remarkGfm, remarkLinkifyPaths]
+							: [remarkGfm, remarkMath, remarkLinkifyPaths]
+					}
+					rehypePlugins={streaming ? [] : [rehypeKatex]}
+					urlTransform={markdownUrlTransform}
+					components={{
+						pre: streaming ? StreamingCodeBlock : CodeBlock,
+						span: MathSpan,
+						a: (linkProps) => (
+							<MarkdownLink
+								{...linkProps}
+								onOpenExternal={props.onOpenExternal}
+								onOpenFile={props.onOpenFile}
+							/>
+						),
+					}}
+				>
+					{cleanText}
+				</ReactMarkdown>
+			</div>
+		);
+	},
+	// 自定义比较：文本、流式标记、图片一致时跳过重渲染。回调函数（onPreviewImage/onOpenExternal/
+	// onOpenFile）行为稳定（读 ref 或 setState），不参与比较，避免 App 每次渲染新建内联箭头
+	// 函数导致 memo 失效——历史消息在流式期间因此不再重复解析 Markdown，从根上消除卡顿。
+	(prev, next) =>
+		prev.text === next.text &&
+		prev.isStreaming === next.isStreaming &&
+		prev.images === next.images,
+);
 
 /** 一轮 AI 回答的扁平容器：左侧竖线聚合，内含思考/工具/正文/文件摘要。
  *  替代旧的 AgentRun + ChatBubble 助手分支 + RunActivity 三层结构。 */
@@ -1446,6 +1563,7 @@ export const TurnRow = memo(function TurnRow(props: {
 	run: AgentRunItem;
 	onPreviewImage: (image: ImageContent) => void;
 	showThinking?: boolean;
+	isStreaming?: boolean;
 	onOpenExternal: (url: string) => void;
 	onOpenFile?: (path: string) => void;
 	onDiffFile?: DiffFileHandler;
@@ -1552,6 +1670,7 @@ export const TurnRow = memo(function TurnRow(props: {
 								onPreviewImage={props.onPreviewImage}
 								onOpenExternal={props.onOpenExternal}
 								onOpenFile={props.onOpenFile}
+								isStreaming={props.isStreaming ?? false}
 							/>
 						)}
 						{/* 合并的思考内联展示（仅当没有独立思考组时附在正文后） */}
@@ -1930,14 +2049,18 @@ function MermaidDiagram(props: { chart: string }) {
 		const chart = normalizeMermaidChart(props.chart);
 		const renderId = `pi-mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 		// Mermaid 图由模型输出生成，使用 strict 安全级别并禁用 startOnLoad，
-		// 避免库扫描整个页面或执行不受控的链接/脚本行为。
-		mermaid.initialize({
-			startOnLoad: false,
-			securityLevel: "strict",
-			theme: document.documentElement.dataset.theme === "dark" ? "dark" : "default",
-		});
-		mermaid
-			.render(renderId, chart)
+		// 避免库扫描整个页面或执行不受控的链接/脚本行为。此处动态加载 mermaid，
+		// 保证不按需出现的图表场景不占用渲染进程常驻内存。
+		loadMermaid()
+			.then((mod) => {
+				const mermaid = mod.default;
+				mermaid.initialize({
+					startOnLoad: false,
+					securityLevel: "strict",
+					theme: document.documentElement.dataset.theme === "dark" ? "dark" : "default",
+				});
+				return mermaid.render(renderId, chart);
+			})
 			.then(({ svg }) => {
 				if (disposed || !containerRef.current) return;
 				containerRef.current.innerHTML = svg;
@@ -3501,10 +3624,12 @@ export function SettingsModal(props: {
 
 	// 宠物包列表：异步加载内置 + petdex 社区包，供选择下拉使用
 	const [petOptions, setPetOptions] = useState<{ value: string; label: string }[]>([]);
+	// 完整宠物清单（含 spritesheetUrl / 描述），用于选择预览：仅靠 id 无法加载图，需清单里的 url。
+	const [petList, setPetList] = useState<PetManifest[]>([]);
 	useEffect(() => {
 		window.piDesktop.pet
 			.list()
-			.then((pets) => setPetOptions(pets.map((p) => ({ value: p.id, label: p.displayName }))))
+			.then((pets) => { setPetList(pets); setPetOptions(pets.map((p) => ({ value: p.id, label: p.displayName }))); })
 			.catch(() => undefined);
 	}, []);
 	// 宠物动画预览模式：下拉选中值需受控，避免选完弹回"自动"
@@ -4092,6 +4217,26 @@ export function SettingsModal(props: {
 										onChange={(value) => props.onChange({ petId: value })}
 									/>
 									<small className="setting-status">{t("settings.pet.petdexHint")}</small>
+									{(() => {
+										// 当前选中宠物的完整清单项；未匹配时（如手输未知 id）走undefined，预览自降级为空。
+										const selected = petList.find((p) => p.id === props.settings.petId);
+										return (
+											<>
+												{selected && (
+													<div className="pet-chooser-preview-row" style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginTop: 8 }}>
+														<PetChooserPreview pet={selected} mode={petPreviewMode} />
+														<div style={{ minWidth: 0, flex: 1 }}>
+															<strong style={{ display: "block", fontSize: "var(--font-size-control)", color: "var(--color-text-primary)" }}>{selected.displayName}</strong>
+															{selected.description && (
+																<small className="setting-status" style={{ display: "block", marginTop: 2 }}>{selected.description}</small>
+															)}
+														</div>
+													</div>
+												)
+											}
+											</>
+										);
+									})()}
 								</SettingsSection>
 								<SettingsSection title={t("settings.pet.scale")} description={t("settings.pet.scaleDesc")}>
 									<div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", maxWidth: 320 }}>

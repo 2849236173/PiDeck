@@ -3,8 +3,11 @@ import { readFile, stat, readdir } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { join, extname } from "node:path";
 import type { PetManifest } from "../../shared/types";
-import arthurSprite from "../../../build/pets/arthur-mergeon/spritesheet.webp?asset";
 import clawdSprite from "../../../build/pets/clawd-3/spritesheet.webp?asset";
+import cacheCapySprite from "../../../build/pets/cache-capy/spritesheet.webp?asset";
+import duoSprite from "../../../build/pets/duo/spritesheet.webp?asset";
+import octohackSprite from "../../../build/pets/octohack/spritesheet.webp?asset";
+import fangjiaSprite from "../../../build/pets/fangjia/spritesheet.webp?asset";
 
 /**
  * PetPackageManager —— 内置 + petdex 双轨宠物包管理。
@@ -31,9 +34,14 @@ async function fileExists(p: string): Promise<boolean> {
 type PetDexManifest = { id: string; displayName?: string; description?: string; spritesheetPath: string };
 
 export class PetPackageManager {
+	// 内置宠物包：随应用打包，优先级高于同名 petdex 社区包（list 中 byId 去重时先放入）。
+	// 限定这 5 个为默认可选项，避免随机占盘与体积膨胀。
 	private readonly builtin = [
-		{ id: "arthur-mergeon", displayName: "Arthur Mergeon", description: "A campfire code gunslinger, carrying old commits, open pull requests, and one hand always near the merge button.", spritePath: arthurSprite },
 		{ id: "clawd", displayName: "Clawd", description: "A tiny pixel Clawd companion made from your sticker GIFs.", spritePath: clawdSprite },
+		{ id: "cache-capy", displayName: "Cache Capy", description: "A calm capybara carrying a tiny cache box for patient builds.", spritePath: cacheCapySprite },
+		{ id: "duo", displayName: "Duo", description: "Learning companion with expressive chibi sprite poses.", spritePath: duoSprite },
+		{ id: "octohack", displayName: "OctoHack", description: "A tiny Octocat-inspired chibi digital pet with a black cat head, cream face, whiskers, tentacle limbs, and a blue-dotted tentacle tail.", spritePath: octohackSprite },
+		{ id: "fangjia", displayName: "FangJia", description: "FangJia is the mascot of switchbase.vip.", spritePath: fangjiaSprite },
 	];
 
 	async list(): Promise<PetManifest[]> {

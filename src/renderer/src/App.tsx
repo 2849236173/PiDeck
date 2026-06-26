@@ -732,6 +732,21 @@ export function App() {
     (activeAgent.status === "running" || activeRuntimeState?.isStreaming) &&
     activeMessages.at(-1)?.role !== "assistant",
   );
+  /** 正在流式追加的最后一条 assistant 消息的 id（agent 处于运行/流式状态时才有值）。
+   *  用于让对应 AssistantText 走轻量渲染路径，避免每个 token 都对不断增长的全量正文
+   *  反复运行 KaTeX 数学解析导致渲染主线程卡死；回答结束后切回完整渲染。 */
+  const streamingMessageId = useMemo(() => {
+    if (!activeAgent || activeAgent.status !== "running") return undefined;
+    if (!(activeRuntimeState?.isStreaming)) return undefined;
+    for (let i = activeMessages.length - 1; i >= 0; i--) {
+      const m = activeMessages[i];
+      if (m.role === "user") break;
+      // 跳过纯 thinking / 工具消息，定位最后一条有实际正文的 assistant 消息
+      if (m.role === "assistant" && (m.text || "").trim()) return m.id;
+    }
+    return undefined;
+  }, [activeAgent, activeRuntimeState, activeMessages]);
+
   /** 当前活跃 agent 的实时思考文本 */
   const activeThinking = activeAgentId
     ? (streamingThinking[activeAgentId] ?? "")
@@ -4191,6 +4206,7 @@ ${goalTextRef.current}
                     onDiffFile={diffFilePath}
                     onResendUserMessage={resendUserMessage}
                     showThinking={settings.showThinking}
+                    isStreaming={Boolean(streamingMessageId) && item.id.endsWith(streamingMessageId ?? "")}
                     fileSummariesByMessage={turnFileSummaryByMessage}
                   />
                 ) : item.kind === "tool-group" ? (
@@ -4218,6 +4234,7 @@ ${goalTextRef.current}
                       onPreviewImage={setPreviewImage}
                       onOpenExternal={(url) => api.app.openExternal(url)}
                       onOpenFile={openFilePath}
+                      isStreaming={item.message.id === streamingMessageId}
                     />
                     {turnFileSummaryByMessage[item.message.id]?.length > 0 && (
                       <SessionFileSummary

@@ -10639,3 +10639,20 @@ a.config-btn {
 	white-space: pre-wrap;
 	word-break: break-word;
 }
+
+/* ---------- 宠物选择预览（设置面板内联动画预览框） ---------- */
+.pet-chooser-preview {
+	flex: 0 0 auto;
+	width: 96px;
+	height: 104px;
+	border: 1px solid var(--color-border-subtle);
+	border-radius: var(--radius-md);
+	background: var(--color-bg-muted);
+	overflow: hidden;
+}
+.pet-chooser-preview canvas {
+	width: 100%;
+	height: 100%;
+	display: block;
+	image-rendering: pixelated;
+}
