@@ -36,6 +36,8 @@ import {
 	getDecryptedBotAppSecret,
 	loadBindings,
 	saveBindings,
+	getPersistentChatId,
+	setPersistentChatId,
 	type FeishuChatBindingPersist,
 } from "./FeishuConfig";
 import { chooseMessageMode, buildPostMessages, buildMarkdownCards } from "./rich-text";
@@ -124,6 +126,16 @@ export class FeishuBridge {
 	/** 当前 Agent 是否已经手动连接/绑定飞书会话，用于决定是否同步消息。 */
 	hasSessionBinding(agentId: string): boolean { return this.sessionToChat.has(agentId); }
 
+	/**
+	 * 按 sessionId 移除绑定：通过 sessionToChat 查找 chatId，然后调用 removeBinding。
+	 * 用于 FeishuLinkIndicator 等场景——前端只知道 agentId，不知 chatId。
+	 */
+	removeBindingBySessionId(sessionId: string): boolean {
+		const chatId = this.sessionToChat.get(sessionId);
+		if (!chatId) return false;
+		return this.removeBinding(chatId);
+	}
+
 	/** 刷新绑定：重新从磁盘加载并匹配当前 agent 列表 */
 	reloadBindings(): void {
 		this.sessionToChat.clear();
@@ -134,10 +146,16 @@ export class FeishuBridge {
 
 	// ===== 绑定管理 =====
 
+	/**
+	 * 移除绑定：取消飞书群与 Agent 的关联，清理会话级别的同步状态。
+	 * 注意：这不会停止 Agent 进程，只是取消飞书侧的关联关系。
+	 * Agent 在 PiDeck 中继续正常运行。
+	 */
 	removeBinding(chatId: string): boolean {
 		const binding = this.chatBindings.get(chatId);
 		if (!binding) return false;
-		try { this.agentManager.stop(binding.sessionId); } catch { /* ignore */ }
+		// 仅取消绑定，不终止 Agent。Agent 在 PiDeck 中继续独立运行。
+		// 用户手动取消关联不应影响 Agent 的使用状态。
 		this.sessionToChat.delete(binding.sessionId);
 		this.feishuSessions.delete(binding.sessionId);
 		this.chatBindings.delete(chatId);
@@ -744,6 +762,12 @@ export class FeishuBridge {
 			this.updateStatus({ activeBindings: this.chatBindings.size });
 			this.persistBindings();
 			this.pushBindings();
+			// 持久化 chatId 映射，确保断开重连后能复用已有群组
+			if (tab.sessionPath) {
+				setPersistentChatId(tab.sessionPath, chatId);
+			}
+			// 也按 agent UUID 保存一份，作为 sessionPath 不可用时的兜底键
+			setPersistentChatId(`agent:${tab.id}`, chatId);
 			await this.sendSmartMessage(chatId, `✅ 已创建会话 (${tab.id.slice(0, 8)})`);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e);
@@ -844,7 +868,7 @@ export class FeishuBridge {
 					// 更新 sessionId 映射
 					binding.sessionId = sessionId;
 					this.sessionToChat.set(sessionId, cid);
-					this.feishuSessions.add(sessionId);
+					// 不加入 feishuSessions：session-mirror 需要 syncPiMessageToFeishu 发送结果文本
 					this.persistBindings();
 					break;
 				}
@@ -860,7 +884,6 @@ export class FeishuBridge {
 				// 确保当前 sessionId 也有映射（可能刚通过 sessionPath 匹配到）
 				if (binding.sessionId !== sessionId) {
 					this.sessionToChat.set(sessionId, existingChatId);
-					this.feishuSessions.add(sessionId);
 				}
 				if (effectiveUserOpenId && !binding.userId) {
 					log(`[飞书 Session Mirror] 检测到空群 ${existingChatId}，尝试补加用户 ${effectiveUserOpenId}`);
@@ -872,7 +895,39 @@ export class FeishuBridge {
 			return existingChatId;
 		}
 
-		// 4. 完全没匹配 → 创建新群
+		// 4. 内存中没匹配 → 尝试从持久化 chatId 映射中恢复（跨连接的生命周期）
+		//    removeBinding 会删除内存绑定，但不删除此映射，确保断开重连后复用同群。
+		//    兜底键 agent:sessionId 在 createNewSession / loadPersistedBindings / 建群时写入。
+		let persistedChatId: string | undefined;
+		if (!existingChatId) {
+			if (sessionPath) {
+				persistedChatId = getPersistentChatId(sessionPath);
+			}
+			if (!persistedChatId) {
+				persistedChatId = getPersistentChatId(`agent:${sessionId}`);
+			}
+		}
+		if (persistedChatId) {
+			log(`[飞书 Session Mirror] 按持久化映射复用群: ${persistedChatId} (session: ${sessionId.slice(0, 8)})`);
+				const agentTab = this.agentManager.list().find((t) => t.id === sessionId);
+				const binding: FeishuChatBinding = {
+					chatId: persistedChatId, botId: this.botConfig.id,
+					userId: this.botConfig.defaultUserOpenId ?? this.userOpenId ?? "",
+					sessionId, sessionPath: agentTab?.sessionPath ?? sessionPath,
+					workspaceId: this.botConfig.defaultWorkspaceId ?? "",
+					source: "session-mirror" as const, chatType: "group",
+					groupName, createdAt: Date.now(),
+				};
+				this.chatBindings.set(persistedChatId, binding);
+				this.sessionToChat.set(sessionId, persistedChatId);
+				this.updateStatus({ activeBindings: this.chatBindings.size });
+				this.persistBindings();
+				this.pushBindings();
+				log(`[飞书 Session Mirror] 持久化群绑定已恢复: ${persistedChatId}`);
+				return persistedChatId;
+			}
+
+		// 5. 完全没匹配 → 创建新群
 		log(`[飞书 Session Mirror] 正在创建群: ${groupName}`);
 
 		// 用户 open_id 获取优先级：配置 > 自动记住
@@ -919,9 +974,10 @@ export class FeishuBridge {
 			// 创建绑定
 			// 找到对应的 agent tab 以获取 sessionPath
 			const agentTab = this.agentManager.list().find((t) => t.id === sessionId);
+			const effectiveSessionPath = agentTab?.sessionPath ?? sessionPath;
 			const binding: FeishuChatBinding = {
 				chatId, botId: this.botConfig.id, userId: effectiveUserOpenId ?? "",
-				sessionId, sessionPath: agentTab?.sessionPath, workspaceId: this.botConfig.defaultWorkspaceId ?? "",
+				sessionId, sessionPath: effectiveSessionPath, workspaceId: this.botConfig.defaultWorkspaceId ?? "",
 				source: "session-mirror" as const, chatType: "group", groupName, createdAt: Date.now(),
 			};
 			this.chatBindings.set(chatId, binding);
@@ -929,6 +985,13 @@ export class FeishuBridge {
 			this.updateStatus({ activeBindings: this.chatBindings.size });
 			this.persistBindings();
 			this.pushBindings();
+			// 持久化 chatId 映射：断开重连后可复用此群（removeBinding 不影响此映射）
+			if (effectiveSessionPath) {
+				setPersistentChatId(effectiveSessionPath, chatId);
+				log(`[飞书 Session Mirror] 已持久化 chatId 映射: ${effectiveSessionPath} → ${chatId}`);
+			}
+			// 按 agent UUID 兜底键保存，确保 sessionPath 不存在时也能找到
+			setPersistentChatId(`agent:${sessionId}`, chatId);
 
 			await this.sendSmartMessage(chatId, `🤖 Pi Agent 会话已创建\n会话 ID: ${sessionId.slice(0, 8)}\n\n直接发消息即可与 Agent 对话。`);
 			return chatId;
@@ -1142,7 +1205,14 @@ export class FeishuBridge {
 				};
 				this.chatBindings.set(b.chatId, binding);
 				this.sessionToChat.set(tab.id, b.chatId);
-				if (b.source === "feishu" || b.source === "session-mirror") this.feishuSessions.add(tab.id);
+				// 只对 Feishu 发起的会话加入 feishuSessions（阻止 syncPiMessageToFeishu 重复发送）；
+				// session-mirror 需要靠 syncPiMessageToFeishu 发送最终结果文本，不加入。
+				if (b.source === "feishu") this.feishuSessions.add(tab.id);
+				// 同步持久化 chatId 映射，确保断开重连后能复用群组
+				if (tab.sessionPath) {
+					setPersistentChatId(tab.sessionPath, b.chatId);
+				}
+				setPersistentChatId(`agent:${tab.id}`, b.chatId);
 			} else {
 				// 无匹配 tab: 保留绑定（用存储的 sessionId/sessionPath），
 				// 后续消息到来时 resumeOrCreateAgent 会恢复或重建 agent。
@@ -1160,6 +1230,13 @@ export class FeishuBridge {
 				// 即使 agent 不存在，也建立 sessionId → chatId 映射，
 				// 方便后续通过 resumeOrCreateAgent 更新
 				if (b.sessionId) this.sessionToChat.set(b.sessionId, b.chatId);
+				// 同步持久化 chatId 映射（用存储的 sessionPath/sessionId 作兜底键）
+				if (b.sessionPath) {
+					setPersistentChatId(b.sessionPath, b.chatId);
+				}
+				if (b.sessionId) {
+					setPersistentChatId(`agent:${b.sessionId}`, b.chatId);
+				}
 			}
 		}
 		if (this.chatBindings.size > 0) log(`[飞书 Bridge] 已恢复 ${this.chatBindings.size} 个聊天绑定`);

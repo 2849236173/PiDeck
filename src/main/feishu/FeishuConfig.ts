@@ -161,6 +161,43 @@ export function getDecryptedBotAppSecret(botId: string): string {
 	return decryptSecret(bot.appSecret);
 }
 
+// ===== 会话-群组 ChatId 持久化 =====
+
+/**
+ * 持久化 sessionPath → chatId 的映射，独立于绑定生命周期。
+ * removeBinding 不会删除此映射，确保断开重连后能复用已有群组、不重复创建。
+ * key 为会话文件路径（sessionPath），value 为飞书群 chatId。
+ */
+const SESSION_CHAT_MAP_PATH = join(getConfigDir(), "feishu-session-chat.json");
+
+function readSessionChatMap(): Record<string, string> {
+	try {
+		if (!existsSync(SESSION_CHAT_MAP_PATH)) return {};
+		return JSON.parse(readFileSync(SESSION_CHAT_MAP_PATH, "utf-8"));
+	} catch {
+		return {};
+	}
+}
+
+function writeSessionChatMap(map: Record<string, string>): void {
+	writeFileSync(SESSION_CHAT_MAP_PATH, JSON.stringify(map, null, 2), "utf-8");
+}
+
+/** 根据 sessionPath 查找已有群组 chatId（不受 removeBinding 影响） */
+export function getPersistentChatId(sessionPath: string): string | undefined {
+	if (!sessionPath) return undefined;
+	const map = readSessionChatMap();
+	return map[sessionPath];
+}
+
+/** 保存 sessionPath → chatId 映射，用于断开重连后复用群组。 */
+export function setPersistentChatId(sessionPath: string, chatId: string): void {
+	if (!sessionPath || !chatId) return;
+	const map = readSessionChatMap();
+	map[sessionPath] = chatId;
+	writeSessionChatMap(map);
+}
+
 // ===== 会话-Bot 分配持久化 =====
 
 /**

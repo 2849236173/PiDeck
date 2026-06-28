@@ -657,7 +657,8 @@ export function App() {
 
   const feishu = useFeishuBridge();
 
-  // 当活跃 Agent 切换时，加载该 Agent 指定的飞书 Bot
+  // 当活跃 Agent 切换或绑定列表变更时，加载该 Agent 指定的飞书 Bot
+  // 绑定变更后同步刷新，确保配置页断开关联后已连接状态正确反映。
   useEffect(() => {
     if (!activeAgentId) {
       setSessionFeishuBotId(undefined);
@@ -666,7 +667,7 @@ export function App() {
     feishu.getSessionBot(activeAgentId).then((botId) => {
       setSessionFeishuBotId(botId);
     });
-  }, [activeAgentId]);
+  }, [activeAgentId, feishu.bindings]);
 
   // Bot 列表变更后，若当前会话固定的 Bot 已被删除，则清除本地缓存避免指示器展示已失效的固定状态。
   useEffect(() => {

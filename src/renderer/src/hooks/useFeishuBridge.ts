@@ -101,6 +101,20 @@ export function useFeishuBridge() {
 		if (!api) return;
 		return api.onBindingsChanged((bi) => {
 			setBindings(bi);
+			// 绑定列表变更时，同步清理 sessionBotMap 中已失效的条目：
+			// 某个会话的绑定被移除（如从配置页断开关联）后，
+			// 其 agentId 不再出现在 bindings 中，应在内存缓存中同步清除。
+			// 否则 getSessionBot 会命中旧缓存，UI 仍显示「已连接」。
+			const boundSessionIds = new Set(bi.map((b) => b.sessionId));
+			setSessionBotMap((prev) => {
+				const next: Record<string, string> = {};
+				for (const [agentId, botId] of Object.entries(prev)) {
+					if (boundSessionIds.has(agentId)) {
+						next[agentId] = botId;
+					}
+				}
+				return next;
+			});
 		});
 	}, [api]);
 

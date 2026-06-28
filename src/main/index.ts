@@ -852,7 +852,15 @@ function registerFeishuIpc() {
 	// 移除绑定
 	ipcMain.handle(ipcChannels.feishuBindingRemove, async (_event, chatId: string) => {
 		if (feishuBridge) {
-			return feishuBridge.removeBinding(chatId);
+			// 先查 binding 拿到 sessionId，移除后清理 session-bot 映射，
+			// 使 FeishuLinkIndicator 等 UI 同步更新断开状态。
+			const bindings = feishuBridge.listBindings();
+			const binding = bindings.find((b) => b.chatId === chatId);
+			const result = feishuBridge.removeBinding(chatId);
+			if (result && binding) {
+				setSessionBotId(binding.sessionId, undefined);
+			}
+			return result;
 		}
 		return false;
 	});
@@ -891,9 +899,17 @@ function registerFeishuIpc() {
 	});
 
 	// 设置 Agent 使用的飞书 Bot ID；非空表示用户手动连接当前会话，需要立即创建/复用飞书群绑定。
+	// 传入 null 时取消关联：仅移除绑定（不终止 Agent），同时清理配置映射。
 	ipcMain.handle(ipcChannels.feishuSessionBotSet, async (_event, agentId: string, botId: string | null) => {
 		setSessionBotId(agentId, botId ?? undefined);
-		if (!botId || !feishuBridge || feishuBridge.getStatus().status !== "connected") return;
+		if (!botId) {
+			// 取消当前会话的飞书关联：移除绑定但不停止 Agent 进程
+			if (feishuBridge && feishuBridge.getStatus().status === "connected") {
+				feishuBridge.removeBindingBySessionId(agentId);
+			}
+			return;
+		}
+		if (!feishuBridge || feishuBridge.getStatus().status !== "connected") return;
 		const tab = agentManager.list().find((item) => item.id === agentId);
 		if (!tab) return;
 		await feishuBridge.ensureSessionMirror(tab.id, tab.title, tab.sessionPath);
