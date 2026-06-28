@@ -49,6 +49,10 @@ export type RichInputProps = {
 	caretRef?: React.MutableRefObject<number | null>;
 	/** chip 点击回调，传递被点击 chip 的解析信息 */
 	onChipClick?: (chip: RichInputChip) => void;
+	/** 有效命令名集合，白名单：不在集合内的 / 命令不渲染 chip */
+	validCommandNames?: Set<string>;
+	/** 有效文件路径集合，白名单：不在集合内的 @ 引用不渲染 chip */
+	validFilePaths?: Set<string>;
 };
 
 type TextNodeRun = {
@@ -80,49 +84,58 @@ function overlapsUrl(
 }
 
 /**
- * 将 prompt 字符串解析为 chip 列表（展示层，比输入时的 detectTrigger 更严格）。
+ * 将 prompt 字符串解析为 chip 列表（展示层，与 detectTrigger 规则对齐）。
  *
- * 收紧规则（避免任意输入被误识别为引用）：
- * - 触发符 @ / 必须出现在行首或空白之后，
- *   这样 "a/b""user@host""hello/world" 等文本中的 / @ 不会被识别为 chip。
+ * 规则：
+ * - /skill 触发符 / 前一个字符不能是 : / 或字母/数字/下划线（\w），
+ *   避免路径段（如 Agent/PiDeck、a/b）被误识别。
+ * - @path 触发符 @ 前同样排除 : / 和 \w。
  * - /skill：skill 名只允许字母开头 + 字母数字/连字符（skill 命名规范），
  *   且 token 后一字符不能是 /（排除 /usr/bin 这类路径）。
  * - @path：路径内允许 / . _ -，不允许空白与 @。
  *
- * 注意：输入时唤出引用菜单的 detectTrigger 仍保留更宽松的前置（允许字母数字前插），
- * 因为那是交互层；这里只负责把最终文本里真正的引用片段渲染成 chip。
  * URL 中的路径段（如 https://example.com/foo）不会被识别为 chip。
  */
-export function parseRichInputChips(text: string): RichInputChip[] {
+export function parseRichInputChips(
+	text: string,
+	validCommandNames?: Set<string>,
+	validFilePaths?: Set<string>,
+): RichInputChip[] {
 	const chips: RichInputChip[] = [];
 	const urlSpans = findUrlSpans(text);
 
-	// /skill：前置行首或空白；slash 命令整体 = 命令名 + 可选的 :参数名（如 /skill:writing-plans、/template:doc）。
+	// /skill：前置排除 : / 和 \w（字母/数字/下划线），避免路径段误识别；slash 命令整体 = 命令名 + 可选的 :参数名（如 /skill:writing-plans、/template:doc）。
 	// 冒号后须字母开头 + 字母数字/连字符，避免匹配 /a:b:c 这种异常文本。
 	// 后一字符若为 /，说明是路径（如 /usr/bin），不当作 skill。
-	const slashRe = /(^|\s)(\/[a-zA-Z][a-zA-Z0-9_-]*(?::[a-zA-Z][a-zA-Z0-9_-]*)?)/g;
+	const slashRe = /(?<![:/.\w#!~])(\/[a-zA-Z][a-zA-Z0-9_-]*(?::[a-zA-Z][a-zA-Z0-9_-]*)?)/g;
 	let m: RegExpExecArray | null;
 	while ((m = slashRe.exec(text)) !== null) {
-		const start = m.index + m[1].length;
-		const end = start + m[2].length;
+		const start = m.index;
+		const end = start + m[1].length;
 		if (text[end] === "/") continue;
 		if (!overlapsUrl(start, end, urlSpans)) {
-			chips.push({ start, end, raw: m[2], kind: "skill", label: m[2].slice(1) });
+			const label = m[1].slice(1);
+			if (!validCommandNames || validCommandNames.has(label)) {
+				chips.push({ start, end, raw: m[1], kind: "skill", label });
+			}
 		}
 		if (m.index === slashRe.lastIndex) slashRe.lastIndex++;
 	}
 
-	// @path：前置行首或空白；必须像文件路径（含 /、\\ 或 .），避免普通 @mention 被误渲染成不可编辑 chip。
-	const atRe = /(^|\s)(@[^\s@]+)/g;
+	// @path：前置排除 : / 和 \w；必须像文件路径（含 /、\\ 或 .），避免普通 @mention 被误渲染成不可编辑 chip。
+	const atRe = /(?<![:/.\w#!~])(@[^\s@]+)/g;
 	while ((m = atRe.exec(text)) !== null) {
-		const start = m.index + m[1].length;
-		const end = start + m[2].length;
+		const start = m.index;
+		const end = start + m[1].length;
 		if (!overlapsUrl(start, end, urlSpans)) {
-			const seg = m[2].slice(1);
+			const seg = m[1].slice(1);
 			if (!/[\\/.]/.test(seg)) continue;
 			const normalized = seg.replace(/\\/g, "/");
+			// 路径白名单检查：去掉 ./ 前缀后校验文件是否存在
+			const pathKey = normalized.startsWith("./") ? normalized.slice(2) : normalized;
+			if (validFilePaths && !validFilePaths.has(pathKey)) continue;
 			const label = normalized.includes("/") ? normalized.slice(normalized.lastIndexOf("/") + 1) : normalized;
-			chips.push({ start, end, raw: m[2], kind: "file", label: label || seg });
+			chips.push({ start, end, raw: m[1], kind: "file", label: label || seg });
 		}
 		if (m.index === atRe.lastIndex) atRe.lastIndex++;
 	}
@@ -310,7 +323,7 @@ export const RichInput = forwardRef<HTMLDivElement, RichInputProps>(
 			value, onChange, onCursorChange, onKeyDown,
 			onPaste, onDrop, onDragOver, onFocus, onBlur,
 			disabled, placeholder, className, caretRef,
-			onChipClick,
+			onChipClick, validCommandNames, validFilePaths,
 		} = props;
 
 		const rootRef = useRef<HTMLDivElement | null>(null);
@@ -327,7 +340,7 @@ export const RichInput = forwardRef<HTMLDivElement, RichInputProps>(
 			[ref],
 		);
 
-		const chips = useMemo(() => parseRichInputChips(value), [value]);
+		const chips = useMemo(() => parseRichInputChips(value, validCommandNames, validFilePaths), [value, validCommandNames, validFilePaths]);
 
 		/** 全量渲染 DOM：清空 root，按 value + chips 重建文本节点 + chip span。 */
 		const renderDom = useCallback(() => {

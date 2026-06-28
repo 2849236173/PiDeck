@@ -1744,6 +1744,8 @@ export const UserBubble = memo(function UserBubble(props: {
 	onPreviewImage: (image: ImageContent) => void;
 	onOpenFile?: (path: string) => void;
 	onResendUserMessage?: (message: ChatMessage) => void;
+	validCommandNames?: Set<string>;
+	validFilePaths?: Set<string>;
 }) {
 	const { message } = props;
 	const rowRef = useRef<HTMLElement | null>(null);
@@ -1796,7 +1798,7 @@ export const UserBubble = memo(function UserBubble(props: {
 			{cleanText && (
 				<div className="user-turn-bubble">
 					<div className="user-turn-text">
-						{renderChipText(cleanText)}
+						{renderChipText(cleanText, props.onOpenFile, props.validCommandNames, props.validFilePaths)}
 					</div>
 				</div>
 			)}
@@ -1971,8 +1973,8 @@ function stripThinkingTags(text: string): string {
 
 /** 将消息文本中的 @path / /command 渲染为行内 chip（聊天区展示用，与输入框 chip 视觉一致）。
  * 可通过 onOpenFile 回调使 chip 可点击跳转。 */
-function renderChipText(text: string, onOpenFile?: (path: string) => void): ReactNode[] {
-	const chips = parseRichInputChips(text);
+function renderChipText(text: string, onOpenFile?: (path: string) => void, validCommandNames?: Set<string>, validFilePaths?: Set<string>): ReactNode[] {
+	const chips = parseRichInputChips(text, validCommandNames, validFilePaths);
 	if (chips.length === 0) return [text];
 	const nodes: ReactNode[] = [];
 	let cursor = 0;
@@ -3268,7 +3270,7 @@ export function buildSuggestionItems(
 	return [];
 }
 
-function mergeCommands(commands: PiCommand[]) {
+export function mergeCommands(commands: PiCommand[]) {
 	const visibleCommands = commands.filter(isVisibleDesktopCommand);
 	const names = new Set(visibleCommands.map((command) => command.name));
 	const extras = getBuiltinCommands().filter(

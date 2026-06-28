@@ -91,6 +91,7 @@ import {
   flattenFiles,
   groupToolMessages,
   matches,
+  mergeCommands,
   type DrawerPanel,
   type SessionModifiedFile,
 } from "./components/app/AppParts";
@@ -900,6 +901,22 @@ export function App() {
         ? buildSuggestionItems(prompt, composerCursor, commands, flatFiles)
         : [],
     [suggestionsOpen, prompt, composerCursor, commands, flatFiles],
+  );
+
+  /** 有效命令名白名单：仅已知命令渲染为 chip */
+  const mergedCommands = useMemo(
+    () => mergeCommands(commands),
+    [commands],
+  );
+  const validCommandNames = useMemo(
+    () => new Set(mergedCommands.map((c) => c.name)),
+    [mergedCommands],
+  );
+
+  /** 有效文件路径白名单：仅工作区真实存在的 @ 引用渲染为 chip */
+  const validFilePaths = useMemo(
+    () => new Set(flatFiles.map((f) => f.relativePath)),
+    [flatFiles],
   );
 
   /** 菜单光标锚定位置（屏幕坐标），仅在 suggestionsOpen 时计算。 */
@@ -4341,6 +4358,8 @@ ${goalTextRef.current}
                     onPreviewImage={setPreviewImage}
                     onOpenFile={openFilePath}
                     onResendUserMessage={resendUserMessage}
+                    validCommandNames={validCommandNames}
+                  validFilePaths={validFilePaths}
                   />
                 ) : (
                   <Fragment key={item.message.id}>
@@ -4507,6 +4526,8 @@ ${goalTextRef.current}
                     : ""
               }
               disabled={composerDisabled}
+              validCommandNames={validCommandNames}
+              validFilePaths={validFilePaths}
               caretRef={pendingComposerCaretRef}
               placeholder={
                 isAgentStarting
