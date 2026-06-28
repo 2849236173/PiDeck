@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.6.2-green)
+![Version](https://img.shields.io/badge/version-0.6.3-green)
 
 `PiDeck` is **not** a fork of pi. It is a lightweight Electron shell that orchestrates multiple `pi --mode rpc` processes, providing a native desktop UI for projects, sessions, conversations, configuration, and tool orchestration — all powered by pi's native agent capabilities.
 
@@ -16,16 +16,16 @@
 
 ## 📋 Changelog
 
-> **Latest: v0.6.2** (2026-06-22)
+> **Latest: v0.6.3** (2026-06-28)
 
-### v0.6.2 Updates
-- 🚀 Unified project child list: agents and history sessions mixed, max 5 items
-- 🚀 External Editor Management: detect, enable/disable editors from Settings
-- ✨ Header button alignment: "New Session", "Files", "Terminal" visually consistent
-- ✨ Logs page: level filter and time range filter
-- 🐛 Fix: history session duplicate display/activation
-- 🐛 Fix: blank messages when re-opening history session after close
-- 🐛 Fix: session order promoted by just clicking without sending message
+### v0.6.3 Updates
+- 🚀 Desktop Pet System: Canvas animation, patrol/tease/review interactions
+- 🚀 Chip Input System: `@path` and `/command` as visual interactive chips
+- 🚀 Centered Modal Dialogs: Settings/Config/Feedback converted to modals
+- 🚀 OpenCode session import and batch model selection
+- ✨ Session stats, model picker fold, loading animations
+- 🐛 Fixed 20+ issues: macOS terminal permission, pet IPC timing, newline loss
+- 🔧 Streaming stutter fix, pet code 41% reduction
 
 [View Full Changelog →](CHANGELOG.md)
 

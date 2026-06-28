@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Electron](https://img.shields.io/badge/Electron-38-47848f)
 ![React](https://img.shields.io/badge/React-19-61dafb)
-![Version](https://img.shields.io/badge/version-0.6.2-green)
+![Version](https://img.shields.io/badge/version-0.6.3-green)
 
 `PiDeck` **不是** pi 的分支。它是一个轻量 Electron 外壳，通过启动多个 `pi --mode rpc` 进程，将项目管理、会话管理、对话界面、配置管理和工具编排整合到一个原生桌面应用中——所有 Agent 能力由 pi 原生提供。
 
@@ -16,16 +16,16 @@
 
 ## 📋 更新日志
 
-> **最新版本 v0.6.2**（2026-06-22）
+> **最新版本 v0.6.3**（2026-06-28）
 
-### v0.6.2 更新
-- 🚀 项目子项统一列表：Agent 和历史会话混排，默认显示 5 项
-- 🚀 外部编辑器管理：设置中新增编辑器配置页，支持检测/启用/禁用
-- ✨ 顶部操作按钮统一：“新会话”“文件”“终端”视觉一致
-- ✨ 日志页优化：级别筛选和时间范围筛选
-- 🐛 修复历史会话重复显示/激活问题
-- 🐛 修复关闭 Agent 后再次打开历史会话消息空白
-- 🐛 修复单纯打开历史会话导致排序提前
+### v0.6.3 更新
+- 🚀 桌面宠物系统：透明悬浮窗、Canvas 动画、巡游/逗弄/Review 交互
+- 🚀 Chip 输入系统：`@`路径和 `/` 命令可视化为交互式 chip，可点击打开文件
+- 🚀 居中模态对话框：设置/配置/反馈改为覆盖模态框
+- 🚀 支持 OpenCode 会话导入和批量模型选择
+- ✨ 会话统计、模型折叠、加载动画等 UI 优化
+- 🐛 修复 macOS 终端权限、宠物 IPC 时序、换行丢失等 20+ 项问题
+- 🔧 流式卡顿修复、宠物代码精简 41%
 
 [查看完整更新日志 →](CHANGELOG.zh-CN.md)
 

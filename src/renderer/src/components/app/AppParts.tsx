@@ -3567,7 +3567,7 @@ export function AgentContextMenu(props: {
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 				</button>
 				<button disabled={Boolean(props.actionLoading)} onClick={props.onToggleRpcLogging}>
-					{props.isRpcLogging ? `✓ ${t("menu.rpcLogFile")}` : t("menu.rpcLogging")}
+					{props.isRpcLogging ? `✓ ${t("menu.rpcLoggingOn")}` : t("menu.rpcLogging")}
 				</button>
 				{props.isRpcLogging && (
 					<button disabled={Boolean(props.actionLoading)} onClick={props.onOpenLogFile}>

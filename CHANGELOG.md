@@ -6,6 +6,73 @@ All notable changes to PiDeck are documented here.
 
 ## [Unreleased]
 
+## v0.6.3 - 2026-06-28
+
+### 🚀 New Features
+
+- **Desktop Pet System (MVP-2)**: Global transparent floating pet window with
+  Canvas animation engine, idle/patrol/review/tease interactions, notification
+  bubbles, and graceful fallback on Linux/Wayland
+- **Built-in Pets**: 5 pets — clawd, cache-capy, duo, octohack, fangjia;
+  selector with Canvas animation preview
+- **ContentEditable Chip Input System (#24)**: `@path` and `/command` rendered
+  as visual interactive inline chips with click-to-open for file chips;
+  cursor-aware suggestion triggering; IME-safe composition handling
+- **Centered Modal Dialogs**: Settings, Config, Feedback converted to centered
+  overlay modals with backdrop click-to-close and unified sizing
+- **Enhanced Message Rendering**: New light-background theme option
+- **Batch Model Selection**: Select multiple fetched models at once
+- **OpenCode Session Import**: Import local OpenCode sessions
+- **Session Source Badges**: Codex/Claude/OpenCode source badges with filtering
+- **RPC Timeout Raised**: Minimum timeout increased to 600s
+- **Pi/Extensions Update UI**: Trust management tab, platform filter
+
+### ✨ UI Polish
+
+- Session stats: token/cache chips in SessionStatus bar
+- Model picker: search result groups now collapsible
+- Header badge font: unified typography
+- Extensions loading: added loading animation
+- Scroll-to-bottom: ResizeObserver-based auto scroll, stays above composer
+
+### 🐛 Bug Fixes
+
+- **macOS Terminal**: Fixed node-pty spawn-helper permission & path corruption
+- **Pet IPC timing**: Fixed pet toggle loss, wrong pet flash on startup
+- **Terminal z-index**: Fixed click-through; hide terminal when modal is open
+- **RichInput newline loss**: Fixed `\n` swallowed by `<br>` in contentEditable
+- **Compact slah command**: Fixed `/compact` command handling
+- **Pet drag→idle**: Instant idle transition; hidden until first agent
+- **Extension state**: Fixed install status and input reference recognition
+- **Session stats & TS errors**: Fixed 4 type errors, persistent filter
+- **Build scripts restored**: Restored 4 accidentally deleted tool scripts
+- **History session**: Optimized loading, scroll-to-bottom, auto trust.json
+- **Agent statusError i18n**: Added missing translations
+- **Context menu duplicate**: Fixed RPC log toggle showing duplicate text
+
+### 🔧 Performance
+
+- **Streaming stutter**: memo-wrapped AssistantText, dynamic mermaid `import()`
+- **Pet code reduction**: 41% reduction (10 files, −1096 lines)
+
+### 📦 Chore
+
+- Revert package files to upstream
+- Add @1900EasonJin to contributors
+
+### 📖 Documentation
+
+- Add pet-only PR description document
+- Add QQ community group info to READMEs and docs-site
+
+### 🔁 CI
+
+- Switch macOS x64 runner from macos-13 to macos-latest
+
+### 🤝 Contributors
+
+Thanks to @ayuayue, @1900EasonJin, @zx3022448 for their contributions!
+
 ## v0.6.2 - 2026-06-22
 
 ### 🚀 New Features

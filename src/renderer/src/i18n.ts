@@ -734,6 +734,7 @@ const zhCN = {
   "menu.rpcLogs": "RPC 日志",
   "menu.rpcLogging": "RPC 日志记录(默认关闭)",
   "menu.rpcLogFile": "打开日志文件夹",
+  "menu.rpcLoggingOn": "关闭RPC日志",
   "preview.agentTitle": "预览会话",
   "preview.assistantText":
     "## 项目概览\n\n这是浏览器预览模式，用来检查 UI 响应式布局。\n\n- 支持 Markdown\n- 支持消息定位\n- 支持工具详情展开",
@@ -1799,6 +1800,7 @@ const enUS: Record<TranslationKey, string> = {
   "menu.rpcLogs": "RPC Logs",
   "menu.rpcLogging": "RPC Logging (off)",
   "menu.rpcLogFile": "Open Log Folder",
+  "menu.rpcLoggingOn": "Disable RPC Logging",
   "preview.agentTitle": "Preview Session",
   "preview.assistantText":
     "## Project overview\n\nThis is browser preview mode for checking responsive UI layout.\n\n- Supports Markdown\n- Supports message navigation\n- Supports expandable tool details",

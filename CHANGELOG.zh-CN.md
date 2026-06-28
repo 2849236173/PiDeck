@@ -6,6 +6,69 @@
 
 ## [未发布]
 
+## v0.6.3 - 2026-06-28
+
+### 🚀 新功能
+
+- **桌面宠物系统 (MVP-2)**：全局透明悬浮窗，Canvas 动画引擎，
+  idle/巡游/Review/逗弄交互，通知气泡，Linux/Wayland 降级圆角小窗
+- **内置宠物**：clawd / cache-capy / duo / octohack / fangjia 五种，
+  选择器新增 Canvas 动画预览
+- **ContentEditable Chip 输入系统 (#24)**：`@路径` 和 `/命令` 渲染为可视化
+  交互式 chip，文件 chip 可点击打开；光标感知建议触发；IME 中文输入保护
+- **居中模态对话框**：设置、配置、反馈改为居中覆盖模态框，backdrop 点击关闭
+- **消息渲染增强**：新增浅色背景主题选项
+- **批量选择模型**：模型获取后支持批量选择多个
+- **OpenCode 会话导入**：支持导入 OpenCode 本地会话
+- **会话来源徽章**：Codex/Claude/OpenCode 来源标识，支持按项目过滤
+- **RPC 超时提升**：最小超时提升至 600 秒
+- **Pi/扩展更新 UI**：信任管理标签页、平台筛选
+
+### ✨ 界面优化
+
+- 会话统计：SessionStatus 栏新增 token/cache chip
+- 模型选择器：搜索结果分组支持折叠/展开
+- 扩展加载动画：列表加载时显示动画避免空白歧义
+- 滚动到底按钮：基于 ResizeObserver 自动滚动
+
+### 🐛 Bug 修复
+
+- **macOS 终端修复**：node-pty spawn-helper 权限及路径替换错误
+- **宠物 IPC 时序**：修复宠物开关丢失、启动时错误宠物闪现
+- **终端层级穿透**：TerminalDock z-index 调整，打开模态时隐藏终端
+- **RichInput 换行丢失**：修复 contentEditable 中 `\n` 被 `<br>` 吞掉
+- **Compact 斜线命令**：修复 `/compact` 处理逻辑
+- **拖拽切 idle**：巡游拖拽后即时切换 idle
+- **扩展状态**：修复安装状态检测和输入引用识别
+- **会话统计 & TS 错误**：修复 4 个类型错误、过滤持久化
+- **构建脚本恢复**：恢复 4 个被误删的工具脚本
+- **历史会话**：优化加载速度、滚动到底体验、自动写入 trust.json
+- **Agent 状态翻译**：补充 app.statusError 中英文翻译
+- **右键菜单重复**：修复 RPC 日志开关显示重复文本
+
+### 🔧 性能优化
+
+- **流式卡顿**：AssistantText 包 memo，mermaid 动态 import()
+- **宠物代码精简**：重构后代码缩减 41%（10 文件，−1096 行）
+
+### 📦 工程
+
+- 恢复 package.json/package-lock.json 至上游版本
+- 添加 @1900EasonJin 到贡献者列表
+
+### 📖 文档
+
+- 新增 pet-only PR 描述文档
+- README 和文档站点添加 QQ 交流群信息
+
+### 🔁 CI
+
+- macOS x64 runner 从 macos-13 迁移到 macos-latest
+
+### 🤝 贡献者
+
+感谢 @ayuayue、@1900EasonJin、@zx3022448 对本版本的贡献！
+
 ## v0.6.2 - 2026-06-22
 
 ### 🚀 新功能
