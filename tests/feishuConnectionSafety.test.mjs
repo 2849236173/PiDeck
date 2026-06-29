@@ -51,6 +51,15 @@ test("bound Feishu sessions pass the current chat_id into the agent context", ()
 	assert.doesNotMatch(handler, /如必须使用飞书工具/);
 });
 
+test("Feishu-origin messages also tell the agent to use SEND_FILE markers", () => {
+	const source = bridgeSource();
+	const method = source.match(/private async runAgent\([\s\S]*?\n\t\}/)?.[0] ?? "";
+	assert.match(method, /严禁调用 lark-cli/);
+	assert.match(method, /\[SEND_FILE:本地文件路径\]/);
+	assert.match(method, /当前绑定的飞书 chat_id/);
+	assert.doesNotMatch(method, /chat_id 是什么/);
+});
+
 test("FeishuBridge prefers the current sessionToChat mapping over stale mirror bindings", () => {
 	const source = bridgeSource();
 	const method = source.match(/private getBestChatId\(agentId: string\): string \| undefined \{[\s\S]*?\n\t\}/)?.[0] ?? "";
@@ -66,6 +75,24 @@ test("FeishuBridge can send a file through the current session binding without a
 	const method = source.match(/async sendFileForSession\(agentId: string, filePath: string\): Promise<string> \{[\s\S]*?\n\t\}/)?.[0] ?? "";
 	assert.match(method, /this\.getBestChatId\(agentId\)/);
 	assert.match(method, /this\.sendFeishuFile\(chatId, filePath\)/);
+});
+
+test("FeishuBridge only executes agent SEND_FILE markers after explicit user send intent", () => {
+	const source = bridgeSource();
+	const method = source.match(/private async processFeishuActions\(chatId: string, sessionId: string\): Promise<void> \{[\s\S]*?\n\t\}/)?.[0] ?? "";
+	assert.match(source, /hasExplicitFeishuFileSendIntent/);
+	assert.match(method, /hasExplicitFeishuFileSendIntent\(userText\)/);
+	assert.match(method, /忽略 SEND_FILE/);
+});
+
+test("Feishu-origin runs do not also trigger local session mirror sync", () => {
+	const source = bridgeSource();
+	const eventMethod = source.match(/private handleAgentEvent\(agentId: string, event: unknown\): void \{[\s\S]*?\n\t\}/)?.[0] ?? "";
+	const runMethod = source.match(/private async runAgent\([\s\S]*?\n\t\}/)?.[0] ?? "";
+	assert.match(source, /feishuDrivenRuns/);
+	assert.match(eventMethod, /!this\.feishuDrivenRuns\.has\(agentId\)/);
+	assert.match(runMethod, /this\.feishuDrivenRuns\.add\(binding\.sessionId\)/);
+	assert.match(runMethod, /this\.feishuDrivenRuns\.delete\(binding\.sessionId\)/);
 });
 
 test("agentsPrompt intercepts Feishu file-send requests before sending them to the agent", () => {

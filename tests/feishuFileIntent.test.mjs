@@ -36,6 +36,22 @@ test("detects Chinese request to send a workspace file", () => {
 	assert.equal(resolveFeishuFileSendIntent("把 temp.pdf 这个文件发给我", dir), fp);
 });
 
+test("detects html file send request", () => {
+	const dir = mkdtempSync(join(tmpdir(), "feishu-file-intent-"));
+	const fp = join(dir, "Pi-Agent-整修计划.html");
+	writeFileSync(fp, "html");
+	const { resolveFeishuFileSendIntent } = loadFileIntentModule();
+
+	assert.equal(resolveFeishuFileSendIntent("Pi-Agent-整修计划.html这个文件发我", dir), fp);
+});
+
+test("requires explicit send intent before executing agent file markers", () => {
+	const { hasExplicitFeishuFileSendIntent } = loadFileIntentModule();
+
+	assert.equal(hasExplicitFeishuFileSendIntent("写成一个md文件放到本地"), false);
+	assert.equal(hasExplicitFeishuFileSendIntent("写成一个md文件发我"), true);
+});
+
 test("ignores non-send file questions", () => {
 	const dir = mkdtempSync(join(tmpdir(), "feishu-file-intent-"));
 	writeFileSync(join(dir, "temp.pdf"), "pdf");

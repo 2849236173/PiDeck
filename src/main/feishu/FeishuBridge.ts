@@ -44,6 +44,7 @@ import {
 import { chooseMessageMode, buildPostMessages, buildMarkdownCards } from "./rich-text";
 import { CardStream } from "./CardStream";
 import { buildFeishuTextChildren, stripFeishuActionMarkers, wantsFeishuDoc } from "./docActions";
+import { hasExplicitFeishuFileSendIntent } from "./fileIntent";
 import { createInitialState, reduceFromPiEvent, markInterrupted, markError, markDone, type RunState } from "./CardRunState";
 import { renderRunCard } from "./CardRenderer";
 import type { AgentManager } from "../pi/AgentManager";
@@ -103,6 +104,8 @@ export class FeishuBridge {
 	private unsubscribeLocalEvents: (() => void) | null = null;
 	// 哪些 session 是飞书发起的（不需要 session mirror）
 	private feishuSessions = new Set<string>();
+	/** 飞书消息触发中的运行，agent_end 期间不要再走 PiDeck 本地同步，避免文件/文本重复发送。 */
+	private feishuDrivenRuns = new Set<string>();
 
 	private lastUserMessageId = new Map<string, string>();
 
@@ -588,13 +591,20 @@ export class FeishuBridge {
 			{ replyToMessageId: ctx.chatType === "group" ? ctx.messageId : undefined },
 		).catch((e) => { logErr("[飞书 Bridge] 流式卡片创建失败:", e); return null as CardStream | null; });
 
+		this.feishuDrivenRuns.add(binding.sessionId);
 		try {
-			// Agent 需要知道消息来自飞书群聊，但不在 UI 显示这条上下文
+			// 飞书来源也必须显式注入宿主发送规则；否则 Agent 会回退到 lark-cli 并询问 chat_id。
+			const feishuActionInstruction = [
+				"当前会话已连接飞书聊天。严禁调用 lark-cli、飞书 IM API 或搜索群聊来发送文件；不要询问 chat_id。需要把本地文件发到当前飞书聊天时，最终回答末尾独立一行写 [SEND_FILE:本地文件路径]，PiDeck 会按当前会话绑定自动上传。",
+				"只有用户明确要求发送、上传或分享文件时才写 [SEND_FILE:本地文件路径]；如果只是要求保存到本地，不要写该标记。",
+				`当前绑定的飞书 chat_id: ${chatId}。这是只读上下文，用于确认当前会话绑定；发送文件仍必须用 [SEND_FILE:本地文件路径]。`,
+			].join("\n");
 			const feishuCtx = finalText
-				? `${finalText}\n\n[这是飞书群聊消息。生成的文件 PiDeck 会自动发送到本群。]`
-				: "[飞书群聊消息。请直接回复用户。]";
+				? `${feishuActionInstruction}\n\n${finalText}\n\n[这是飞书群聊消息。请直接回复用户。]`
+				: `${feishuActionInstruction}\n\n[飞书群聊消息。请直接回复用户。]`;
 			await this.agentManager.sendPrompt({ agentId: binding.sessionId, message: finalText || "处理附件", agentMessage: feishuCtx, ...(images.length > 0 ? { images } : {}) });
 		} catch (e) {
+			this.feishuDrivenRuns.delete(binding.sessionId);
 			this.streamingRunStates.delete(binding.sessionId);
 			this.pendingCardEvents.delete(binding.sessionId);
 			this.streamingCards.delete(binding.sessionId);
@@ -660,6 +670,8 @@ export class FeishuBridge {
 			this.pendingCardEvents.delete(binding.sessionId);
 			this.cardUpdateFailed.delete(binding.sessionId);
 			await this.sendSmartMessage(chatId, `❌ Agent 错误: ${msg}`);
+		} finally {
+			this.feishuDrivenRuns.delete(binding.sessionId);
 		}
 	}
 
@@ -758,7 +770,7 @@ export class FeishuBridge {
 		}
 
 		// 只有用户显式手动连接过的 PiDeck 会话，才把 Agent 结果同步到飞书。
-		if (!this.feishuSessions.has(agentId) && typed.type === "agent_end") {
+		if (!this.feishuSessions.has(agentId) && !this.feishuDrivenRuns.has(agentId) && typed.type === "agent_end") {
 			log(`[Feishu Bridge] agent_end 触发 syncPiMessageToFeishu, agentId=${agentId.slice(0,8)}`);
 			// 优先用 session-mirror 群聊，没有则回退到 sessionToChat
 			const chatId = this.getBestChatId(agentId);
@@ -1379,17 +1391,23 @@ export class FeishuBridge {
 		const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
 		const text = lastAssistant?.text ?? "";
 		if (!text) return;
+		const userText = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
+		const canSendFile = hasExplicitFeishuFileSendIntent(userText);
 
 		// 1. 显式 [SEND_FILE:path] 标记
 		const sendMatch = text.match(/\[SEND_FILE:([^\]]+)\]/);
 		if (sendMatch) {
 			const filePath = sendMatch[1].trim();
-			log(`[飞书 Bridge] 检测到 SEND_FILE: ${filePath}`);
-			const result = await this.sendFeishuFile(chatId, filePath);
-			log(`[飞书 Bridge] SEND_FILE 结果: ${result}`);
-			if (!result.startsWith("✅")) await this.sendSmartMessage(chatId, `⚠️ ${result}`);
-			else await this.sendSmartMessage(chatId, result);
-		} else {
+			if (!canSendFile) {
+				log(`[飞书 Bridge] 忽略 SEND_FILE：用户未明确要求发送文件: ${filePath}`);
+			} else {
+				log(`[飞书 Bridge] 检测到 SEND_FILE: ${filePath}`);
+				const result = await this.sendFeishuFile(chatId, filePath);
+				log(`[飞书 Bridge] SEND_FILE 结果: ${result}`);
+				if (!result.startsWith("✅")) await this.sendSmartMessage(chatId, `⚠️ ${result}`);
+				else await this.sendSmartMessage(chatId, result);
+			}
+		} else if (canSendFile) {
 			// 2. 无显式标记 → 自动检测 Agent 回答中提到的文件并发送（前 3 个）
 			const { existsSync } = await import("node:fs");
 			const pathPattern = /(?:保存到|已生成|文件在|输出到|写入|created|saved to|written to)[：:\s]*([^\s，,\n""<>]{5,200}\.(?:md|txt|csv|json|html|pdf|png|jpg|xlsx|docx|pptx|py|ts|js))/gi;
