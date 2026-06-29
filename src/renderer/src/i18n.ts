@@ -28,6 +28,7 @@ const zhCN = {
   "app.compacting": "压缩中…",
   "app.compactDone": "上下文压缩完成",
   "app.compactFailed": "压缩失败",
+  "app.agentCreateTimeout": "Agent 启动超时，请检查 pi 是否能正常启动，或稍后重试。",
   "app.agentStarting": "正在启动 Agent…",
   "app.agentStartingPlaceholder": "Agent 正在启动…",
   "app.branchCurrent": "当前分支：{branch}，共 {count} 个分支",
@@ -101,6 +102,7 @@ const zhCN = {
   "app.piPathCleared": "已清除自定义 pi 路径，将恢复自动检测。",
   "app.piPathSaved": "pi 路径已保存：{path}",
   "app.piPathValidateFailed": "pi 路径校验失败：{error}",
+  "app.preloadMissing": "桌面端预加载 API 未注入，请重新启动 PiDeck。",
   "app.projectChatGuide": "内置对话区，不需要选择项目目录",
   "app.projectChatInfo":
     "Chat 是固定置顶的内置对话区；会话写入应用用户目录，不需要先添加项目。",
@@ -1163,6 +1165,8 @@ const enUS: Record<TranslationKey, string> = {
   "app.modelUnfavorite": "Unfavorite",
   "app.modelFavorites": "Favorites",
   "app.moreAgents": "{count} more Agents",
+  "app.agentCreateTimeout":
+    "Agent startup timed out. Check whether pi can start normally, then try again.",
   "app.openTerminalTitle": "Show or hide this Agent terminal",
   "app.piCheckFailed": "pi check failed: {error}",
   "app.piCheckPassed": "pi check passed: {value}",
@@ -1170,6 +1174,7 @@ const enUS: Record<TranslationKey, string> = {
     "Custom pi path cleared. Automatic detection will be used.",
   "app.piPathSaved": "pi path saved: {path}",
   "app.piPathValidateFailed": "pi path validation failed: {error}",
+  "app.preloadMissing": "Desktop preload API is not available. Restart PiDeck.",
   "app.projectChatGuide": "Built-in chat area. No project folder required.",
   "app.projectChatInfo":
     "Chat is a pinned built-in conversation area. Sessions are written to the app user data directory.",
