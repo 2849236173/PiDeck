@@ -210,12 +210,18 @@ export class TerminalSessionManager {
 		let lastError: unknown;
 		for (const candidate of candidates) {
 			try {
+				// macOS GUI 应用（Electron）不继承登录 shell 的环境变量，
+				// LANG/LC_CTYPE 可能为空或 C，导致 shell 内 UTF-8 输出乱码。
+				// 显式注入 UTF-8 locale，让 shell 知道应以 UTF-8 解释字节流。
+				const env = { ...process.env };
+				if (!env.LANG) env.LANG = "en_US.UTF-8";
+				if (!env.LC_ALL) env.LC_ALL = "en_US.UTF-8";
 				const terminal = pty.spawn(candidate.command, candidate.args, {
 					name: "xterm-256color",
 					cols: 80,
 					rows: 24,
 					cwd,
-					env: process.env,
+					env,
 				});
 				return { shell: candidate.shell, pty: terminal };
 			} catch (error) {
