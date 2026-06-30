@@ -1243,7 +1243,15 @@ function parseToolArgs(value: unknown): Record<string, unknown> | undefined {
 	}
 	if (typeof value !== "string" || !value.trim()) return undefined;
 	try {
-		const parsed = JSON.parse(value) as unknown;
+		let parsed = JSON.parse(value) as unknown;
+		// 兼容已二次 JSON.stringify 的异常数据（meta 中存储的 args 字符串被 safeJson 再包一层）
+		if (typeof parsed === "string" && parsed.trim()) {
+			try {
+				parsed = JSON.parse(parsed) as unknown;
+			} catch {
+				return undefined;
+			}
+		}
 		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
 			? parsed as Record<string, unknown>
 			: undefined;
@@ -1704,9 +1712,20 @@ export const TurnRow = memo(function TurnRow(props: {
 	onOpenFile?: (path: string) => void;
 	onDiffFile?: DiffFileHandler;
 	onResendUserMessage?: (message: ChatMessage) => void;
+	onDeleteMessage?: (messageId: string) => void;
+	onEditMessage?: (messageId: string, newText: string) => void;
 	fileSummariesByMessage?: Record<string, SessionModifiedFile[]>;
 }) {
 	const { run } = props;
+	const [editing, setEditing] = useState(false);
+	const [editText, setEditText] = useState("");
+	const editAreaRef = useRef<HTMLDivElement | null>(null);
+	// 激活编辑时自动滚动到编辑区（避免 textarea 超出可视区域）
+	useEffect(() => {
+		if (editing && editAreaRef.current) {
+			editAreaRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+		}
+	}, [editing]);
 	const isComplete = run.endedAt > 0;
 	const duration = isComplete && run.startedAt > 0 ? run.endedAt - run.startedAt : 0;
 	const showDuration = isComplete && duration > 100;
@@ -1798,8 +1817,52 @@ export const TurnRow = memo(function TurnRow(props: {
 						{toolGroups.map((g) => (
 							<ToolGroupCard key={g.id} group={g} />
 						))}
-						{/* 助手正文 */}
-						{mergedText && (
+						{/* 助手正文 — 编辑模式下显示 textarea，普通模式显示原文 */}
+						{mergedText && editing ? (
+							<div className="turn-row-edit-area" ref={editAreaRef}>
+								<div className="edit-area-indicator">{t("common.edit")}</div>
+								<textarea
+									className="turn-row-edit-textarea"
+									value={editText}
+									onChange={(e) => setEditText(e.target.value)}
+									onKeyDown={(e) => {
+										// Ctrl+Enter 保存，Escape 取消
+										if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+											e.preventDefault();
+											const targetId = assistantMessages.at(-1)?.message.id;
+											if (targetId && props.onEditMessage) {
+												props.onEditMessage(targetId, editText);
+												setEditing(false);
+											}
+										}
+										if (e.key === "Escape") {
+											setEditing(false);
+										}
+									}}
+									autoFocus
+								/>
+								<div className="turn-row-edit-actions">
+									<button
+										className="turn-row-edit-btn primary"
+										onClick={() => {
+											const targetId = assistantMessages.at(-1)?.message.id;
+											if (targetId && props.onEditMessage) {
+												props.onEditMessage(targetId, editText);
+												setEditing(false);
+											}
+										}}
+									>
+										{t("common.save")}
+									</button>
+									<button
+										className="turn-row-edit-btn"
+										onClick={() => setEditing(false)}
+									>
+										{t("common.cancel")}
+									</button>
+								</div>
+							</div>
+						) : mergedText ? (
 							<AssistantText
 								text={mergedText}
 								images={allImages}
@@ -1808,7 +1871,7 @@ export const TurnRow = memo(function TurnRow(props: {
 								onOpenFile={props.onOpenFile}
 								isStreaming={props.isStreaming ?? false}
 							/>
-						)}
+						) : null}
 						{/* 合并的思考内联展示（仅当没有独立思考组时附在正文后） */}
 						{props.showThinking &&
 							mergedThinking &&
@@ -1819,10 +1882,36 @@ export const TurnRow = memo(function TurnRow(props: {
 									showThinking={props.showThinking}
 								/>
 							)}
-						{/* 操作栏：hover/focus 显隐，复制整轮回答 */}
-						{mergedText && (
+						{/* 操作栏：hover/focus 显隐，复制/编辑/删除整轮回答 */}
+						{mergedText && !editing && (
 							<div className="turn-row-actions">
 								<CopyMenu text={mergedText} markdown={mergedText} targetRef={rowRef} />
+								{!props.isStreaming && assistantMessages.at(-1)?.message.id && (
+									<>
+										<button
+											className="turn-row-action-btn"
+											onClick={() => {
+												setEditText(mergedText);
+												setEditing(true);
+											}}
+											title={t("common.edit")}
+										>
+											{t("common.edit")}
+										</button>
+										<button
+											className="turn-row-action-btn"
+											onClick={() => {
+												const targetId = assistantMessages.at(-1)?.message.id;
+												if (targetId && props.onDeleteMessage) {
+													props.onDeleteMessage(targetId);
+												}
+											}}
+											title={t("common.delete")}
+										>
+											{t("common.delete")}
+										</button>
+									</>
+								)}
 							</div>
 						)}
 						{/* 本轮修改文件摘要 */}
@@ -1857,17 +1946,31 @@ function extractSkillBlocks(text: string): { skills: string[]; text: string } {
 	return { skills, text: cleaned.trim() };
 }
 
-/** 用户消息：右对齐气泡 + 附件 + hover 显隐操作栏（复制/编辑/重发）。 */
+/** 用户消息：右对齐气泡 + 附件 + hover 显隐操作栏（复制/编辑/删除/重发/修改输入框）。
+ * 编辑分两种：原地编辑（修改 JSONL + 重载会话）和修改输入框（放回 composer 不自动发送）。 */
 export const UserBubble = memo(function UserBubble(props: {
 	message: ChatMessage;
 	onPreviewImage: (image: ImageContent) => void;
 	onOpenFile?: (path: string) => void;
 	onResendUserMessage?: (message: ChatMessage) => void;
+	onEditMessage?: (messageId: string, newText: string) => void;
+	onDeleteMessage?: (messageId: string) => void;
+	/** 是否为该 agent 消息列表中的最后一条用户消息，用于控制「重发」按钮的显隐 */
+	isLastUserMessage?: boolean;
 	validCommandNames?: Set<string>;
 	validFilePaths?: Set<string>;
 }) {
 	const { message } = props;
 	const rowRef = useRef<HTMLElement | null>(null);
+	const [editing, setEditing] = useState(false);
+	const [editText, setEditText] = useState("");
+	const editAreaRef = useRef<HTMLDivElement | null>(null);
+	// 激活编辑时自动滚动到编辑区
+	useEffect(() => {
+		if (editing && editAreaRef.current) {
+			editAreaRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+		}
+	}, [editing]);
 	// 提取 pi 展开后的 <skill> 块：渲染为 skill 徽标，并从正文里剥除 XML
 	const { skills, text: bodyText } = extractSkillBlocks(stripAnsi(message.text));
 	const cleanText = bodyText;
@@ -1882,8 +1985,15 @@ export const UserBubble = memo(function UserBubble(props: {
 			: deliveryBehavior === "followUp"
 				? t("app.messageDeliveryFollowUp")
 				: null;
-	const handleEdit = () => {
-		// 编辑只把原消息放回输入框，不自动发送，方便用户二次加工
+	/** 原地编辑不影响输入框；先提交给确认弹窗。 */
+	const handleSaveEdit = () => {
+		if (props.onEditMessage && editText.trim()) {
+			props.onEditMessage(message.id, editText);
+			setEditing(false);
+		}
+	};
+	/** 编辑后重发：放回 composer 输入框，由用户自行修改后发送。 */
+	const handleEditAndResend = () => {
 		document.querySelector<HTMLTextAreaElement>(".composer-box textarea")?.focus();
 		window.dispatchEvent(
 			new CustomEvent("user-message-edit", { detail: { text: message.text } }),
@@ -1914,10 +2024,36 @@ export const UserBubble = memo(function UserBubble(props: {
 					))}
 				</div>
 			)}
-			{cleanText && (
+			{cleanText && !editing && (
 				<div className="user-turn-bubble">
 					<div className="user-turn-text">
 						{renderChipText(cleanText, props.onOpenFile, props.validCommandNames, props.validFilePaths)}
+					</div>
+				</div>
+			)}
+			{editing && (
+				<div className="user-turn-edit-area" ref={editAreaRef}>
+					<div className="edit-area-indicator">{t("common.edit")}</div>
+					<textarea
+						className="message-edit-textarea"
+						value={editText}
+						onChange={(e) => setEditText(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+								e.preventDefault();
+								handleSaveEdit();
+							}
+							if (e.key === "Escape") setEditing(false);
+						}}
+						autoFocus
+					/>
+					<div className="message-edit-actions">
+						<button className="message-edit-btn primary" onClick={handleSaveEdit}>
+							{t("common.save")}
+						</button>
+						<button className="message-edit-btn" onClick={() => setEditing(false)}>
+							{t("common.cancel")}
+						</button>
 					</div>
 				</div>
 			)}
@@ -1940,16 +2076,39 @@ export const UserBubble = memo(function UserBubble(props: {
 			</div>
 			<div className="user-turn-actions">
 				<CopyMenu text={cleanText} markdown={message.text} targetRef={rowRef} />
-				<button className="user-turn-action-btn" onClick={handleEdit}>
-					{t("common.edit")}
-				</button>
-				<button
-					className="user-turn-action-btn"
-					onClick={() => props.onResendUserMessage?.(message)}
-					title={t("app.resendTitle")}
-				>
-					{t("app.resend")}
-				</button>
+				{!editing && (
+					<>
+						<button className="user-turn-action-btn" onClick={() => {
+							setEditText(cleanText);
+							setEditing(true);
+						}}>
+							{t("common.edit")}
+						</button>
+						<button
+							className="user-turn-action-btn"
+							onClick={handleEditAndResend}
+							title={t("app.editAndResendTitle")}
+						>
+							{t("app.editAndResend")}
+						</button>
+						<button
+							className="user-turn-action-btn"
+							onClick={() => props.onDeleteMessage?.(message.id)}
+							title={t("common.delete")}
+						>
+							{t("common.delete")}
+						</button>
+						{props.isLastUserMessage && (
+							<button
+								className="user-turn-action-btn"
+								onClick={() => props.onResendUserMessage?.(message)}
+								title={t("app.resendTitle")}
+							>
+								{t("app.resend")}
+							</button>
+						)}
+					</>
+				)}
 			</div>
 		</article>
 	);

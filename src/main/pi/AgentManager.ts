@@ -778,10 +778,166 @@ export class AgentManager {
 		return this.getRuntimeState(agentId);
 	}
 
+	/**
+	 * 使用 pi 的 switch_session RPC 重载当前会话，无需重启进程。
+	 * 流程：编辑 JSONL → 调用 switch_session（同路径）→ pi 从文件重建会话 → loadMessages 刷新。
+	 * 比 restart 快得多（不创建新进程）。
+	 */
+	private async reloadSession(agentId: string) {
+		const runtime = this.requireRuntime(agentId);
+		const sessionPath = runtime.tab.sessionPath;
+		if (!sessionPath) throw new Error("Session path not available for reload");
+		await runtime.process.client.request({
+			type: "switch_session",
+			sessionPath,
+		}, 60_000);
+		await this.loadMessages(agentId);
+	}
+
+	/**
+	 * 编辑消息：修改 JSONL 中的 text 后通过 switch_session 重载，不重启进程。
+	 * 前端需在 agent idle 时调用。
+	 */
+	/**
+	 * 遍历 JSONL 行，按 convertAgentMessages 同样的规则过滤，找到第 msgIndex 条 desktop 消息对应的 JSONL 行号。
+	 * 手动同步两处的过滤逻辑：
+	 *   - user：始终计入（图片无文本时生成为 "[图片]"）
+	 *   - assistant：只计入 extractText 结果非空的行（纯工具调用被 .filter(m => m.text.trim()) 移除）
+	 *   - toolResult：始终计入（"✓/✗ toolName" 非空）
+	 * 返回 JSONL 行号（0-based），若找不到返回 -1。
+	 */
+	private findJsonlLineForMessage(lines: string[], msgIndex: number): number {
+		let desktopCount = 0;
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			if (!line.trim()) continue;
+			let counts = false;
+			try {
+				const entry = JSON.parse(line);
+				const msg = (entry as any)?.message;
+				const role = msg?.role;
+				if (role === "user") {
+					counts = true;
+				} else if (role === "assistant") {
+					const text = this.extractText(msg?.content);
+					counts = !!text.trim();
+				} else if (role === "toolResult") {
+					counts = true;
+				}
+			} catch { /* 跳过无法解析的行 */ }
+			if (counts) {
+				if (desktopCount === msgIndex) return i;
+				desktopCount++;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * 编辑消息：修改 JSONL 中的 text 后通过 switch_session 重载，不重启进程。
+	 * 前端需在 agent idle 时调用。
+	 */
+	async editMessage(agentId: string, messageId: string, newText: string) {
+		const runtime = this.requireRuntime(agentId);
+		const sessionPath = runtime.tab.sessionPath;
+		if (!sessionPath) throw new Error("Session not persisted");
+
+		const raw = await readFile(sessionPath, "utf8").catch(() => "");
+		if (!raw) throw new Error("Session file is empty");
+		const lines = raw.split(/\r?\n/);
+
+		const messages = this.messages.get(agentId);
+		if (!messages) throw new Error("No messages for agent");
+		const msg = messages.find((m) => m.id === messageId);
+		if (!msg) throw new Error("Message not found");
+
+		// 用 desktop 消息上的 _piDeckMsgSeq 定位 JSONL 行号
+		// 尝试用持久化的 _piDeckMsgSeq 定位；若没有（首次编辑或旧会话）则按桌面消息索引扫描
+		const seq = typeof msg.meta?._piDeckMsgSeq === "number" ? msg.meta._piDeckMsgSeq : -1;
+		const msgIndex = messages.indexOf(msg);
+		const jsonLineIdx = seq >= 0 ? seq : msgIndex;
+		const jsonlLine = this.findJsonlLineForMessage(lines, jsonLineIdx);
+		if (jsonlLine === -1) throw new Error("Message not found in session file");
+
+		const entry = JSON.parse(lines[jsonlLine]) as { message?: Record<string, any> };
+		const role = entry.message?.role;
+
+		if (role === "user" || role === "assistant") {
+			const content = entry.message!.content;
+			if (Array.isArray(content)) {
+				const textBlock = content.find((c: any) => c.type === "text");
+				if (textBlock) {
+					textBlock.text = newText;
+				} else {
+					content.push({ type: "text", text: newText });
+				}
+			} else {
+				entry.message!.content = [{ type: "text", text: newText }];
+			}
+		} else {
+			throw new Error("Only user and assistant messages can be edited");
+		}
+
+		// 持久化 _piDeckMsgSeq 到 JSONL 的 message 对象上，后续 reload 后可直接用 O(1) 定位
+		entry.message = { ...entry.message!, _piDeckMsgSeq: seq >= 0 ? seq : msgIndex };
+
+		// 写回 JSONL
+		lines[jsonlLine] = JSON.stringify(entry);
+		await writeFile(sessionPath, lines.join("\n"), "utf8");
+
+		// 更新桌面端内存
+		const newMsg = { ...msg, text: newText, meta: { ...msg.meta, _piDeckMsgSeq: seq } };
+		const newMessages = messages.map((m) => (m.id === messageId ? newMsg : m));
+		this.messages.set(agentId, newMessages);
+		this.scheduleMessageEmit(agentId, true);
+
+		await this.reloadSession(agentId);
+	}
+
+	/**
+	 * 删除消息：从 JSONL 移除对应行后通过 switch_session 重载。
+	 * 前端需在 agent idle 时调用。
+	 */
+	async deleteMessage(agentId: string, messageId: string) {
+		const runtime = this.requireRuntime(agentId);
+		const sessionPath = runtime.tab.sessionPath;
+		if (!sessionPath) throw new Error("Session not persisted");
+
+		const raw = await readFile(sessionPath, "utf8").catch(() => "");
+		if (!raw) throw new Error("Session file is empty");
+		const lines = raw.split(/\r?\n/);
+
+		const messages = this.messages.get(agentId);
+		if (!messages) throw new Error("No messages for agent");
+		const msg = messages.find((m) => m.id === messageId);
+		if (!msg) throw new Error("Message not found");
+
+		// 尝试用持久化的 _piDeckMsgSeq 定位；若没有则按桌面消息索引扫描
+		const seq = typeof msg.meta?._piDeckMsgSeq === "number" ? msg.meta._piDeckMsgSeq : -1;
+		const msgIndex = messages.indexOf(msg);
+		const jsonLineIdx = seq >= 0 ? seq : msgIndex;
+		const jsonlLine = this.findJsonlLineForMessage(lines, jsonLineIdx);
+		if (jsonlLine === -1) throw new Error("Message not found in session file");
+
+		// 从 JSONL 移除该行（置空保持行号稳定，避免 session tree 错乱）
+		const newLines = [...lines];
+		newLines[jsonlLine] = "";
+		await writeFile(sessionPath, newLines.join("\n"), "utf8");
+
+		// 更新桌面端内存
+		messages.splice(msgIndex, 1);
+		this.messages.set(agentId, messages);
+		this.scheduleMessageEmit(agentId, true);
+
+		await this.reloadSession(agentId);
+	}
+
+	/**
+	 * 轻量重载：使用 switch_session RPC 重载会话上下文，无需重启进程。
+	 * 编辑/删除消息后自动调用；IPC channels:agents:reload 也走此路径。
+	 */
 	async reload(agentId: string) {
-		// pi RPC 目前无法通过 prompt 入口正确发送斜线命令（/reload 会被当作文本），
-		// 因此前端已去掉 Reload 按钮，统一走 restart。此方法保留以兼容 IPC 通道。
-		await this.restart(agentId);
+		await this.reloadSession(agentId);
 	}
 
 	/**
@@ -1403,13 +1559,16 @@ export class AgentManager {
 		const icon = status === "running" ? "▶" : isError ? "✗" : "✓";
 		const text =
 			status === "running" ? `${icon} ${toolName}` : `${icon} ${toolName}`;
+		// args 可能来自 event.args（对象）或 existing.meta.args（已序列化的 JSON 字符串）。
+		// 如果是后者（如 tool_execution_end 不带 args），直接复用已有字符串避免 double encoding。
+		const argsMeta = typeof args === "string" ? args : this.truncateForDetail(this.safeJson(args));
 		const meta = {
 			status,
 			toolName,
 			toolCallId,
 			startedAt,
 			...(durationMs !== undefined ? { durationMs } : {}),
-			args: this.truncateForDetail(this.safeJson(args)),
+			args: argsMeta,
 			result: this.truncateForDetail(this.extractToolResultText(result) || this.safeJson(result)),
 			isError,
 			detailText,
@@ -1559,37 +1718,45 @@ export class AgentManager {
 			rawMessages,
 			historicalToolCalls,
 		);
+		// 用于生成 _piDeckMsgSeq：仅对有文本的消息递增，与 .filter(m => m.text.trim()) 一致
+		let msgSeq = 0;
 		return rawMessages
 			.flatMap<ChatMessage>((message, index) => {
 				if (!message || typeof message !== "object") return [];
 				const typed = message as any;
+				// 尝试读取持久化的 _piDeckMsgSeq（首次不存则 undefined）
+				const persistedSeq =
+					typeof typed._piDeckMsgSeq === "number" ? typed._piDeckMsgSeq : undefined;
 				if (typed.role === "user") {
 					const images = this.extractImages(typed.content);
-					return [
-						{
-							id: `${agentId}-history-${index}`,
-							agentId,
-							role: "user" as const,
-							text:
-								this.extractText(typed.content) ||
-								(images.length > 0 ? "[图片]" : ""),
-							timestamp: typed.timestamp ?? Date.now(),
-							...(images.length > 0 ? { images } : {}),
-						},
-					];
+					const text = this.extractText(typed.content) ||
+						(images.length > 0 ? "[图片]" : "");
+					if (!text.trim()) return [];
+					const seq = persistedSeq ?? msgSeq++;
+					return [{
+						id: `${agentId}-history-${index}`,
+						agentId,
+						role: "user" as const,
+						text,
+						timestamp: typed.timestamp ?? Date.now(),
+						meta: { _piDeckMsgSeq: seq },
+						...(images.length > 0 ? { images } : {}),
+					}];
 				}
 				if (typed.role === "assistant") {
+					const text = this.extractText(typed.content);
+					if (!text.trim()) return [];
 					const thinking = this.extractThinking(typed.content);
-					return [
-						{
-							id: `${agentId}-history-${index}`,
-							agentId,
-							role: "assistant" as const,
-							text: this.extractText(typed.content),
-							timestamp: typed.timestamp ?? Date.now(),
-							...(thinking ? { thinking } : {}),
-						},
-					];
+					const seq = persistedSeq ?? msgSeq++;
+					return [{
+						id: `${agentId}-history-${index}`,
+						agentId,
+						role: "assistant" as const,
+						text,
+						timestamp: typed.timestamp ?? Date.now(),
+						meta: { _piDeckMsgSeq: seq },
+						...(thinking ? { thinking } : {}),
+					}];
 				}
 				if (typed.role === "toolResult") {
 					const toolCallId = String(typed.toolCallId ?? `history-tool-${index}`);
@@ -1609,9 +1776,6 @@ export class AgentManager {
 						details: typed.details,
 					};
 					const filePath = this.getToolPathFromArgs(historicalCall?.args);
-
-					// 优先使用 pi-deck-file-capture 扩展注入的原始内容
-					// 该数据在工具执行时已写入 details 并持久化到 session JSONL
 					const piDeckOriginalContent = typed.details?._piDeckOriginalContent as
 						| string
 						| undefined;
@@ -1626,29 +1790,29 @@ export class AgentManager {
 						result,
 						isError,
 					);
-					return [
-						{
-							id: `${agentId}-history-${index}`,
-							agentId,
-							role: "tool" as const,
-							text: `${isError ? "✗" : "✓"} ${toolName}`,
-							timestamp: typed.timestamp ?? Date.now(),
-							meta: {
-								status: isError ? "error" : "done",
-								toolName,
-								toolCallId,
-								...(startedAt !== undefined ? { startedAt } : {}),
-								...(durationMs !== undefined ? { durationMs } : {}),
-								args: this.truncateForDetail(this.safeJson(historicalCall?.args)),
-								result: this.truncateForDetail(this.extractToolResultText(result) || this.safeJson(result)),
-								isError,
-								detailText,
-								...(originalContent && /write|edit|create|patch/i.test(toolName)
-									? { originalContent }
-									: {}),
-							},
+					const seq = persistedSeq ?? msgSeq++;
+					return [{
+						id: `${agentId}-history-${index}`,
+						agentId,
+						role: "tool" as const,
+						text: `${isError ? "✗" : "✓"} ${toolName}`,
+						timestamp: typed.timestamp ?? Date.now(),
+						meta: {
+							_piDeckMsgSeq: seq,
+							status: isError ? "error" : "done",
+							toolName,
+							toolCallId,
+							...(startedAt !== undefined ? { startedAt } : {}),
+							...(durationMs !== undefined ? { durationMs } : {}),
+							args: this.truncateForDetail(this.safeJson(historicalCall?.args)),
+							result: this.truncateForDetail(this.extractToolResultText(result) || this.safeJson(result)),
+							isError,
+							detailText,
+							...(originalContent && /write|edit|create|patch/i.test(toolName)
+								? { originalContent }
+								: {}),
 						},
-					];
+					}];
 				}
 				return [];
 			})
@@ -1722,7 +1886,17 @@ export class AgentManager {
 	) {
 		const details = this.extractToolDetails(result);
 		// args/结果/details 都先序列化再截断，避免单条工具详情撑大 ChatMessage.meta。
-		const argsText = args ? this.truncateForDetail(this.safeJson(args)) : "";
+		// 注意：args 在 end/update 事件里可能已是序列化字符串（从 existing.meta.args 回退），
+		// 此时 safeJson(string) 会二次编码导致显示异常，先反解回对象再序列化。
+		let argsObj = args;
+		if (typeof args === "string" && args.trim()) {
+			try {
+				argsObj = JSON.parse(args) as unknown;
+			} catch {
+				// truncated/不可解析时保持原样
+			}
+		}
+		const argsText = argsObj ? this.truncateForDetail(this.safeJson(argsObj)) : "";
 		const resultText = result
 			? this.truncateForDetail(this.extractToolResultText(result) || this.safeJson(result))
 			: "";

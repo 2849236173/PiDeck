@@ -95,6 +95,8 @@ export const ipcChannels = {
 	agentsCloneSession: "agents:clone-session",
 	agentsSwitchSession: "agents:switch-session",
 	agentsReload: "agents:reload",
+	agentsEditMessage: "agents:edit-message",
+	agentsDeleteMessage: "agents:delete-message",
 	agentsRestart: "agents:restart",
 	agentsCompact: "agents:compact",
 	agentsRuntimeState: "agents:runtime-state",

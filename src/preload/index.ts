@@ -456,6 +456,19 @@ const api = {
 				agentId,
 				sessionPath,
 			) as Promise<{ cancelled?: boolean }>,
+		editMessage: (agentId: string, messageId: string, text: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.agentsEditMessage,
+				agentId,
+				messageId,
+				text,
+			) as Promise<void>,
+		deleteMessage: (agentId: string, messageId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.agentsDeleteMessage,
+				agentId,
+				messageId,
+			) as Promise<void>,
 		reload: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.agentsReload, agentId) as Promise<void>,
 		restart: (agentId: string) =>

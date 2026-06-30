@@ -792,6 +792,14 @@ export function App() {
     enabled: activeMessages.length > 100, // 超过 100 条才启用
   });
 
+  /** 最后一条用户消息的 id，用于决定重发按钮只在最新消息上显示。 */
+  const lastUserMessageId = useMemo(() => {
+    for (let i = activeMessages.length - 1; i >= 0; i--) {
+      if (activeMessages[i].role === "user") return activeMessages[i].id;
+    }
+    return undefined;
+  }, [activeMessages]);
+
   const renderedMessages = useMemo(
     () => groupToolMessages(paginatedMessages),
     [paginatedMessages],
@@ -1650,7 +1658,8 @@ export function App() {
       const detail = (event as CustomEvent<{ text: string }>).detail;
       if (detail?.text) {
         setPrompt(detail.text);
-        // 自动聚焦到输入框
+        // 光标移至文本末尾，利用 RichInput 的 caretRef 机制在渲染后恢复
+        pendingComposerCaretRef.current = detail.text.length;
         requestAnimationFrame(() => {
           composerTextareaRef.current?.focus();
         });
@@ -2827,6 +2836,12 @@ export function App() {
 
   async function abortAgent(agentId = activeAgentId) {
     if (!agentId || isPendingAgentId(agentId)) return;
+    // 立即清除流式状态，让思考气泡和 loading 立刻消失，不等后端 RPC 返回
+    setRuntimeStateByAgent((current) => {
+      const prev = current[agentId];
+      if (!prev) return current;
+      return { ...current, [agentId]: { ...prev, isStreaming: false } };
+    });
     await api.agents.abort(agentId);
     void refreshRuntimeState(agentId);
   }
@@ -3211,8 +3226,24 @@ ${goalTextRef.current}
     const objective = trimmed;
     const existing = goalStatusRef.current;
     if (existing === "active") {
-      if (!window.confirm(`当前有进行中的目标:\n${goalTextRef.current}\n\n是否替换为新目标?`)) return;
+      // 使用自定义 ConfirmDialog 弹框确认替换当前目标
+      setConfirmDialog({
+        title: t("goal.replaceTitle"),
+        message: t("goal.replaceConfirm", { goal: goalTextRef.current ?? "" }),
+        danger: false,
+        confirmLabel: t("common.confirm"),
+        onConfirm: () => {
+          setConfirmDialog(null);
+          startNewGoal(objective);
+        },
+      });
+      return;
     }
+    startNewGoal(objective);
+  }
+
+  /** 在确认后实际启动新目标（从 /goal 和 replace 确认回调共享） */
+  function startNewGoal(objective: string) {
 
     goalTextRef.current = objective;
     goalStatusRef.current = "active";
@@ -3248,10 +3279,61 @@ ${goalTextRef.current}
     });
   }
 
+  /** 重发防重复：通过 messageId 锁避免同一消息多次重发。
+   *  锁会在 agent 状态切回 idle 时自动清除（下方 useEffect），超时 30s 兜底释放。 */
+  const resendingIdsRef = useRef<Set<string>>(new Set());
+
   function resendUserMessage(message: ChatMessage) {
     if (!activeAgentId || message.agentId !== activeAgentId) return;
+    if (resendingIdsRef.current.has(message.id)) return;
+    resendingIdsRef.current.add(message.id);
+    // 30 秒兜底释放，防止锁泄漏
+    setTimeout(() => resendingIdsRef.current.delete(message.id), 30_000);
+
     // "重新发送"按原消息快照再次提交,不修改输入框,图片也复用原始 base64 内容。
     void submitPromptSnapshot(activeAgentId, message.text, message.images);
+  }
+
+  /** agent 切回 idle 时释放所有重发锁，允许下次正常重发。 */
+  useEffect(() => {
+    if (activeAgent?.status !== "running" && activeAgent?.status !== "starting") {
+      resendingIdsRef.current.clear();
+    }
+  }, [activeAgent?.status]);
+
+  /**
+   * 编辑消息：修改 JSONL + 重载会话。用户已点击「编辑 + 保存」两步操作，意图明确，不额外弹框确认。
+   */
+  async function editMessage(messageId: string, newText: string) {
+    if (!activeAgentId) return;
+    try {
+      await api.agents.editMessage(activeAgentId, messageId, newText);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      showToast(`${t("message.editFailed")}: ${msg}`, 5000);
+    }
+  }
+
+  /**
+   * 删除消息：从 JSONL 移除 + 重载会话。使用统一的自定义 ConfirmDialog。
+   */
+  function deleteMessage(messageId: string) {
+    if (!activeAgentId) return;
+    setConfirmDialog({
+      title: t("message.deleteTitle"),
+      message: t("message.deleteReloadPrompt"),
+      danger: true,
+      confirmLabel: t("common.delete"),
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await api.agents.deleteMessage(activeAgentId!, messageId);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          showToast(`${t("message.deleteFailed")}: ${msg}`, 5000);
+        }
+      },
+    });
   }
 
   /**
@@ -4397,6 +4479,8 @@ ${goalTextRef.current}
                     onOpenFile={openFilePath}
                     onDiffFile={diffFilePath}
                     onResendUserMessage={resendUserMessage}
+                    onEditMessage={editMessage}
+                    onDeleteMessage={deleteMessage}
                     showThinking={settings.showThinking}
                     isStreaming={Boolean(streamingMessageId) && item.id.endsWith(streamingMessageId ?? "")}
                     fileSummariesByMessage={turnFileSummaryByMessage}
@@ -4417,6 +4501,9 @@ ${goalTextRef.current}
                     onPreviewImage={setPreviewImage}
                     onOpenFile={openFilePath}
                     onResendUserMessage={resendUserMessage}
+                    onEditMessage={editMessage}
+                    onDeleteMessage={deleteMessage}
+                    isLastUserMessage={item.message.id === lastUserMessageId}
                     validCommandNames={validCommandNames}
                   validFilePaths={validFilePaths}
                   />

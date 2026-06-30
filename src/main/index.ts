@@ -1501,6 +1501,14 @@ function registerIpc() {
 			return result;
 		},
 	);
+	ipcMain.handle(ipcChannels.agentsEditMessage, async (_event, agentId: string, messageId: string, text: string) => {
+		await agentManager.editMessage(agentId, messageId, text);
+		void appLogger.info("agent", "Message edited", { agentId, messageId });
+	});
+	ipcMain.handle(ipcChannels.agentsDeleteMessage, async (_event, agentId: string, messageId: string) => {
+		await agentManager.deleteMessage(agentId, messageId);
+		void appLogger.info("agent", "Message deleted", { agentId, messageId });
+	});
 	ipcMain.handle(ipcChannels.agentsReload, async (_event, agentId: string) => {
 		const result = await agentManager.reload(agentId);
 		void appLogger.info("agent", "Agent reloaded", { agentId });
