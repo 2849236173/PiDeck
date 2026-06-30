@@ -591,6 +591,7 @@ export function App() {
     webServicePort: 8765,
     rpcTimeout: 600_000,
     linkOpenMode: "external",
+    contentMaxWidth: 1400,
     maxEditorFileSizeMB: 5,
     externalEditors: createDefaultExternalEditorSettings(),
 
@@ -4091,7 +4092,13 @@ ${goalTextRef.current}
         onPointerDown={(event) => startResize("list", event)}
       />
 
-      <main ref={chatPaneRef} className="chat-pane">
+      <main
+        ref={chatPaneRef}
+        className="chat-pane"
+        style={settings.contentMaxWidth > 0 && settings.contentMaxWidth < 1400
+          ? { "--content-max-width": `${settings.contentMaxWidth}px` } as React.CSSProperties
+          : undefined}
+      >
         <header ref={chatHeaderRef} className="chat-header">
           <div className="chat-title-block">
             <div className="chat-title-row">

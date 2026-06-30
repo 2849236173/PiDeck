@@ -1488,6 +1488,18 @@ body.is-terminal-resizing {
 	border-bottom-left-radius: var(--radius-lg);
 	overflow: hidden;
 }
+
+/* ── 内容行宽限制：仅在 --content-max-width 由 JS 注入时生效 ── */
+.chat-pane[style*="--content-max-width"] .message-list {
+	width: min(100%, var(--content-max-width));
+	max-width: var(--content-max-width);
+	margin-inline: auto;
+}
+.chat-pane[style*="--content-max-width"] .composer-box {
+	width: min(100%, var(--content-max-width));
+	max-width: var(--content-max-width);
+	margin-inline: auto;
+}
 .chat-header {
 	display: grid;
 	grid-template-columns: minmax(180px, 1fr) minmax(0, auto);
