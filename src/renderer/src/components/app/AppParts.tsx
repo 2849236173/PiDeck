@@ -2434,9 +2434,10 @@ export function ConversationOutline(props: {
 		>
 			<div className="outline-zone">
 				<button
-					className="outline-trigger"
+					className={`outline-trigger${props.items.length > 0 ? "" : " is-disabled"}`}
+					disabled={props.items.length === 0}
 					title={t("outline.trigger", { count: props.items.length })}
-					onPointerDown={startDrag}
+					onPointerDown={props.items.length > 0 ? startDrag : undefined}
 				>
 					☰
 				</button>

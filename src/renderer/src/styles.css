@@ -4964,6 +4964,14 @@ body.is-composer-resizing .composer-resize-handle::after {
 	color: var(--color-accent);
 	border-color: var(--color-accent);
 }
+.outline-trigger.is-disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+.outline-trigger.is-disabled:hover {
+	color: var(--color-text-tertiary);
+	border-color: var(--color-border-subtle);
+}
 .conversation-outline {
 	position: absolute;
 	right: 0;
@@ -4988,8 +4996,8 @@ body.is-composer-resizing .composer-resize-handle::after {
 	pointer-events: auto;
 	transform: translateX(0);
 }
-.outline-zone:hover .outline-trigger,
-.outline-hover.dragging .outline-trigger {
+.outline-zone:hover .outline-trigger:not(.is-disabled),
+.outline-hover.dragging .outline-trigger:not(.is-disabled) {
 	opacity: 0;
 }
 .outline-title {
