@@ -102,6 +102,8 @@ const zhCN = {
   "app.piPathSaved": "pi 路径已保存：{path}",
   "app.piPathValidateFailed": "pi 路径校验失败：{error}",
   "app.projectChatGuide": "内置对话区，不需要选择项目目录",
+  "app.sessionFile": "会话文件",
+  "app.compactionEvent": "会话已压缩",
   "app.projectChatInfo":
     "Chat 是固定置顶的内置对话区；会话写入应用用户目录，不需要先添加项目。",
   "app.projectCollapse": "折叠",
@@ -1235,6 +1237,8 @@ const enUS: Record<TranslationKey, string> = {
   "app.piPathSaved": "pi path saved: {path}",
   "app.piPathValidateFailed": "pi path validation failed: {error}",
   "app.projectChatGuide": "Built-in chat area. No project folder required.",
+  "app.sessionFile": "Session file",
+  "app.compactionEvent": "Session compacted",
   "app.projectChatInfo":
     "Chat is a pinned built-in conversation area. Sessions are written to the app user data directory.",
   "app.projectCollapse": "Collapse",
