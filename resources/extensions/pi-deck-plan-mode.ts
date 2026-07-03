@@ -361,10 +361,10 @@ export default function piDeckPlanModeExtension(pi: ExtensionAPI): void {
 		persistState();
 
 		const todoListText = todoItems.map((item) => `${item.step}. ☐ ${item.text}`).join("\n");
-		const choice = await ctx.ui.select("PiDeck 计划模式 — 请选择下一步操作", [
-			"执行计划（跟踪进度）",
-			"继续计划模式",
-			"修改计划",
+		const choice = await ctx.ui.select("PiDeck 计划模式 — 计划已生成，请选择下一步", [
+			"执行计划（AI 开始逐步实施，并自动标记完成进度）",
+			"继续只读分析（保持计划模式，不修改文件）",
+			"修改计划（编辑计划步骤后重新提交给 AI）",
 		]);
 
 		if (choice?.startsWith("执行")) {
