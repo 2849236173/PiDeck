@@ -3023,7 +3023,7 @@ export function ConversationOutline(props: {
 	return (
 		<div
 			className={`outline-hover${dragging ? " dragging" : ""}`}
-			style={{ top }}
+			style={{ "--outline-top": `${top}px` } as React.CSSProperties}
 		>
 			<div className="outline-zone">
 				<button

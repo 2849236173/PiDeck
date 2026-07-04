@@ -573,9 +573,10 @@ select:focus-visible {
 }
 
 .wechat-shell {
-	--list-width: 250px;
-	--list-expanded-width: 250px;
-	--list-hover-width: 320px;
+	position: relative;
+	--list-width: 190px;
+	--list-expanded-width: 190px;
+	--list-hover-width: 250px;
 	--drawer-width: 270px;
 	/* 抽屉列下限 / 分隔条列宽由 JS 按 open+collapsed 状态注入：
 	   关闭或折叠时为 0，展开时抽屉下限 260px、分隔条 6px。
@@ -5561,8 +5562,9 @@ body.is-composer-resizing .composer-resize-handle::after {
 }
 .outline-hover {
 	position: absolute;
-	right: 18px;
-	z-index: 8;
+	right: calc(6px + max(var(--drawer-col-w), min(var(--drawer-width), 38vw)));
+	top: calc(var(--outline-top, 180px) + var(--window-drag-height, 0px));
+	z-index: 15;
 	display: flex;
 	flex-direction: column;
 	align-items: flex-end;
@@ -5820,7 +5822,7 @@ body.is-composer-resizing .composer-resize-handle::after {
 	color: var(--color-text-tertiary);
 	font-size: var(--font-size-caption);
 }
-@media (max-width: 1280px) {
+@media (max-width: 640px) {
 	.outline-hover {
 		display: none;
 	}

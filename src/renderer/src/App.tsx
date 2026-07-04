@@ -86,6 +86,7 @@ import {
   PromptSuggestions,
   SessionContextMenu,
   SessionStatus,
+
   SessionFileSummary,
   ComposerModePicker,
   ThinkingPicker,
@@ -178,7 +179,7 @@ const api =
       ? createBrowserApi()
       : createPreviewApi());
 // 输入框默认高度增加,提供更好的输入体验,适合多行输入和代码片段
-const COMPOSER_MIN_HEIGHT = 215;
+const COMPOSER_MIN_HEIGHT = 150;
 const COMPOSER_DEFAULT_TERMINAL_HEIGHT = 220;
 const COMPOSER_MIN_TIMELINE_HEIGHT = 160;
 const DRAWER_ANIMATION_MS = 300;
@@ -763,7 +764,7 @@ export function App() {
   const [customPathResult, setCustomPathResult] =
     useState<PiInstallStatus | null>(null);
   const [environmentDialog, setEnvironmentDialog] = useState(false);
-  const DEFAULT_LIST_WIDTH = 250;
+  const DEFAULT_LIST_WIDTH = 190;
   const [listWidth, setListWidth] = useState(DEFAULT_LIST_WIDTH);
   const [drawerWidth, setDrawerWidth] = useState(270);
   const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT);
@@ -3873,8 +3874,8 @@ ${goalTextRef.current}
       frame = requestAnimationFrame(() => {
         const delta = moveEvent.clientX - startX;
         if (target === "list") {
-          const next = Math.min(440, Math.max(160, startListWidth + delta));
-          setListCollapsed(next <= 170);
+          const next = Math.min(440, Math.max(100, startListWidth + delta));
+          setListCollapsed(next <= 120);
           setListWidth(next);
         } else {
           const minDrawerWidth = drawerPinned ? 220 : 180;
@@ -3972,7 +3973,7 @@ ${goalTextRef.current}
         {
           "--list-width": `${listCollapsed ? 0 : listWidth}px`,
           "--list-expanded-width": `${listWidth}px`,
-          "--list-hover-width": `${Math.max(250, listWidth)}px`,
+          "--list-hover-width": `${Math.max(190, listWidth)}px`,
           // 抽屉关闭/折叠时上限也必须归零，否则常驻第 5 列会留下右侧空白。
           "--drawer-width": `${drawer && !drawerCollapsed ? drawerWidth : 0}px`,
           // 抽屉列下限：展开且未折叠时 260px，否则 0；实际列宽由 CSS max(下限, min(drawer-width, 38vw)) 计算。
@@ -4528,15 +4529,6 @@ ${goalTextRef.current}
               )}
             </div>
             <div className="chat-subtitle-row">
-              {activeAgent?.status && (
-                <span className={`agent-status-badge status-${activeAgent.status}`}>
-                  {activeAgent.status === 'running' && '●'}
-                  {activeAgent.status === 'idle' && '○'}
-                  {activeAgent.status === 'starting' && '◐'}
-                  {' '}
-                  {t(`app.status${activeAgent.status.charAt(0).toUpperCase() + activeAgent.status.slice(1)}` as any) || activeAgent.status}
-                </span>
-              )}
               <SessionStatus
                 state={activeRuntimeState}
                 duration={
@@ -4863,54 +4855,6 @@ ${goalTextRef.current}
           )}
 
         {activeAgent && (
-          <ConversationOutline
-            items={outlineItems}
-            onJump={handleOutlineJump}
-            extraAction={{
-              active: scratchPad.isOpen,
-              label: t("scratchPad.openTooltip"),
-              onClick: () => scratchPad.toggle(),
-              icon: <Pencil size={17} />,
-            }}
-            terminalAction={{
-              active: terminalOpen,
-              label: t("app.terminal"),
-              onClick: () => {
-                if (!activeAgentId) return;
-                setTerminalOpenForAgent(activeAgentId, !terminalOpen);
-              },
-              icon: <Terminal size={17} />,
-            }}
-            filesAction={{
-              active: drawer === "files",
-              label: t("app.files"),
-              onClick: () => {
-                if (drawer === "files" && !drawerCollapsed) {
-                  setDrawer(null);
-                } else {
-                  openDrawer("files");
-                  setDrawerCollapsed(false);
-                }
-              },
-              icon: <FolderOpen size={17} />,
-            }}
-            editorsAction={{
-              active: editorsOpen,
-              label: t("app.openWithEditor"),
-              onClick: (e) => {
-                setEditorsOpen((open) => !open);
-                const btn = (e?.currentTarget as HTMLElement)?.closest("button");
-                if (btn) {
-                  const rect = btn.getBoundingClientRect();
-                  setEditorsAnchor({ x: rect.left - 4, y: rect.top });
-                }
-              },
-              icon: <Code size={17} />,
-            }}
-          />
-        )}
-
-        {activeAgent && (
         <footer ref={composerRef} className="composer">
           {/* 图片预览作为输入框上方的附件栏,避免占用 textarea 的可输入区域。 */}
           {attachedImages.length > 0 && (
@@ -5189,6 +5133,54 @@ ${goalTextRef.current}
           />
         )}
       </main>
+
+        {activeAgent && (
+          <ConversationOutline
+            items={outlineItems}
+            onJump={handleOutlineJump}
+            extraAction={{
+              active: scratchPad.isOpen,
+              label: t("scratchPad.openTooltip"),
+              onClick: () => scratchPad.toggle(),
+              icon: <Pencil size={17} />,
+            }}
+            terminalAction={{
+              active: terminalOpen,
+              label: t("app.terminal"),
+              onClick: () => {
+                if (!activeAgentId) return;
+                setTerminalOpenForAgent(activeAgentId, !terminalOpen);
+              },
+              icon: <Terminal size={17} />,
+            }}
+            filesAction={{
+              active: drawer === "files",
+              label: t("app.files"),
+              onClick: () => {
+                if (drawer === "files" && !drawerCollapsed) {
+                  setDrawer(null);
+                } else {
+                  openDrawer("files");
+                  setDrawerCollapsed(false);
+                }
+              },
+              icon: <FolderOpen size={17} />,
+            }}
+            editorsAction={{
+              active: editorsOpen,
+              label: t("app.openWithEditor"),
+              onClick: (e) => {
+                setEditorsOpen((open) => !open);
+                const btn = (e?.currentTarget as HTMLElement)?.closest("button");
+                if (btn) {
+                  const rect = btn.getBoundingClientRect();
+                  setEditorsAnchor({ x: rect.left - 4, y: rect.top });
+                }
+              },
+              icon: <Code size={17} />,
+            }}
+          />
+        )}
 
       {/* 右侧分隔条常驻 grid 列 4，宽度由 --drawer-splitter-w 驱动（0/6px）；
           关闭/折叠时宽度 0 且 pointer-events:none，避免遮挡会话区。 */}
