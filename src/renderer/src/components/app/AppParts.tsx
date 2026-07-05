@@ -450,8 +450,7 @@ export function ComposerToolbar(props: {
 	onOpenComposerModePicker?: () => void;
 	/** 在思考按钮后插入的额外指示器（如飞书链接状态） */
 	feishuIndicator?: ReactNode;
-	/** Agent 正在运行中，显示全局脉冲指示 */
-	isRunning?: boolean;
+
 }) {
 	const ctxPercent = props.state?.contextPercent;
 	const showCompact = ctxPercent != null && ctxPercent > 30;
@@ -488,12 +487,7 @@ export function ComposerToolbar(props: {
 				{t("app.think")}: {thinkingDisplay}
 			</button>
 			{props.feishuIndicator}
-			{props.isRunning && (
-				<span className="composer-running-indicator">
-					<span className="running-dot" />
-					{t("app.statusRunning")}
-				</span>
-			)}
+
 			{showCompact && (
 				<button
 					className={
@@ -1832,28 +1826,56 @@ export const ThinkingBlock = memo(function ThinkingBlock(props: {
 	);
 });
 
-/** 流式等待指示器：思考中/响应中，三点脉动 + 文案。 */
+
+
+/**
+ * 流式等待指示器（三点脉动动画 + 状态文案）。
+ *
+ * 状态优先级：
+ *  1. 工具执行中 → "正在执行 {tool}"（琥珀色）
+ *  2. 思考中（有可见思考文本）→ "思考中"（默认强调色）
+ *  3. 等待中 → 只显示 "..."（更低透明度）
+ *
+ * 当模型正在输出可见文本（responding）时，由外层 App.tsx
+ * 的 isAwaitingAssistant 控制直接不渲染此组件，无需在此处理。
+ */
 export function ThinkingIndicator(props: {
 	thinking?: string;
 	showThinking?: boolean;
 	isExecutingTool?: boolean;
 	executingToolName?: string;
 }) {
-	const hasThinking =
-		props.showThinking && props.thinking && props.thinking.length > 0;
+	const { isExecutingTool, executingToolName, thinking, showThinking } = props;
+
+	let kind: "executing" | "thinking" | "waiting";
+	let label: string;
+
+	if (isExecutingTool) {
+		// 工具执行中：琥珀色变体，优先显示具体工具名
+		kind = "executing";
+		label = executingToolName
+			? t("thinking.executing", { tool: executingToolName })
+			: t("thinking.executingFallback");
+	} else if (showThinking && thinking && thinking.length > 0) {
+		// 思考中：有可见思考文本
+		kind = "thinking";
+		label = t("thinking.streaming");
+	} else {
+		// 通用等待：无具体状态
+		kind = "waiting";
+		label = "...";
+	}
+
 	return (
-		<div
-			className="thinking-indicator"
-			data-kind={hasThinking ? "thinking" : "responding"}
-		>
+		<div className="thinking-indicator" data-kind={kind}>
 			<span className="thinking-indicator-dots" aria-hidden="true">
 				<span />
 				<span />
 				<span />
 			</span>
-			<span className="thinking-indicator-label">
-				{hasThinking ? t("thinking.streaming") : t("thinking.responding")}
-			</span>
+			{kind !== "waiting" && (
+				<span className="thinking-indicator-label">{label}</span>
+			)}
 		</div>
 	);
 }

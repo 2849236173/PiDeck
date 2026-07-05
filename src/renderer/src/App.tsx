@@ -70,6 +70,7 @@ import {
   AgentContextMenu,
   BranchSelector,
   ComposerToolbar,
+  ThinkingIndicator,
   CompactionCard,
   ConversationOutline,
   DiagnosticMessageCard,
@@ -179,7 +180,7 @@ const api =
       ? createBrowserApi()
       : createPreviewApi());
 // 输入框默认高度增加,提供更好的输入体验,适合多行输入和代码片段
-const COMPOSER_MIN_HEIGHT = 150;
+const COMPOSER_MIN_HEIGHT = 175;
 const COMPOSER_DEFAULT_TERMINAL_HEIGHT = 220;
 const COMPOSER_MIN_TIMELINE_HEIGHT = 160;
 const DRAWER_ANIMATION_MS = 300;
@@ -4835,6 +4836,12 @@ ${goalTextRef.current}
                       <div className="thinking-card-content">{activeThinking}</div>
                     </section>
                   )}
+                  <ThinkingIndicator
+                    thinking={activeThinking}
+                    showThinking={settings.showThinking}
+                    isExecutingTool={activeRuntimeState?.isExecutingTool}
+                    executingToolName={activeRuntimeState?.executingToolName}
+                  />
                 </>
               )}
             </div>
@@ -4918,7 +4925,6 @@ ${goalTextRef.current}
               state={activeRuntimeState}
               compacting={compacting}
               disabled={isAgentBusy || composerDisabled}
-              isRunning={isAwaitingAssistant}
               onCycleModel={cycleModel}
               onPickModel={openModelPicker}
               onPickThinking={() => setThinkingPickerOpen(true)}
