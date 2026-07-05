@@ -3542,6 +3542,14 @@ ${goalTextRef.current}
     }
   }, [activeAgent?.status]);
 
+  /** 将主进程抛出的错误消息中的 BUSY_ 前缀码转为前端多语言文案 */
+  function translateAgentErrorMessage(msg: string): string {
+    if (msg.startsWith("BUSY_STREAMING:")) return t("message.busyStreaming");
+    if (msg.startsWith("BUSY_TOOL:")) return t("message.busyTool");
+    if (msg.startsWith("BUSY_GENERIC:")) return t("message.busyGeneric");
+    return msg;
+  }
+
   /**
    * 编辑消息：修改 JSONL + 重载会话。用户已点击「编辑 + 保存」两步操作，意图明确，不额外弹框确认。
    */
@@ -3551,7 +3559,7 @@ ${goalTextRef.current}
       await api.agents.editMessage(activeAgentId, messageId, newText);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      showToast(`${t("message.editFailed")}: ${msg}`, 5000);
+      showToast(`${t("message.editFailed")}: ${translateAgentErrorMessage(msg)}`, 5000);
     }
   }
 
@@ -3571,7 +3579,7 @@ ${goalTextRef.current}
           await api.agents.deleteMessage(activeAgentId!, messageId);
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          showToast(`${t("message.deleteFailed")}: ${msg}`, 5000);
+          showToast(`${t("message.deleteFailed")}: ${translateAgentErrorMessage(msg)}`, 5000);
         }
       },
     });
@@ -4875,7 +4883,6 @@ ${goalTextRef.current}
           )}
           {activeAgentId && extensionWidgetsByAgent[activeAgentId] && Object.keys(extensionWidgetsByAgent[activeAgentId]).length > 0 && (() => {
             const entries = Object.entries(extensionWidgetsByAgent[activeAgentId]);
-            const totalLines = entries.reduce((sum, [, lines]) => sum + lines.length, 0);
             const collapsed = widgetsCollapsedByAgent[activeAgentId] ?? false;
             return (
               <div className="extension-widgets-container" key="widgets-container">
@@ -4890,8 +4897,7 @@ ${goalTextRef.current}
                   title={collapsed ? t("app.expandList") : t("app.collapseList")}
                 >
                   <ChevronDown size={14} className={`toggle-arrow${collapsed ? "" : " expanded"}`} />
-                  <span>{t("app.widgetsToggle", { count: totalLines })}</span>
-                  <span className="toggle-count">{entries.length} widget{entries.length > 1 ? "s" : ""}</span>
+                  <span>{t("app.widgetsToggle")}</span>
                 </button>
                 {!collapsed && entries.map(([widgetKey, widgetLines]) => (
                   <div key={widgetKey} className="extension-widget-stack" aria-live="polite">

@@ -128,7 +128,7 @@ export class AgentManager {
 				type: "get_entries",
 			}, 15_000);
 			const entriesData = entriesResponse.data as
-				| { entries?: Array<{ id: string; parentId: string | null }>; leafId?: string }
+				| { entries?: Array<{ id: string; parentId: string | null; type?: string; message?: { role?: string } }>; leafId?: string }
 				| undefined;
 			if (entriesData?.entries && entriesData?.leafId) {
 				activeEntryIds = this.buildActiveBranchEntryIds(entriesData.entries, entriesData.leafId);
@@ -678,14 +678,11 @@ export class AgentManager {
 
 	async abort(agentId: string) {
 		const runtime = this.requireRuntime(agentId);
-		// 先取消所有 pending UI 请求，防止 pi 等待 extension_ui_response 导致 abort 超时
-		const pending = this.pendingUIRequests.get(agentId);
-		if (pending && pending.size > 0) {
-			for (const [reqId, _req] of pending) {
-				this.sendUIResponse(agentId, reqId, { cancelled: true });
-			}
-		}
 		// pi RPC 原生支持 abort，对应终端里的 Escape：停止当前 LLM/tool 流程并保留会话进程。
+		// 注意：不先取消 pending UI 请求——pi 的 abort 应能打断正在等待 extension_ui_response 的
+		// agent_end 处理器。如果先发 extension_ui_response 解析掉 ctx.ui.select()，会导致
+		// extension 的 agent_end 处理器提前完成、释放 agent，而 abort RPC 还没到达，
+		// 此时如果排队消息被 pi 处理，就会产生停止后又继续的假象。
 		await runtime.process.client
 			.request({ type: "abort" }, 10_000)
 			.catch((error) => {
@@ -880,14 +877,12 @@ export class AgentManager {
 	}
 
 	/**
-	 * 使用 pi 的 switch_session RPC 重载当前会话，无需重启进程。
-	 * 流程：编辑 JSONL → 在文件首行插入 _reloadMarker → 调用 switch_session（同路径）
-	 * → pi 发现文件首行变更→缓存失效→重新读取 → 移除 _reloadMarker 行。
+	 * 使用 pi �� switch_session RPC ���ص�ǰ�Ự���������½��̡�
+	 * ���̣��༭ JSONL → �ĵ�һ�� JSON ������ _reloadMarker �ֶ� → switch_session
+	 * → pi ���ֵ�һ�����ݱ仯→������Ч→���¶�ȡ → �Ƴ� _reloadMarker �ֶΡ�
 	 *
-	 * 相比旧版本（临时文件复制→两次 switch_session），本方案：
-	 * - 只有一次 switch_session 调用
-	 * - 不产生临时文件残留
-	 * - 每次编辑的 _reloadMarker 不同，确保缓存必定失效
+	 * ��ȣ��ɷ������б�ǩ�У����� _reloadMarker ��Ϊ�ֶ�д���һ�е� JSON �У�
+	 * ���ı��ļ��нṹ������ marker δ��������ļ���Ȼ�ǺϷỰ���ɱ� pi ������
 	 */
 	private async reloadSession(agentId: string) {
 		const startTime = Date.now();
@@ -896,12 +891,20 @@ export class AgentManager {
 		if (!sessionPath) throw new Error("Session path not available for reload");
 
 		const markerId = randomUUID();
-		const markerLine = JSON.stringify({ _reloadMarker: markerId, ts: Date.now() });
 
 		try {
-			// 先读取文件，在首行插入 _reloadMarker（确保 pi 读取时 content 不同，缓存失效）
 			const raw = await readFile(sessionPath, "utf8");
-			await writeFile(sessionPath, `${markerLine}\n${raw}`, "utf8");
+			const lines = raw.split(/\r?\n/);
+			if (lines.length === 0 || !lines[0].trim()) {
+				throw new Error("Session file is empty");
+			}
+			// �ĵ�һ�� JSON ���󣬼��� _reloadMarker �ֶΣ����� pi ���·������Ļ��档
+			// ֻ�ĵ�һ�е����ݣ����ı��нṹ��ʹ marker ���������ļ���Ȼ�ǺϷỰ��
+			const firstLine = JSON.parse(lines[0]) as Record<string, unknown>;
+			delete firstLine._reloadMarker; // 先清除旧的，确保值不同
+			firstLine._reloadMarker = markerId;
+			lines[0] = JSON.stringify(firstLine);
+			await writeFile(sessionPath, lines.join("\n"), "utf8");
 
 			void this.appLogger?.info("agent", "Session reload: switch_session start", {
 				agentId,
@@ -909,7 +912,6 @@ export class AgentManager {
 				elapsedMs: Date.now() - startTime,
 			});
 
-			// 调用 switch_session，pi 发现首行变化 → 缓存失效 → 重新读取文件
 			const response = await runtime.process.client.request({
 				type: "switch_session",
 				sessionPath,
@@ -922,11 +924,18 @@ export class AgentManager {
 				elapsedMs: Date.now() - startTime,
 			});
 
-			// 恢复文件：移除首行的 _reloadMarker
-			const afterRaw = await readFile(sessionPath, "utf8");
-			const afterLines = afterRaw.split(/\r?\n/);
-			if (afterLines.length > 0 && afterLines[0].includes('_reloadMarker')) {
-				await writeFile(sessionPath, afterLines.slice(1).join("\n"), "utf8");
+			// �ָ���һ�У��Ƴ� _reloadMarker �ֶΣ������ļ���ԭʼ״̬
+			try {
+				const afterRaw = await readFile(sessionPath, "utf8");
+				const afterLines = afterRaw.split(/\r?\n/);
+				if (afterLines.length > 0 && afterLines[0].includes("_reloadMarker")) {
+					const restored = JSON.parse(afterLines[0]) as Record<string, unknown>;
+					delete restored._reloadMarker;
+					afterLines[0] = JSON.stringify(restored);
+					await writeFile(sessionPath, afterLines.join("\n"), "utf8");
+				}
+			} catch {
+				// _reloadMarker �ֶ����� residue ���ᵼ�� pi ���Է�����������Ӱ���Ựʹ��
 			}
 
 			if (!response.success) {
@@ -940,14 +949,6 @@ export class AgentManager {
 
 			await this.loadMessages(agentId);
 		} catch (error) {
-			// 出错时尝试恢复文件（移除 marker 行）
-			try {
-				const raw = await readFile(sessionPath, "utf8");
-				const lines = raw.split(/\r?\n/);
-				if (lines.length > 0 && lines[0].includes('_reloadMarker')) {
-					await writeFile(sessionPath, lines.slice(1).join("\n"), "utf8");
-				}
-			} catch { /* 恢复失败时 marker 行残留无害 */ }
 			void this.appLogger?.error("agent", "Session reload failed", {
 				agentId,
 				error: error instanceof Error ? error.message : String(error),
@@ -1025,18 +1026,18 @@ export class AgentManager {
 			try {
 				const state = await this.getRuntimeState(agentId);
 				if (state.isStreaming || state.isCompacting) {
-					throw new Error("Agent is busy streaming, please wait until it completes");
+					throw new Error("BUSY_STREAMING: Agent is streaming, please wait");
 				}
 				// isExecutingTool 时也视为 busy
 				if (state.isExecutingTool) {
-					throw new Error("Agent is executing a tool, please wait until it completes");
+					throw new Error("BUSY_TOOL: Agent is executing a tool, please wait");
 				}
 			} catch (error) {
 				// 如果 getRuntimeState 本身失败，但 tab.status 为 running，仍然拒绝
-				if (error instanceof Error && error.message.includes("please wait")) {
+				if (error instanceof Error && error.message.startsWith("BUSY_")) {
 					throw error;
 				}
-				throw new Error("Agent is currently busy, please try again later");
+				throw new Error("BUSY_GENERIC: Agent is currently busy, please try again later");
 			}
 		}
 	}
