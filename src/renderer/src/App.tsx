@@ -88,14 +88,12 @@ import {
   SessionContextMenu,
   SessionStatus,
 
-  SessionFileSummary,
   ComposerModePicker,
   ThinkingPicker,
   UserBubble,
-  AssistantText,
-  ThinkingBlock,
-  ToolCard,
+  TurnRow,
   AskQuestionCard,
+  groupToolMessages,
   applySuggestion,
   buildOutline,
   buildSuggestionItems,
@@ -919,6 +917,15 @@ export function App() {
   });
 
   /** 最后一条用户消息的 id，用于决定重发按钮只在最新消息上显示。 */
+  /**
+   * 将分页消息按 agent run 分组，用于 TurnRow 渲染。
+   * 用户/错误/系统消息保持独立条目，assistant + tool 消息聚合为 agnet-run。
+   */
+  const renderedRuns = useMemo(
+    () => groupToolMessages(paginatedMessages),
+    [paginatedMessages],
+  );
+
   const lastUserMessageId = useMemo(() => {
     for (let i = activeMessages.length - 1; i >= 0; i--) {
       if (activeMessages[i].role === "user") return activeMessages[i].id;
@@ -4711,7 +4718,38 @@ ${goalTextRef.current}
           )}
           {activeAgent && (
             <div className="message-list">
-              {paginatedMessages.map((message) => {
+              {/* 使用 groupToolMessages 渲染：user/error/system 独立条目，
+                  assistant + tool 聚合为 agnet-run（TurnRow 自带操作栏） */}
+              {renderedRuns.map((item) => {
+                if (item.kind === "agent-run") {
+                  // 判断该 run 是否包含正在流式的消息
+                  const isRunStreaming = Boolean(
+                    streamingMessageId &&
+                    item.items.some(
+                      (i) => i.kind === "message" && i.message.id === streamingMessageId,
+                    ),
+                  );
+                  return (
+                    <TurnRow
+                      key={item.id}
+                      run={item}
+                      onPreviewImage={setPreviewImage}
+                      showThinking={settings.showThinking}
+                      isStreaming={isRunStreaming}
+                      onOpenExternal={(url) => api.app.openExternal(url)}
+                      onOpenFile={openFilePath}
+                      onDiffFile={diffFilePath}
+                      onEditMessage={editMessage}
+                      onDeleteMessage={deleteMessage}
+                      fileSummariesByMessage={turnFileSummaryByMessage}
+                    />
+                  );
+                }
+                // 独立消息条目：user / error / system
+                // 理论上顶层的 thinking-group / tool-group 不会穿透到此（
+                // 它们总是被聚合进 agent-run），但 TypeScript 需要穷举
+                if (item.kind !== "message") return null;
+                const message = item.message;
                 if (message.role === "user") {
                   return (
                     <UserBubble
@@ -4726,81 +4764,6 @@ ${goalTextRef.current}
                       validCommandNames={validCommandNames}
                       validFilePaths={validFilePaths}
                     />
-                  );
-                }
-                if (message.role === "assistant") {
-                  // 按 <thinking> 标签切分，保持原文交替顺序，不合并
-                  const hasThinkingTags = /<thinking>/i.test(message.text);
-                  if (hasThinkingTags) {
-                    const parts = message.text.split(/(<thinking>[\s\S]*?<\/thinking>)/g);
-                    const segs = parts
-                      .map((part: string) => {
-                        const m = part.match(/^<thinking>([\s\S]*)<\/thinking>$/);
-                        if (m) {
-                          const c = m[1].trim();
-                          return c && settings.showThinking ? { type: "thinking" as const, content: c } : null;
-                        }
-                        const t = part.trim();
-                        return t ? { type: "text" as const, content: t } : null;
-                      })
-                      .filter(Boolean) as Array<{ type: "text" | "thinking"; content: string }>;
-                    return (
-                      <Fragment key={message.id}>
-                        {segs.map((seg, i) =>
-                          seg.type === "thinking" ? (
-                            <ThinkingBlock key={i} text={seg.content} showThinking={settings.showThinking} />
-                          ) : (
-                            <AssistantText
-                              key={`t${i}`}
-                              text={seg.content}
-                              images={i === 0 ? message.images : undefined}
-                              onPreviewImage={setPreviewImage}
-                              onOpenExternal={(url) => api.app.openExternal(url)}
-                              onOpenFile={openFilePath}
-                              isStreaming={message.id === streamingMessageId}
-                            />
-                          ),
-                        )}
-                        {turnFileSummaryByMessage[message.id]?.length > 0 && (
-                          <SessionFileSummary
-                            files={turnFileSummaryByMessage[message.id]}
-                            onOpenFile={openFilePath}
-                            onDiffFile={diffFilePath}
-                          />
-                        )}
-                      </Fragment>
-                    );
-                  }
-                  // 无 thinking 标签：用 message.thinking 字段兜底
-                  return (
-                    <Fragment key={message.id}>
-                      <AssistantText
-                        text={message.text}
-                        images={message.images}
-                        onPreviewImage={setPreviewImage}
-                        onOpenExternal={(url) => api.app.openExternal(url)}
-                        onOpenFile={openFilePath}
-                        isStreaming={message.id === streamingMessageId}
-                      />
-                      {settings.showThinking && message.thinking?.trim() && (
-                        <ThinkingBlock
-                          text={message.thinking}
-                          showThinking={settings.showThinking}
-                        />
-                      )}
-                      {turnFileSummaryByMessage[message.id]?.length > 0 && (
-                        <SessionFileSummary
-                          files={turnFileSummaryByMessage[message.id]}
-                          onOpenFile={openFilePath}
-                          onDiffFile={diffFilePath}
-                        />
-                      )}
-                    </Fragment>
-                  );
-                }
-                if (message.role === "tool") {
-                  return (
-                    <ToolCard key={message.id} message={message} />
                   );
                 }
                 if (message.role === "error") {
