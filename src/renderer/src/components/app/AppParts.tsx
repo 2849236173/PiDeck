@@ -1792,7 +1792,8 @@ export const ThinkingBlock = memo(function ThinkingBlock(props: {
 	endedAt?: number;
 	showThinking?: boolean;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	// 默认展开，方便用户看到推理过程；可手动折叠
+	const [expanded, setExpanded] = useState(true);
 	if (!props.showThinking || !props.text.trim()) return null;
 	const previewLen = 220;
 	const needsTruncate = props.text.length > previewLen;
