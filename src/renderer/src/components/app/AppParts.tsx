@@ -1800,13 +1800,6 @@ export const AskQuestionCard = memo(function AskQuestionCard(props: {
 						>
 							{t("common.false")}
 						</button>
-						<button
-							className="ask-question-card-cancel"
-							onClick={handleCancel}
-							disabled={cancelling}
-						>
-							{cancelling ? cancellingLabel : t("common.cancel")}
-						</button>
 					</div>
 				)}
 				{method === "input" && (
