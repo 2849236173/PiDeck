@@ -1527,11 +1527,15 @@ export const ToolCard = memo(function ToolCard(props: {
 						{formatDuration(durationMs)}
 					</span>
 				)}
-				{subtitle && (
+				{isAskCard && askCard?.question ? (
+					<span className="tool-card-subtitle" title={askCard.question}>
+						{askCard.question}
+					</span>
+				) : subtitle ? (
 					<span className="tool-card-subtitle" title={subtitle}>
 						{subtitle}
 					</span>
-				)}
+				) : null}
 				<ChevronDown
 					size={14}
 					className={`tool-card-chevron${expanded ? " open" : ""}`}
