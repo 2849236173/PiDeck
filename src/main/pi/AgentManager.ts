@@ -2115,22 +2115,41 @@ export class AgentManager {
 		// args 可能来自 event.args（对象）或 existing.meta.args（已序列化的 JSON 字符串）。
 		// 如果是后者（如 tool_execution_end 不带 args），直接复用已有字符串避免 double encoding。
 		const argsMeta = typeof args === "string" ? args : this.truncateForDetail(this.safeJson(args));
-		// 提取 ask_question 详情用于渲染提问卡片；历史会话恢复依赖此字段重建交互式 UI。
+		// 提取 ask_question 详情用于渲染提问卡片；支持批量（questions 数组）和单问题两种格式。
 		const askDetails =
 			toolName === "ask_question" &&
 				result && typeof result === "object" &&
-				(result as any).details?.question
+				((result as any).details?.question || Array.isArray((result as any).details?.answers))
 			? (result as any).details
 			: undefined;
-		const askCard = askDetails
-			? {
+		const askCard = (() => {
+			if (!askDetails) return undefined;
+			// 单问题格式：details.question (string), details.answer
+			if (askDetails.question) {
+				return {
 					question: askDetails.question,
 					type: askDetails.type,
 					answered: askDetails.answered,
 					answer: askDetails.answer,
+					answerLabel: askDetails.answerLabel,
 					options: askDetails.options,
-				}
-			: undefined;
+				};
+			}
+			// 批量格式：details.questions / details.answers 数组，取第一组问答展示
+			if (Array.isArray(askDetails.answers) && askDetails.answers.length > 0) {
+				const firstQuestion = Array.isArray(askDetails.questions) ? askDetails.questions[0] : undefined;
+				const firstAnswer = askDetails.answers[0];
+				return {
+					question: firstQuestion?.question ?? String(firstAnswer.id ?? ""),
+					type: firstAnswer.type ?? firstQuestion?.type ?? "input",
+					answered: !askDetails.cancelled && firstAnswer.value !== null,
+					answer: firstAnswer.value,
+					answerLabel: firstAnswer.label,
+					options: firstQuestion?.options,
+				};
+			}
+			return undefined;
+		})();
 		const meta = {
 			status,
 			toolName,
@@ -2399,17 +2418,35 @@ export class AgentManager {
 						result,
 						isError,
 					);
-					// 从历史工具结果中提取 ask_question 详情，用于渲染提问卡片。
-					const askCard =
-						toolName === "ask_question" && typed.details?.question
-							? {
-									question: typed.details.question,
-									type: typed.details.type,
-									answered: typed.details.answered,
-									answer: typed.details.answer,
-									options: typed.details.options,
-								}
-							: undefined;
+					// 从历史工具结果中提取 ask_question 详情，用于渲染提问卡片（支持单问题和批量格式）。
+					const askCard = (() => {
+						if (toolName !== "ask_question" || !typed.details) return undefined;
+						// 单问题格式：details.question (string), details.answer
+						if (typed.details.question) {
+							return {
+								question: typed.details.question,
+								type: typed.details.type,
+								answered: typed.details.answered,
+								answer: typed.details.answer,
+								answerLabel: typed.details.answerLabel,
+								options: typed.details.options,
+							};
+						}
+						// 批量格式：details.questions / details.answers 数组，取第一组问答
+						if (Array.isArray(typed.details.answers) && typed.details.answers.length > 0) {
+							const firstQuestion = Array.isArray(typed.details.questions) ? typed.details.questions[0] : undefined;
+							const firstAnswer = typed.details.answers[0];
+							return {
+								question: firstQuestion?.question ?? String(firstAnswer.id ?? ""),
+								type: firstAnswer.type ?? firstQuestion?.type ?? "input",
+								answered: !typed.details.cancelled && firstAnswer.value !== null,
+								answer: firstAnswer.value,
+								answerLabel: firstAnswer.label,
+								options: firstQuestion?.options,
+							};
+						}
+						return undefined;
+					})();
 					entryIndex++;
 					return [{
 						id: `${agentId}-history-${currentEntryId ?? index}`,

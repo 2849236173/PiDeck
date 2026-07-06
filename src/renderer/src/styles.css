@@ -3897,6 +3897,29 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 .ask-question-card-tool-inner .ask-question-card-title {
   margin-bottom: var(--space-1);
 }
+.ask-question-card-tool-inner .ask-question-card-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  padding-left: var(--space-1);
+  border-left: 2px solid var(--color-border-subtle);
+}
+.ask-question-card-tool-inner .ask-question-card-option-item {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-sm);
+}
+.ask-question-card-tool-inner .ask-question-card-option-label {
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+}
+.ask-question-card-tool-inner .ask-question-card-option-desc {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
 
 /* 内联提问卡片（实时会话中 system 消息形式） */
 .ask-question-card {

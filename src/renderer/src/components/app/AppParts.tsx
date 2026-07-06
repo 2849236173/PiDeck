@@ -1482,7 +1482,7 @@ export const ToolCard = memo(function ToolCard(props: {
 	const isSkillRead = Boolean(skillName);
 	// 历史会话中从 ask_question 工具结果反推的提问卡片数据
 	const askCard = props.message.meta?._askCard as
-		| { question?: string; type?: string; answered?: boolean; answer?: unknown; options?: string[] }
+		| { question?: string; type?: string; answered?: boolean; answer?: unknown; answerLabel?: string; options?: string[] }
 		| undefined;
 	const isAskCard = Boolean(askCard?.question);
 	const statusLabel =
@@ -1542,10 +1542,24 @@ export const ToolCard = memo(function ToolCard(props: {
 					{isAskCard && askCard ? (
 						<div className="ask-question-card-tool-inner">
 							<div className="ask-question-card-title">{askCard.question}</div>
+							{askCard.options && askCard.options.length > 0 && (
+								<div className="ask-question-card-options-list">
+									{askCard.options.map((opt, i) => {
+										const label = typeof opt === "string" ? opt : (opt as any).label ?? String((opt as any).value ?? "");
+										const desc = typeof opt === "object" ? (opt as any).description : undefined;
+										return (
+											<div key={i} className="ask-question-card-option-item">
+												<span className="ask-question-card-option-label">{label}</span>
+												{desc && <span className="ask-question-card-option-desc">{desc}</span>}
+											</div>
+										);
+									})}
+								</div>
+							)}
 							{askCard.answered ? (
 								<div className="ask-question-card-answered">
 									<Check size={13} className="ask-question-card-answered-ok" />
-									{typeof askCard.answer === "string" ? askCard.answer : t("ask.answered")}
+									{askCard.answerLabel ?? (typeof askCard.answer === "string" ? askCard.answer : t("ask.answered"))}
 								</div>
 							) : (
 								<div className="ask-question-card-answered" style={{ color: "var(--color-text-tertiary)" }}>
