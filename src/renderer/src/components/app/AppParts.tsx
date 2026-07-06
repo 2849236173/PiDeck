@@ -1561,16 +1561,16 @@ export const ToolCard = memo(function ToolCard(props: {
 									})}
 								</div>
 							)}
-							{askCard.answered ? (
+							{askCard.answered && (!askCard.options || askCard.options.length === 0) ? (
 								<div className="ask-question-card-answered">
 									<Check size={14} className="ask-question-card-answered-ok" />
 									<span className="ask-question-card-answer-text">{askCard.answerLabel ?? (typeof askCard.answer === "string" ? askCard.answer : t("ask.answered"))}</span>
 								</div>
-							) : (
+							) : !askCard.answered ? (
 								<div className="ask-question-card-answered" style={{ color: "var(--color-text-tertiary)" }}>
 									{t("ask.unanswered")}
 								</div>
-							)}
+							) : null}
 						</div>
 					) : (
 						<pre className="tool-card-detail">{detailText}</pre>
