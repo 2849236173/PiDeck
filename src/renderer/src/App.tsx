@@ -87,6 +87,7 @@ import {
   ProjectContextMenu,
   PromptSuggestions,
   SessionContextMenu,
+  SessionManagerModal,
   SessionStatus,
 
   ComposerModePicker,
@@ -652,6 +653,8 @@ export function App() {
     y: number;
     project: Project;
   } | null>(null);
+  /** 会话管理弹框 */
+  const [sessionManagerProject, setSessionManagerProject] = useState<Project | null>(null);
   /** Worktree 创建弹窗 */
   const [worktreeCreateDialog, setWorktreeCreateDialog] = useState<{
     projectId: string;
@@ -5662,6 +5665,15 @@ ${goalTextRef.current}
             setProjectResourcesProject(projectMenu.project);
             setProjectMenu(null);
           }}
+          onManageSessions={() => {
+            setSessionManagerProject(projectMenu.project);
+            setProjectMenu(null);
+            // 确保会话列表已加载
+            const pid = projectMenu.project.id;
+            if (!(sessionsByProject[pid]?.length)) {
+              void refreshProjectSessions(pid);
+            }
+          }}
           onFilterSessions={() => {
             setSessionFilterOpen({
               ...adjustMenuPos(projectMenu.x, projectMenu.y + 20, 180, 250),
@@ -5766,6 +5778,29 @@ ${goalTextRef.current}
             const session = sessionMenu.session;
             setSessionMenu(null);
             void deleteHistorySession(session);
+          }}
+        />
+      )}
+      {sessionManagerProject && (
+        <SessionManagerModal
+          sessions={sessionsByProject[sessionManagerProject.id] ?? []}
+          onClose={() => setSessionManagerProject(null)}
+          onRename={(session) => {
+            setSessionManagerProject(null);
+            openSessionRename(sessionManagerProject.id, session);
+          }}
+          onExport={(session) => {
+            setSessionManagerProject(null);
+            void exportHistorySession(session);
+          }}
+          onDelete={async (sessions) => {
+            for (const session of sessions) {
+              await api.sessions.delete(session.filePath);
+            }
+            showToast(t("app.sessionDeleted"), 2200);
+            const projectId = sessionManagerProject.id;
+            await refreshSessions(projectId);
+            await refreshProjectSessions(projectId);
           }}
         />
       )}

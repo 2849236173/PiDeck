@@ -4111,6 +4111,165 @@ body.is-terminal-resizing .terminal-resize-handle::before {
   outline-offset: 1px;
 }
 
+/* ── 会话管理弹框 ── */
+.session-manager-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1300px, calc(100vw - 48px));
+  height: min(850px, calc(100vh - 48px));
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+.session-manager-modal .modal-header small {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-caption);
+}
+.session-manager-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  flex-shrink: 0;
+}
+.session-manager-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.session-manager-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-caption);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.session-manager-select-all input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+.session-manager-source-filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.session-source-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.session-source-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.session-source-btn.active {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg-panel));
+  color: var(--color-accent);
+}
+.session-manager-delete-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-danger);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.session-manager-delete-btn:hover {
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  border-color: var(--color-danger);
+}
+.session-manager-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.session-manager-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  transition: background 0.1s ease;
+}
+.session-manager-row:hover {
+  background: var(--color-bg-hover);
+}
+.session-manager-row.selected {
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-bg));
+}
+.session-manager-row-checkbox {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.session-manager-row-checkbox input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+.session-manager-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.session-manager-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-small);
+  color: var(--color-text-primary);
+}
+.session-manager-row .session-source-badge {
+  flex-shrink: 0;
+}
+.session-manager-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  flex-shrink: 0;
+}
+.session-manager-row:hover .session-manager-row-actions,
+.session-manager-row:focus-within .session-manager-row-actions {
+  opacity: 1;
+}
+.session-manager-action-btn {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.session-manager-action-btn:hover {
+  color: var(--color-accent);
+  background: var(--color-bg-hover);
+}
+.session-manager-action-btn.danger:hover {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+}
+
 /* 底部操作栏 */
 .multi-select-action-bar {
   display: flex;
