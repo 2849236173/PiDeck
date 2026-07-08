@@ -520,16 +520,14 @@ export const RichInput = forwardRef<HTMLDivElement, RichInputProps>(
 		const handleKeyDown = useCallback(
 			(event: React.KeyboardEvent<HTMLDivElement>) => {
 				onKeyDown(event);
-				if (event.defaultPrevented || composingRef.current) return;
+				if (event.defaultPrevented) return;
 
 				if (event.key === "Enter") {
-					event.preventDefault();
-					// Shift+Enter 跳过 IME 合成检测：换行不经过输入法
-					if (!event.shiftKey && composingRef.current) return;
-					const root = rootRef.current;
-					if (!root) return;
-					insertPlainTextAtSelection(root, "\n");
-					handleInput();
+					// IME 合成期间只有 Shift+Enter 允许换行（跳过 IME 提交），
+					// 普通 Enter 交给 IME 确认候选词，不插入 \n。
+					if (composingRef.current && !event.shiftKey) return;
+					// 不 preventDefault，让浏览器原生的 contentEditable Enter 行为
+					// 处理换行（插入 <br> 并正确放置光标），随后触发 input 事件同步 value。
 				}
 			},
 			[onKeyDown, handleInput],
