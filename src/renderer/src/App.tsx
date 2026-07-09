@@ -410,6 +410,9 @@ interface UiRequest {
 	completed?: boolean;
 	value?: string;
 	cancelled?: boolean;
+	message?: string;
+	notifyType?: "info" | "warning" | "error";
+	text?: string;
 	widgetKey?: string;
 	widgetLines?: string[];
 	widgetPlacement?: "aboveEditor" | "belowEditor";
@@ -1466,6 +1469,28 @@ export function App() {
     );
     // 监听 Extension UI 请求：对话类渲染为提问卡片；setWidget 类作为 composer 上方的轻量状态块展示。
     const offUiRequest = api.agents.onUiRequest((request) => {
+      if (request.method === "notify") {
+        const notifyRequest = request as UiRequest;
+        if (notifyRequest.message) showToast(notifyRequest.message, notifyRequest.notifyType === "error" ? 5000 : 3500);
+        return;
+      }
+
+      if (request.method === "set_editor_text") {
+        const editorRequest = request as UiRequest;
+        const text = editorRequest.text ?? "";
+        setPromptByAgent((current) => {
+          const next = { ...current };
+          if (text) next[request.agentId] = text;
+          else delete next[request.agentId];
+          return next;
+        });
+        if (request.agentId === activeAgentIdRef.current) {
+          setComposerCursor(text.length);
+          pendingComposerCaretRef.current = text.length;
+        }
+        return;
+      }
+
       if (request.method === "setWidget") {
         const widgetRequest = request as UiRequest;
         const widgetKey = widgetRequest.widgetKey || widgetRequest.requestId;
