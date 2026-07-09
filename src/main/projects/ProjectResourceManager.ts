@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import type {
 	CreateProjectSkillInput,
@@ -235,6 +235,46 @@ export class ProjectResourceManager {
 		if (!project) throw new Error(`Project not found: ${projectId}`);
 		if (project.kind === "chat") throw new Error("Chat 项目不支持项目级资源");
 		return project;
+	}
+
+	/** 重命名项目级 Skill：重命名目录并更新 SKILL.md 中的 name 字段 */
+	async renameSkill(projectId: string, skillPath: string, newName: string): Promise<PiSkillSummary> {
+		const project = this.requireProject(projectId);
+		const skill = await this.findSkill(project, skillPath);
+		const normalizedNew = this.normalizeSkillName(newName);
+		if (!normalizedNew) throw new Error("Skill 名称不能为空");
+
+		const displayName = newName.trim();
+		const oldDir = skill.dir;
+		const parentDir = skill.dir.split(/[\\/]/).slice(0, -1).join("\\");
+		const newDir = join(parentDir, normalizedNew);
+
+		this.assertInsideProject(project, newDir);
+		if (oldDir === newDir) throw new Error("新旧名称相同");
+		if (existsSync(newDir)) throw new Error(`项目 Skill 已存在：${normalizedNew}`);
+
+		// 更新 SKILL.md 中的 name frontmatter
+		const raw = await readFile(skill.path, "utf8");
+		const updated = this.setFrontmatterName(raw, displayName);
+		await writeFile(skill.path, updated, "utf8");
+
+		await rename(oldDir, newDir);
+
+		// 重命名后重新读取
+		const newSkillPath = join(newDir, skill.path.split(/[\\/]/).pop()!);
+		return this.readSkill(newSkillPath, this.skillLocations(project).find((l) => newSkillPath.startsWith(l.path)) ?? this.skillLocations(project)[0], skill.type);
+	}
+
+	/** 更新 frontmatter 中的 name 字段 */
+	private setFrontmatterName(raw: string, name: string): string {
+		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+		if (!match) return `---\nname: ${name}\n---\n\n${raw}`;
+		const lines = match[1].split(/\r?\n/);
+		const nextLines = lines.map((line) => {
+			if (line.trim().startsWith("name:")) return `name: ${name}`;
+			return line;
+		});
+		return raw.replace(match[0], `---\n${nextLines.join("\n")}\n---`);
 	}
 
 	private async findSkill(project: Project, skillPath: string) {

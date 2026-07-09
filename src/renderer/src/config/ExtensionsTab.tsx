@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import type { PiCliUpdateResult, PiExtensionListResult, PiExtensionSummary, PiPackageInfo } from "../../../shared/types";
 import { t } from "../i18n";
 
@@ -306,21 +307,24 @@ function ExtensionCard(props: {
 					{extension.updateError && <small className="setting-status error">{extension.updateError}</small>}
 					{extension.path && <small>{extension.path}</small>}
 				</div>
-				<div className="session-card-actions skill-card-actions">
+				<div className="prompts-list-item-actions">
 					<button
-						className="session-rename-button"
+						className="config-icon-btn"
 						disabled={props.toggling}
 						onClick={() => props.onToggle(extension)}
+						title={extension.enabled !== false ? t("common.disable") : t("common.enabled")}
+						style={extension.enabled !== false ? { color: "var(--color-accent)" } : undefined}
 					>
-						{props.toggling ? t("common.saving") : (extension.enabled !== false ? t("common.disable") : t("common.enabled"))}
+						{extension.enabled !== false ? <ToggleRight size={14} strokeWidth={1.8} /> : <ToggleLeft size={14} strokeWidth={1.8} />}
 					</button>
 					{!extension.builtIn && (
 						<button
-							className="session-rename-button danger"
+							className="config-icon-btn danger"
 							disabled={props.uninstalling}
 							onClick={() => props.onUninstall(extension)}
+							title={props.uninstalling ? t("config.uninstalling") : t("config.uninstall")}
 						>
-							{props.uninstalling ? t("config.uninstalling") : t("config.uninstall")}
+							<Trash2 size={14} strokeWidth={1.8} />
 						</button>
 					)}
 				</div>

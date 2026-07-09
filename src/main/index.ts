@@ -1153,6 +1153,11 @@ function registerIpc() {
 		await projectResourceManager.toggleExtension(projectId, extensionPath, enabled);
 		void appLogger.info("project-resource", "Project extension toggled", { projectId, extensionPath, enabled });
 	});
+	ipcMain.handle(ipcChannels.projectResourcesRenameSkill, async (_event, projectId: string, skillPath: string, newName: string) => {
+		const result = await projectResourceManager.renameSkill(projectId, skillPath, newName);
+		void appLogger.info("project-resource", "Project skill renamed", { projectId, skillPath, newName });
+		return result;
+	});
 
 	// ── Worktree 项目管理 ──
 
@@ -1782,6 +1787,16 @@ function registerIpc() {
 	ipcMain.handle(ipcChannels.promptsDeleteInProject, async (_event, projectPath: string, fileName: string) => {
 		await promptManager.deleteFromProject(projectPath, fileName);
 		void appLogger.info("prompt", "Project prompt template deleted", { projectPath, fileName });
+	});
+	ipcMain.handle(ipcChannels.promptsRename, async (_event, oldName: string, newName: string) => {
+		const result = await promptManager.rename(oldName, newName);
+		void appLogger.info("prompt", "Prompt template renamed", { oldName, newName });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.promptsRenameInProject, async (_event, projectPath: string, oldName: string, newName: string) => {
+		const result = await promptManager.renameInProject(projectPath, oldName, newName);
+		void appLogger.info("prompt", "Project prompt template renamed", { projectPath, oldName, newName });
+		return result;
 	});
 
 	ipcMain.handle(ipcChannels.extensionsList, () => extensionManager.list());

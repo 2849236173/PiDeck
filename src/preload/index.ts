@@ -127,6 +127,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.projectResourcesToggleExtension, projectId, extensionPath, enabled) as Promise<void>,
 		toggleSkill: (projectId: string, skillPath: string, enabled: boolean) =>
 			ipcRenderer.invoke(ipcChannels.projectResourcesToggleSkill, projectId, skillPath, enabled) as Promise<PiSkillSummary>,
+		renameSkill: (projectId: string, skillPath: string, newName: string) =>
+			ipcRenderer.invoke(ipcChannels.projectResourcesRenameSkill, projectId, skillPath, newName) as Promise<PiSkillSummary>,
 	},
 	files: {
 		list: (projectId: string) =>
@@ -357,6 +359,8 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.skillsDelete, path) as Promise<void>,
 		openFolder: (path?: string) =>
 			ipcRenderer.invoke(ipcChannels.skillsOpenFolder, path) as Promise<void>,
+		rename: (skillPath: string, newName: string) =>
+			ipcRenderer.invoke(ipcChannels.skillsRename, skillPath, newName) as Promise<PiSkillSummary>,
 	},
 	prompts: {
 		list: () =>
@@ -375,6 +379,10 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.promptsCreateInProject, projectPath, input) as Promise<PiPromptTemplateSummary>,
 		deleteFromProject: (projectPath: string, fileName: string) =>
 			ipcRenderer.invoke(ipcChannels.promptsDeleteInProject, projectPath, fileName) as Promise<void>,
+		rename: (oldName: string, newName: string) =>
+			ipcRenderer.invoke(ipcChannels.promptsRename, oldName, newName) as Promise<PiPromptTemplateSummary>,
+		renameInProject: (projectPath: string, oldName: string, newName: string) =>
+			ipcRenderer.invoke(ipcChannels.promptsRenameInProject, projectPath, oldName, newName) as Promise<PiPromptTemplateSummary>,
 	},
 	extensions: {
 		list: () =>

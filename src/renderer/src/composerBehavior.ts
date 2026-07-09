@@ -21,6 +21,55 @@ export type ComposerPromptSubmission = {
  * Plan 模式依赖 PiDeck 内置 extension 在 pi 的 input 事件里识别隐藏标记；
  * 用户可见消息保持原文，避免会话时间线出现实现细节或控制 token。
  */
+/**
+ * Prompt Template 类型，与 App.tsx 中 promptTemplateList 类型一致。
+ */
+export type PromptTemplateInfo = {
+	name: string;
+	path: string;
+	description: string;
+	content: string;
+};
+
+/**
+ * 展开消息中的 prompt template 命令（/templateName）。
+ *
+ * 在发送到 pi 之前本地展开模板内容，避免依赖 pi 的展开机制导致：
+ * - 用户附加在命令后的文本丢失（pi 仅替换命令，丢弃后续输入）
+ * - 模板内容中的特殊符号（frontmatter delimiters、XML 标签等）
+ *   与用户文本拼接时串格式
+ *
+ * 边界处理：
+ * - 按 name 长度降序匹配，避免短名称误吃长名称的前缀
+ * - 只匹配后跟空格或行尾的 /name，防止部分匹配
+ * - 单次正则遍历，不会级联展开替换后的内容
+ * - 未找到的模板名保持原样，由 pi 兜底处理
+ */
+export function expandPromptTemplates(
+	message: string,
+	templates: PromptTemplateInfo[],
+): string {
+	if (!templates.length || !message.includes("/")) return message;
+
+	// 按 name 长度降序排序，确保正则交替时最长匹配优先
+	const sorted = [...templates].sort((a, b) => b.name.length - a.name.length);
+	const nameToContent = new Map(sorted.map((t) => [t.name, t.content]));
+
+	// 构建 /name1|/name2|/name3 的单一正则，避免多次替换导致级联展开
+	const escapedNames = sorted.map((t) =>
+		t.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+	);
+	const regex = new RegExp(
+		`(^|\\s)/(${escapedNames.join("|")})(?=\\s|$)`,
+		"g",
+	);
+
+	return message.replace(regex, (_match, prefix, name) => {
+		return prefix + (nameToContent.get(name) ?? "/" + name);
+	});
+}
+
+
 export function buildComposerPromptSubmission(
 	message: string,
 	mode: ComposerAgentMode,

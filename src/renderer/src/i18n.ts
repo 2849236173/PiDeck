@@ -482,6 +482,8 @@ const zhCN = {
   "config.modelsSavedRestartHint": "模型配置已保存，请重启激活的 Agent 会话以应用新配置",
   "config.skillCreatedToast": "Skill 已创建，重启 agent 后生效",
   "config.skillDeletedToast": "Skill 已删除，重启 agent 后生效",
+  "config.skillRenamedToast": "Skill 已重命名，重启 agent 后生效",
+  "config.promptRenamedToast": "Prompt 已重命名，重启 agent 后生效",
   "config.skillDisabledToast": "Skill 已禁用，重启 agent 后生效",
   "config.skillEnabledToast": "Skill 已启用，重启 agent 后生效",
   "config.extensionUninstalledToast": "扩展已卸载，重启 agent 后生效",
@@ -1745,6 +1747,10 @@ const enUS: Record<TranslationKey, string> = {
     "Skill created. Restart agents for it to take effect.",
   "config.skillDeletedToast":
     "Skill deleted. Restart agents for it to take effect.",
+  "config.skillRenamedToast":
+    "Skill renamed. Restart agents for it to take effect.",
+  "config.promptRenamedToast":
+    "Prompt renamed. Restart agents for it to take effect.",
   "config.skillDisabledToast":
     "Skill disabled. Restart agents for it to take effect.",
   "config.skillEnabledToast":

@@ -1040,6 +1040,17 @@ function ConfigModalContent(props: ConfigModalProps) {
 	};
 
 	/** Ctrl+S 快速保存：保存但不关闭弹框、不弹提示 */
+	const handleRenamePrompt = async (template: { name: string; path: string }, newName: string) => {
+		setError(null);
+		try {
+			await api.prompts.rename(template.name, newName);
+			await refreshPrompts();
+			showToast(t("config.promptRenamedToast"));
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		}
+	};
+
 	const handleQuickSavePrompt = async () => {
 		if (!editingPrompt || editPromptSaving) return;
 		setEditPromptSaving(true);
@@ -1111,6 +1122,17 @@ function ConfigModalContent(props: ConfigModalProps) {
 			await api.skills.delete(target.path);
 			await refreshSkills();
 			showToast(t("config.skillDeletedToast"));
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		}
+	};
+
+	const handleRenameGlobalSkill = async (skill: PiSkillSummary, newName: string) => {
+		setError(null);
+		try {
+			await api.skills.rename(skill.path, newName);
+			await refreshSkills();
+			showToast(t("config.skillRenamedToast"));
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
 		}
@@ -1464,6 +1486,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 							onToggle={(skill, enabled) => handleToggleSkill(skill.path, enabled)}
 							onDelete={setDeleteSkillConfirm}
 							onEdit={handleEditGlobalSkill}
+							onRename={handleRenameGlobalSkill}
 						/>
 						)
 					)}
@@ -1486,6 +1509,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 							onCreate={handleCreatePrompt}
 							onDelete={confirmDeletePrompt}
 							onEdit={handleEditPrompt}
+							onRename={handleRenamePrompt}
 							onQuickSave={handleQuickSavePrompt}
 							onCancelEdit={handleCancelEditPrompt}
 							onChangeEditContent={setEditPromptContent}

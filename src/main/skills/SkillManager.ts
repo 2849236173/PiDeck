@@ -1,6 +1,6 @@
 import { shell } from "electron";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type {
@@ -184,6 +184,51 @@ export class SkillManager {
 		if (!description) warnings.push("缺少 description，pi 不会加载该 skill");
 		if (description.length > 1024) warnings.push("description 超过 1024 个字符");
 		return warnings;
+	}
+
+	/** 重命名 Skill：重命名目录并更新 SKILL.md 中的 name 字段 */
+	async rename(skillPath: string, newName: string): Promise<PiSkillSummary> {
+		const skill = await this.findByPath(skillPath);
+		const normalizedNew = this.normalizeSkillName(newName);
+		if (!normalizedNew) throw new Error("Skill 名称不能为空");
+
+		const displayName = newName.trim();
+		const oldDir = skill.dir;
+		const parentDir = skill.dir.split(/[\\/]/).slice(0, -1).join("\\");
+		const newDir = join(parentDir, normalizedNew);
+
+		if (oldDir === newDir) throw new Error("新旧名称相同");
+		if (existsSync(newDir)) throw new Error(`Skill 已存在：${normalizedNew}`);
+
+		// 更新 SKILL.md 中的 name frontmatter
+		const raw = await readFile(skill.path, "utf8");
+		const updated = this.setFrontmatterName(raw, displayName);
+		await writeFile(skill.path, updated, "utf8");
+
+		await rename(oldDir, newDir);
+
+		// 重命名后路径变为新路径
+		const newSkillPath = join(newDir, skill.path.split(/[\\/]/).pop()!);
+		// 找对应的 location（搜索所有 locations）
+		const { skills } = await this.list();
+		const reloaded = await this.readSkill(
+			newSkillPath,
+			this.locations.find((l) => newSkillPath.startsWith(l.path)) ?? this.locations[0],
+			skill.type,
+		);
+		return reloaded;
+	}
+
+	/** 更新 frontmatter 中的 name 字段 */
+	private setFrontmatterName(raw: string, name: string): string {
+		const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+		if (!match) return `---\nname: ${name}\n---\n\n${raw}`;
+		const lines = match[1].split(/\r?\n/);
+		const nextLines = lines.map((line) => {
+			if (line.trim().startsWith("name:")) return `name: ${name}`;
+			return line;
+		});
+		return raw.replace(match[0], `---\n${nextLines.join("\n")}\n---`);
 	}
 
 	/** 规范化 Skill 名称：保留 Unicode 字母（含中文等）、数字和连字符 */

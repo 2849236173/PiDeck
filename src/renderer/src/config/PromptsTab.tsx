@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Editor } from "@monaco-editor/react";
-import { Pencil, Trash2 } from "lucide-react";
+import { FileEdit, Pencil, Trash2 } from "lucide-react";
 import type {
 	CreatePiPromptTemplateInput,
 	PiPromptTemplateListResult,
@@ -56,6 +56,7 @@ export function PromptsTab(props: {
 	onCreate: () => void;
 	onDelete: (template: PiPromptTemplateSummary) => void;
 	onEdit: (template: PiPromptTemplateSummary) => void;
+	onRename: (template: PiPromptTemplateSummary, newName: string) => Promise<void>;
 	onCancelEdit: () => void;
 	onQuickSave: () => void;
 	onChangeEditContent: (value: string) => void;
@@ -64,6 +65,11 @@ export function PromptsTab(props: {
 	const { data } = props;
 	ensureMonaco();
 	const canCreate = props.newName.trim().length > 0 && props.newDescription.trim().length > 0;
+
+	// Prompt 重命名状态
+	const [renamingTemplate, setRenamingTemplate] = useState<string | null>(null);
+	const [renameValue, setRenameValue] = useState("");
+	const [renameBusy, setRenameBusy] = useState(false);
 
 	// 编辑器提示状态
 	const [showHint, setShowHint] = useState(false);
@@ -163,35 +169,76 @@ export function PromptsTab(props: {
 				{data.templates.length === 0 ? (
 					<div className="config-empty">{t("config.noPrompts")}</div>
 				) : (
-					data.templates.map((template) => (
-						<div key={template.path} className="prompts-list-item">
-							<button
-								type="button"
-								className="prompts-list-item-info"
-								onClick={() => props.onEdit(template)}
-								title={t("common.edit")}
-							>
-								<strong>/{template.name}</strong>
-								<span className="prompts-list-item-desc">{template.description}</span>
-							</button>
-							<div className="prompts-list-item-actions">
-								<button
-									className="config-icon-btn"
-									onClick={() => props.onEdit(template)}
-									title={t("common.edit")}
-								>
-									<Pencil size={14} strokeWidth={1.8} />
-								</button>
-								<button
-									className="config-icon-btn danger"
-									onClick={() => props.onDelete(template)}
-									title={t("common.delete")}
-								>
-									<Trash2 size={14} strokeWidth={1.8} />
-								</button>
+					data.templates.map((template) => {
+						const isRenaming = renamingTemplate === template.path;
+						const handleRename = async () => {
+							if (renameBusy || !renameValue.trim() || renameValue.trim() === template.name) {
+								setRenamingTemplate(null);
+								return;
+							}
+							setRenameBusy(true);
+							try {
+								await props.onRename(template, renameValue.trim());
+								setRenamingTemplate(null);
+							} finally {
+								setRenameBusy(false);
+							}
+						};
+						return (
+							<div key={template.path} className="prompts-list-item">
+								{isRenaming ? (
+									<div className="skill-rename-inline">
+										<input
+											value={renameValue}
+											onChange={(e) => setRenameValue(e.target.value)}
+											onKeyDown={(e) => { if (e.key === "Enter") void handleRename(); if (e.key === "Escape") setRenamingTemplate(null); }}
+											autoFocus
+											disabled={renameBusy}
+										/>
+										<button className="config-icon-btn" onClick={handleRename} disabled={renameBusy} title={t("common.confirm")}>
+											✓
+										</button>
+										<button className="config-icon-btn" onClick={() => setRenamingTemplate(null)} disabled={renameBusy} title={t("common.cancel")}>
+											✕
+										</button>
+									</div>
+								) : (
+									<button
+										type="button"
+										className="prompts-list-item-info"
+										onClick={() => props.onEdit(template)}
+										title={t("common.edit")}
+									>
+										<strong>/{template.name}</strong>
+										<span className="prompts-list-item-desc">{template.description}</span>
+									</button>
+								)}
+								<div className="prompts-list-item-actions">
+									<button
+										className="config-icon-btn"
+										onClick={() => props.onEdit(template)}
+										title={t("common.edit")}
+									>
+										<Pencil size={14} strokeWidth={1.8} />
+									</button>
+									<button
+										className="config-icon-btn"
+										onClick={() => { setRenamingTemplate(template.path); setRenameValue(template.name); }}
+										title={t("common.rename")}
+									>
+										<FileEdit size={14} strokeWidth={1.8} />
+									</button>
+									<button
+										className="config-icon-btn danger"
+										onClick={() => props.onDelete(template)}
+										title={t("common.delete")}
+									>
+										<Trash2 size={14} strokeWidth={1.8} />
+									</button>
+								</div>
 							</div>
-						</div>
-					))
+						);
+					})
 				)}
 			</section>
 

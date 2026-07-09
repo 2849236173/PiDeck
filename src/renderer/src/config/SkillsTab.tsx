@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { FileEdit, Pencil, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import type {
 	CreatePiSkillInput,
 	PiSkillListResult,
@@ -23,6 +24,7 @@ export function SkillsTab(props: {
 	onToggle: (skill: PiSkillSummary, enabled: boolean) => void;
 	onDelete: (skill: PiSkillSummary) => void;
 	onEdit: (skill: PiSkillSummary) => void;
+	onRename: (skill: PiSkillSummary, newName: string) => Promise<void>;
 }) {
 	const { data } = props;
 	const [locationPickerOpen, setLocationPickerOpen] = useState(false);
@@ -133,6 +135,7 @@ export function SkillsTab(props: {
 							onToggle={props.onToggle}
 							onDelete={props.onDelete}
 							onEdit={props.onEdit}
+							onRename={props.onRename}
 						/>
 					))
 				)}
@@ -146,14 +149,51 @@ function SkillCard(props: {
 	onToggle: (skill: PiSkillSummary, enabled: boolean) => void;
 	onDelete: (skill: PiSkillSummary) => void;
 	onEdit: (skill: PiSkillSummary) => void;
+	onRename: (skill: PiSkillSummary, newName: string) => Promise<void>;
 }) {
 	const { skill } = props;
+	const [renaming, setRenaming] = useState(false);
+	const [renameValue, setRenameValue] = useState(skill.name);
+	const [renameBusy, setRenameBusy] = useState(false);
+
+	const handleRename = async () => {
+		if (renameBusy || !renameValue.trim() || renameValue.trim() === skill.name) {
+			setRenaming(false);
+			return;
+		}
+		setRenameBusy(true);
+		try {
+			await props.onRename(skill, renameValue.trim());
+			setRenaming(false);
+		} finally {
+			setRenameBusy(false);
+		}
+	};
+
 	return (
 		<article className="session-card skill-card">
 			<div className="session-card-display">
 				<div className="session-card-inner skill-card-main">
 					<div className="session-card-title skill-title-row">
-						<strong>{skill.name}</strong>
+						{renaming ? (
+							<div className="skill-rename-inline">
+								<input
+									value={renameValue}
+									onChange={(e) => setRenameValue(e.target.value)}
+									onKeyDown={(e) => { if (e.key === "Enter") void handleRename(); if (e.key === "Escape") setRenaming(false); }}
+									autoFocus
+									disabled={renameBusy}
+								/>
+								<button className="config-icon-btn" onClick={handleRename} disabled={renameBusy} title={t("common.confirm")}>
+									✓
+								</button>
+								<button className="config-icon-btn" onClick={() => setRenaming(false)} disabled={renameBusy} title={t("common.cancel")}>
+									✕
+								</button>
+							</div>
+						) : (
+							<strong>{skill.name}</strong>
+						)}
 						<div className="skill-badges">
 							<span className={`skill-state ${skill.enabled ? "enabled" : "disabled"}`}>
 								{skill.enabled ? t("common.enabled") : t("common.disabled")}
@@ -171,12 +211,36 @@ function SkillCard(props: {
 						</ul>
 					)}
 				</div>
-				<div className="session-card-actions skill-card-actions">
-					<button className="session-rename-button" onClick={() => props.onToggle(skill, !skill.enabled)}>
-						{skill.enabled ? t("common.disable") : t("common.enabled")}
+				<div className="prompts-list-item-actions">
+					<button
+						className="config-icon-btn"
+						onClick={() => props.onToggle(skill, !skill.enabled)}
+						title={skill.enabled ? t("common.disable") : t("common.enabled")}
+						style={skill.enabled ? { color: "var(--color-accent)" } : undefined}
+					>
+						{skill.enabled ? <ToggleRight size={14} strokeWidth={1.8} /> : <ToggleLeft size={14} strokeWidth={1.8} />}
 					</button>
-					<button className="session-rename-button" onClick={() => props.onEdit(skill)}>{t("common.edit")}</button>
-					<button className="session-rename-button danger" onClick={() => props.onDelete(skill)}>{t("common.delete")}</button>
+					<button
+						className="config-icon-btn"
+						onClick={() => props.onEdit(skill)}
+						title={t("common.edit")}
+					>
+						<Pencil size={14} strokeWidth={1.8} />
+					</button>
+					<button
+						className="config-icon-btn"
+						onClick={() => { setRenaming(true); setRenameValue(skill.name); }}
+						title={t("common.rename")}
+					>
+						<FileEdit size={14} strokeWidth={1.8} />
+					</button>
+					<button
+						className="config-icon-btn danger"
+						onClick={() => props.onDelete(skill)}
+						title={t("common.delete")}
+					>
+						<Trash2 size={14} strokeWidth={1.8} />
+					</button>
 				</div>
 			</div>
 		</article>

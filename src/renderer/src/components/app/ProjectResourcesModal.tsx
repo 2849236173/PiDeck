@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { FileEdit, Pencil, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
 import type {
 	PiExtensionSummary,
 	PiPromptTemplateSummary,
@@ -49,6 +49,10 @@ export function ProjectResourcesModal(props: {
 	const [editLoading, setEditLoading] = useState(false);
 	const [editSaving, setEditSaving] = useState(false);
 	const [editSaved, setEditSaved] = useState(false);
+	// 项目 skill 重命名状态
+	const [renamingSkill, setRenamingSkill] = useState<string | null>(null);
+	const [renameSkillValue, setRenameSkillValue] = useState("");
+	const [renameSkillBusy, setRenameSkillBusy] = useState(false);
 	const api = (window as unknown as { piDesktop: { projectResources: ProjectResourcesApi } }).piDesktop.projectResources;
 
 	const refresh = useMemo(
@@ -173,6 +177,25 @@ export function ProjectResourcesModal(props: {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
 			setEditSaving(false);
+		}
+	};
+
+	/** 重命名项目 Skill */
+	const renameSkillConfirm = async (skill: PiSkillSummary, newName: string) => {
+		if (renameSkillBusy || !newName.trim() || newName.trim() === skill.name) {
+			setRenamingSkill(null);
+			return;
+		}
+		setRenameSkillBusy(true);
+		setError(null);
+		try {
+			await api.renameSkill(props.project.id, skill.path, newName.trim());
+			await refresh();
+			setRenamingSkill(null);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setRenameSkillBusy(false);
 		}
 	};
 
@@ -364,7 +387,25 @@ export function ProjectResourcesModal(props: {
 							<article key={skill.id} className="project-resource-card">
 								<div className="project-resource-info">
 									<div className="project-resource-title">
-																				<strong>{skill.name}</strong>
+										{renamingSkill === skill.id ? (
+											<div className="skill-rename-inline">
+												<input
+													value={renameSkillValue}
+													onChange={(e) => setRenameSkillValue(e.target.value)}
+													onKeyDown={(e) => { if (e.key === "Enter") void renameSkillConfirm(skill, renameSkillValue); if (e.key === "Escape") setRenamingSkill(null); }}
+													autoFocus
+													disabled={renameSkillBusy}
+												/>
+												<button className="config-icon-btn" onClick={() => void renameSkillConfirm(skill, renameSkillValue)} disabled={renameSkillBusy} title={t("common.confirm")}>
+													✓
+												</button>
+												<button className="config-icon-btn" onClick={() => setRenamingSkill(null)} disabled={renameSkillBusy} title={t("common.cancel")}>
+													✕
+												</button>
+											</div>
+										) : (
+											<strong>{skill.name}</strong>
+										)}
 										<span className="skill-badges">
 											<span className={`skill-state ${skill.enabled ? "enabled" : "disabled"}`}>
 												{skill.enabled ? t("common.enabled") : t("common.disabled")}
@@ -376,14 +417,34 @@ export function ProjectResourcesModal(props: {
 									<small>{skill.sourceLabel} · {skill.path}</small>
 								</div>
 								<div className="skill-card-actions project-resource-actions">
-									<button className="session-rename-button" onClick={() => void openEditor(skill)}>
-										{t("common.edit")}
+									<button
+										className="config-icon-btn"
+										onClick={() => void openEditor(skill)}
+										title={t("common.edit")}
+									>
+										<Pencil size={14} strokeWidth={1.8} />
 									</button>
-									<button className="session-rename-button" onClick={() => void toggleSkill(skill)}>
-										{skill.enabled ? t("common.disable") : t("common.enabled")}
+									<button
+										className="config-icon-btn"
+										onClick={() => { setRenamingSkill(skill.id); setRenameSkillValue(skill.name); }}
+										title={t("common.rename")}
+									>
+										<FileEdit size={14} strokeWidth={1.8} />
 									</button>
-									<button className="session-rename-button danger" onClick={() => setDeleteTarget({ kind: "skill", item: skill })}>
-										{t("common.delete")}
+									<button
+										className="config-icon-btn"
+										onClick={() => void toggleSkill(skill)}
+										title={skill.enabled ? t("common.disable") : t("common.enabled")}
+										style={skill.enabled ? { color: "var(--color-accent)" } : undefined}
+									>
+										{skill.enabled ? <ToggleRight size={14} strokeWidth={1.8} /> : <ToggleLeft size={14} strokeWidth={1.8} />}
+									</button>
+									<button
+										className="config-icon-btn danger"
+										onClick={() => setDeleteTarget({ kind: "skill", item: skill })}
+										title={t("common.delete")}
+									>
+										<Trash2 size={14} strokeWidth={1.8} />
 									</button>
 								</div>
 							</article>
@@ -406,11 +467,21 @@ export function ProjectResourcesModal(props: {
 									<small>{extension.path}</small>
 								</div>
 								<div className="skill-card-actions project-resource-actions">
-									<button className="session-rename-button" onClick={() => void toggleExtension(extension)}>
-										{extension.enabled !== false ? t("common.disable") : t("common.enabled")}
+									<button
+										className="config-icon-btn"
+										onClick={() => void toggleExtension(extension)}
+										title={extension.enabled !== false ? t("common.disable") : t("common.enabled")}
+										style={extension.enabled !== false ? { color: "var(--color-accent)" } : undefined}
+									>
+										{extension.enabled !== false ? <ToggleRight size={14} strokeWidth={1.8} /> : <ToggleLeft size={14} strokeWidth={1.8} />}
 									</button>
-									<button className="session-rename-button danger" onClick={() => setDeleteTarget({ kind: "extension", item: extension })} disabled={!extension.path}>
-										{t("common.delete")}
+									<button
+										className="config-icon-btn danger"
+										onClick={() => setDeleteTarget({ kind: "extension", item: extension })}
+										disabled={!extension.path}
+										title={t("common.delete")}
+									>
+										<Trash2 size={14} strokeWidth={1.8} />
 									</button>
 								</div>
 							</article>
@@ -470,11 +541,19 @@ export function ProjectResourcesModal(props: {
 									<small>{prompt.path}</small>
 								</div>
 								<div className="skill-card-actions project-resource-actions">
-									<button className="session-rename-button" onClick={() => void openProjectPromptEditor(prompt)}>
-										{t("common.edit")}
+									<button
+										className="config-icon-btn"
+										onClick={() => void openProjectPromptEditor(prompt)}
+										title={t("common.edit")}
+									>
+										<Pencil size={14} strokeWidth={1.8} />
 									</button>
-									<button className="session-rename-button danger" onClick={() => setDeleteTarget({ kind: "prompt", item: prompt })}>
-										{t("common.delete")}
+									<button
+										className="config-icon-btn danger"
+										onClick={() => setDeleteTarget({ kind: "prompt", item: prompt })}
+										title={t("common.delete")}
+									>
+										<Trash2 size={14} strokeWidth={1.8} />
 									</button>
 								</div>
 							</article>

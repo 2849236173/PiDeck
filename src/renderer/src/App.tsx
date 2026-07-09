@@ -49,6 +49,7 @@ import { useFeishuBridge } from "./hooks/useFeishuBridge";
 import { CloseIconButton } from "./components/ui/IconButton";
 import {
   buildComposerPromptSubmission,
+  expandPromptTemplates,
   getComposerEnterIntent,
 } from "./composerBehavior";
 import {
@@ -3575,7 +3576,11 @@ ${text}
     // 下一帧 DOM 同步后再跑一次 syncComposerAutoHeight，让最终高度以清空后的 scrollHeight 为准。
     setComposerAutoHeight(COMPOSER_MIN_HEIGHT);
     requestAnimationFrame(() => syncComposerAutoHeight());
-    await submitPromptSnapshot(activeAgentId, message, images, undefined, currentComposerAgentMode);
+
+    // 在发送前本地展开 prompt template 命令（/name → 完整内容），
+    // 避免依赖 pi 的展开导致用户附加文本丢失以及特殊符号干扰
+    const expandedMessage = expandPromptTemplates(message, promptTemplateList);
+    await submitPromptSnapshot(activeAgentId, expandedMessage, images, undefined, currentComposerAgentMode);
   }
 
   async function sendPromptAsFollowUp() {

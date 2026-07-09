@@ -1,6 +1,6 @@
 import { shell } from "electron";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import type {
@@ -347,6 +347,60 @@ export class PromptManager {
 			if (key) result[key] = value;
 		}
 		return result;
+	}
+
+	/** 重命名全局模板：将 <oldName>.md 重命名为 <newName>.md */
+	async rename(oldName: string, newName: string): Promise<PiPromptTemplateSummary> {
+		const normalizedOld = this.normalizeName(oldName);
+		const normalizedNew = this.normalizeName(newName);
+		if (!normalizedOld || !normalizedNew) throw new Error("模板名称不能为空");
+		if (normalizedOld === normalizedNew) throw new Error("新旧名称相同");
+
+		const oldPath = join(this.promptsDir, `${normalizedOld}.md`);
+		const newPath = join(this.promptsDir, `${normalizedNew}.md`);
+		if (!existsSync(oldPath)) throw new Error(`模板不存在：${oldName}`);
+		if (existsSync(newPath)) throw new Error(`模板已存在：${normalizedNew}`);
+
+		await rename(oldPath, newPath);
+		// 读取新文件内容返回摘要
+		const raw = await readFile(newPath, "utf8");
+		const frontmatter = this.parseFrontmatter(raw);
+		const description = frontmatter.description ?? "";
+		return {
+			name: normalizedNew,
+			path: newPath,
+			description: description.replace(/^["']|["']$/g, "").trim(),
+			content: raw,
+			userCreated: true,
+			scope: "global",
+		};
+	}
+
+	/** 重命名项目级模板 */
+	async renameInProject(projectPath: string, oldName: string, newName: string): Promise<PiPromptTemplateSummary> {
+		const projectPromptsDir = join(projectPath, ".pi", "prompts");
+		const normalizedOld = this.normalizeName(oldName);
+		const normalizedNew = this.normalizeName(newName);
+		if (!normalizedOld || !normalizedNew) throw new Error("模板名称不能为空");
+		if (normalizedOld === normalizedNew) throw new Error("新旧名称相同");
+
+		const oldPath = join(projectPromptsDir, `${normalizedOld}.md`);
+		const newPath = join(projectPromptsDir, `${normalizedNew}.md`);
+		if (!existsSync(oldPath)) throw new Error(`模板不存在：${oldName}`);
+		if (existsSync(newPath)) throw new Error(`模板已存在：${normalizedNew}`);
+
+		await rename(oldPath, newPath);
+		const raw = await readFile(newPath, "utf8");
+		const frontmatter = this.parseFrontmatter(raw);
+		const description = frontmatter.description ?? "";
+		return {
+			name: normalizedNew,
+			path: newPath,
+			description: description.replace(/^["']|["']$/g, "").trim(),
+			content: raw,
+			userCreated: true,
+			scope: "project",
+		};
 	}
 
 	/** 规范化模板名称：保留 Unicode 字母（含中文等非拉丁文字）、数字和连字符，其余替换为连字符 */
