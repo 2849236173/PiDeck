@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileEdit, Pencil, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
+import { Check, FileEdit, Pencil, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
 import type {
 	CreatePiSkillInput,
 	PiSkillListResult,
@@ -173,7 +173,12 @@ function SkillCard(props: {
 	return (
 		<article className="session-card skill-card">
 			<div className="session-card-display">
-				<div className="session-card-inner skill-card-main">
+				<button
+					type="button"
+					className="session-card-inner skill-card-main"
+					onClick={() => props.onEdit(skill)}
+					title={t("common.edit")}
+				>
 					<div className="session-card-title skill-title-row">
 						{renaming ? (
 							<div className="skill-rename-inline">
@@ -185,10 +190,10 @@ function SkillCard(props: {
 									disabled={renameBusy}
 								/>
 								<button className="config-icon-btn" onClick={handleRename} disabled={renameBusy} title={t("common.confirm")}>
-									✓
+									<Check size={14} strokeWidth={2} />
 								</button>
 								<button className="config-icon-btn" onClick={() => setRenaming(false)} disabled={renameBusy} title={t("common.cancel")}>
-									✕
+									<X size={14} strokeWidth={2} />
 								</button>
 							</div>
 						) : (
@@ -210,7 +215,7 @@ function SkillCard(props: {
 							))}
 						</ul>
 					)}
-				</div>
+				</button>
 				<div className="prompts-list-item-actions">
 					<button
 						className="config-icon-btn"

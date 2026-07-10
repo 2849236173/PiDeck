@@ -13,6 +13,7 @@ import { ImTab } from "./config/ImTab";
 import { LogsTab } from "./config/LogsTab";
 import { CloseIconButton } from "./components/ui/IconButton";
 import { t } from "./i18n";
+import { MonacoEditor } from "./components/ui/MonacoEditor";
 import type {
 	AuthFile,
 	ConfigTab,
@@ -211,6 +212,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 	const [editGlobalContent, setEditGlobalContent] = useState("");
 	const [editGlobalLoading, setEditGlobalLoading] = useState(false);
 	const [editGlobalSaving, setEditGlobalSaving] = useState(false);
+	const [editGlobalSaved, setEditGlobalSaved] = useState(false);
 	const [promptsData, setPromptsData] = useState<PiPromptTemplateListResult>({
 		templates: [],
 		globalDir: "",
@@ -1154,14 +1156,28 @@ function ConfigModalContent(props: ConfigModalProps) {
 		}
 	};
 
+	// Ctrl+S / Cmd+S 快捷键保存 skill 编辑器
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && e.key === "s" && editingGlobalSkill && !editGlobalSaving) {
+				e.preventDefault();
+				void saveGlobalSkillEditor();
+			}
+		};
+		if (editingGlobalSkill) {
+			window.addEventListener("keydown", handleKeyDown);
+			return () => window.removeEventListener("keydown", handleKeyDown);
+		}
+	}, [editingGlobalSkill, editGlobalSaving]);
+
 	const saveGlobalSkillEditor = async () => {
 		if (!editingGlobalSkill || editGlobalSaving) return;
 		setEditGlobalSaving(true);
 		setError(null);
 		try {
 			await window.piDesktop.files.writeContent(editingGlobalSkill.path, editGlobalContent);
-			showToast(t("projectResources.editorSaved"));
-			setEditingGlobalSkill(null);
+			setEditGlobalSaved(true);
+			window.setTimeout(() => setEditGlobalSaved(false), 2000);
 			await refreshSkills();
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
@@ -1448,28 +1464,28 @@ function ConfigModalContent(props: ConfigModalProps) {
 
 					{section === "skills" && !loading && (
 						editingGlobalSkill ? (
-							<div className="config-skills-editor">
-								<div className="config-skills-editor-header">
-									<strong>{editingGlobalSkill.name} · SKILL.md</strong>
-									<button className="config-icon-btn" onClick={() => setEditingGlobalSkill(null)}>×</button>
-								</div>
-								{editGlobalLoading ? (
-									<div className="config-empty">{t("common.loading")}</div>
-								) : (
-									<textarea
-										value={editGlobalContent}
-										onChange={(e) => setEditGlobalContent(e.target.value)}
-										spellCheck={false}
-									/>
+							<div className="prompts-editor-backdrop" onClick={() => setEditingGlobalSkill(null)}>
+								<div className="prompts-editor-modal" onClick={(e) => e.stopPropagation()}>
+									<div className="file-diff-header">
+										<span className="file-diff-header-file">{editingGlobalSkill.name} · SKILL.md</span>
+										<div className="file-diff-header-actions">
+											<CloseIconButton label={t("common.close")} onClick={() => setEditingGlobalSkill(null)} />
+										</div>
+									</div>
+									{editGlobalLoading ? (
+										<div className="config-empty">{t("common.loading")}</div>
+									) : (
+										<div className="prompts-monaco-wrap">
+											<MonacoEditor
+												value={editGlobalContent}
+												onChange={setEditGlobalContent}
+											/>
+									</div>
 								)}
-								<div className="config-skills-editor-footer">
-									<button className="config-btn" onClick={() => setEditingGlobalSkill(null)}>{t("common.cancel")}</button>
-									<button className="config-btn primary" onClick={() => void saveGlobalSkillEditor()} disabled={editGlobalSaving}>
-										{editGlobalSaving ? t("common.saving") : t("common.save")}
-									</button>
-								</div>
+								{editGlobalSaved && <span className="file-diff-hint saved">{t("config.promptSavedHint")}</span>}
 							</div>
-						) : (
+						</div>
+					) : (
 							<SkillsTab
 							data={skillsData}
 							loading={loading}

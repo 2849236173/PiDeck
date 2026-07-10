@@ -5984,6 +5984,32 @@ body.is-composer-resizing .composer-resize-handle::after {
   font-size: var(--font-size-micro);
   animation: picker-check-in 0.18s ease-out;
 }
+.skill-rename-inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
+  padding: 2px 0;
+}
+.skill-rename-inline input {
+  width: 100%;
+  height: var(--control-height-sm);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-body);
+  outline: none;
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-business);
+  min-width: 0;
+}
+.skill-rename-inline input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+
 .session-rename-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -13592,6 +13618,13 @@ a.config-btn {
   gap: 3px;
   min-width: 0;
   flex: 1;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  font: inherit;
 }
 .project-resource-title {
   display: flex;
