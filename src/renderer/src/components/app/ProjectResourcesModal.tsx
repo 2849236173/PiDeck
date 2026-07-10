@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileEdit, Pencil, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
+
+import { Check, FileEdit, Pencil, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
+import { MonacoEditor } from "../ui/MonacoEditor";
 import type {
 	PiExtensionSummary,
 	PiPromptTemplateSummary,
@@ -92,7 +94,8 @@ export function ProjectResourcesModal(props: {
 
 	useEffect(() => {
 		void refresh();
-	}, [refresh]);
+		void loadPrompts();
+	}, [refresh, loadPrompts]);
 
 	const canCreateSkill = useMemo(
 		() => newName.trim().length > 0 && newDescription.trim().length > 0,
@@ -143,6 +146,24 @@ export function ProjectResourcesModal(props: {
 			setDeleteBusy(false);
 		}
 	};
+
+	// Ctrl+S / Cmd+S 快捷键保存
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (!(e.ctrlKey || e.metaKey) || e.key !== "s") return;
+			if (editingSkill && !editSaving) {
+				e.preventDefault();
+				void saveEditor();
+			} else if (editingProjectPrompt && !editProjectPromptSaving) {
+				e.preventDefault();
+				void saveProjectPromptEditor();
+			}
+		};
+		if (editingSkill || editingProjectPrompt) {
+			window.addEventListener("keydown", handleKeyDown);
+			return () => window.removeEventListener("keydown", handleKeyDown);
+		}
+	}, [editingSkill, editingProjectPrompt, editSaving, editProjectPromptSaving]);
 
 	/** 打开内建编辑器：读取 SKILL.md 内容 */
 	const openEditor = async (skill: PiSkillSummary) => {
@@ -338,30 +359,27 @@ export function ProjectResourcesModal(props: {
 				{error && <div className="project-resources-error">{error}</div>}
 
 				{editingSkill ? (
-					<div className="project-resources-editor-overlay">
-						<div className="project-resources-editor-header">
-							<strong>{editingSkill.name} · SKILL.md</strong>
-							<button type="button" onClick={() => setEditingSkill(null)} aria-label={t("common.close")}>
-								<X size={16} />
-							</button>
-						</div>
-						{editLoading ? (
-							<div className="config-empty">{t("common.loading")}</div>
-						) : (
-							<textarea
-								value={editContent}
-								onChange={(event) => { setEditContent(event.target.value); setEditSaved(false); }}
-								spellCheck={false}
-							/>
-						)}
-						<div className="project-resources-editor-footer">
-							{editSaved && <span className="project-resources-editor-saved">{t("projectResources.editorSaved")}</span>}
-							<div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-								<button className="config-btn" onClick={() => setEditingSkill(null)}>{t("common.cancel")}</button>
-								<button className="config-btn primary" onClick={() => void saveEditor()} disabled={editSaving}>
-									{editSaving ? t("common.saving") : t("common.save")}
-								</button>
+					<div className="prompts-editor-backdrop" onClick={() => setEditingSkill(null)}>
+						<div className="prompts-editor-modal" onClick={(e) => e.stopPropagation()}>
+							<div className="file-diff-header">
+								<span className="file-diff-header-file">{editingSkill.name} · SKILL.md</span>
+								<div className="file-diff-header-actions">
+									<button type="button" onClick={() => setEditingSkill(null)} aria-label={t("common.close")} className="config-icon-btn">
+										<X size={16} />
+									</button>
+								</div>
 							</div>
+							{editLoading ? (
+								<div className="config-empty">{t("common.loading")}</div>
+							) : (
+								<div className="prompts-monaco-wrap">
+									<MonacoEditor
+										value={editContent}
+										onChange={setEditContent}
+									/>
+								</div>
+							)}
+							{editSaved && <span className="file-diff-hint saved">{t("config.promptSavedHint")}</span>}
 						</div>
 					</div>
 				) : activeTab === "skills" ? (
@@ -385,22 +403,27 @@ export function ProjectResourcesModal(props: {
 						<ResourceListEmpty loading={loading} empty={data.skills.length === 0} label={t("projectResources.emptySkills")} />
 						{data.skills.map((skill) => (
 							<article key={skill.id} className="project-resource-card">
-								<div className="project-resource-info">
+								<button
+									type="button"
+									className="project-resource-info"
+									onClick={() => void openEditor(skill)}
+									title={t("common.edit")}
+								>
 									<div className="project-resource-title">
 										{renamingSkill === skill.id ? (
 											<div className="skill-rename-inline">
 												<input
-													value={renameSkillValue}
-													onChange={(e) => setRenameSkillValue(e.target.value)}
+											value={renameSkillValue}
+											onChange={(e) => setRenameSkillValue(e.target.value)}
 													onKeyDown={(e) => { if (e.key === "Enter") void renameSkillConfirm(skill, renameSkillValue); if (e.key === "Escape") setRenamingSkill(null); }}
 													autoFocus
 													disabled={renameSkillBusy}
 												/>
 												<button className="config-icon-btn" onClick={() => void renameSkillConfirm(skill, renameSkillValue)} disabled={renameSkillBusy} title={t("common.confirm")}>
-													✓
+													<Check size={14} strokeWidth={2} />
 												</button>
 												<button className="config-icon-btn" onClick={() => setRenamingSkill(null)} disabled={renameSkillBusy} title={t("common.cancel")}>
-													✕
+													<X size={14} strokeWidth={2} />
 												</button>
 											</div>
 										) : (
@@ -414,8 +437,8 @@ export function ProjectResourcesModal(props: {
 										</span>
 									</div>
 									<small>{skill.description || t("config.skillDescriptionMissing")}</small>
-									<small>{skill.sourceLabel} · {skill.path}</small>
-								</div>
+								<small>{skill.sourceLabel} · {skill.path}</small>
+								</button>
 								<div className="skill-card-actions project-resource-actions">
 									<button
 										className="config-icon-btn"
@@ -488,30 +511,27 @@ export function ProjectResourcesModal(props: {
 						))}
 					</div>
 				) : editingProjectPrompt ? (
-					<div className="project-resources-editor-overlay">
-						<div className="project-resources-editor-header">
-							<strong>{editingProjectPrompt.name}.md</strong>
-							<button type="button" onClick={cancelProjectPromptEditor} aria-label={t("common.close")}>
-								<X size={16} />
-							</button>
-						</div>
-						{editProjectPromptLoading ? (
-							<div className="config-empty">{t("common.loading")}</div>
-						) : (
-							<textarea
-								value={editProjectPromptContent}
-								onChange={(event) => { setEditProjectPromptContent(event.target.value); setEditProjectPromptSaved(false); }}
-								spellCheck={false}
-							/>
-						)}
-						<div className="project-resources-editor-footer">
-							{editProjectPromptSaved && <span className="project-resources-editor-saved">{t("projectResources.editorSaved")}</span>}
-							<div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-								<button className="config-btn" onClick={cancelProjectPromptEditor}>{t("common.cancel")}</button>
-								<button className="config-btn primary" onClick={() => void saveProjectPromptEditor()} disabled={editProjectPromptSaving}>
-									{editProjectPromptSaving ? t("common.saving") : t("common.save")}
-								</button>
+					<div className="prompts-editor-backdrop" onClick={cancelProjectPromptEditor}>
+						<div className="prompts-editor-modal" onClick={(e) => e.stopPropagation()}>
+							<div className="file-diff-header">
+								<span className="file-diff-header-file">{editingProjectPrompt.name}.md</span>
+								<div className="file-diff-header-actions">
+									<button type="button" onClick={cancelProjectPromptEditor} aria-label={t("common.close")} className="config-icon-btn">
+										<X size={16} />
+									</button>
+								</div>
 							</div>
+							{editProjectPromptLoading ? (
+								<div className="config-empty">{t("common.loading")}</div>
+							) : (
+								<div className="prompts-monaco-wrap">
+									<MonacoEditor
+										value={editProjectPromptContent}
+										onChange={setEditProjectPromptContent}
+									/>
+								</div>
+							)}
+							{editProjectPromptSaved && <span className="file-diff-hint saved">{t("config.promptSavedHint")}</span>}
 						</div>
 					</div>
 				) : (
@@ -533,13 +553,18 @@ export function ProjectResourcesModal(props: {
 						<ResourceListEmpty loading={promptsLoading} empty={prompts.length === 0} label={t("projectResources.emptyPrompts")} />
 						{prompts.map((prompt) => (
 							<article key={prompt.path} className="project-resource-card">
-								<div className="project-resource-info">
+								<button
+									type="button"
+									className="project-resource-info"
+									onClick={() => void openProjectPromptEditor(prompt)}
+									title={t("common.edit")}
+								>
 									<div className="project-resource-title">
 										<strong>/{prompt.name}</strong>
 									</div>
 									<small>{prompt.description}</small>
 									<small>{prompt.path}</small>
-								</div>
+								</button>
 								<div className="skill-card-actions project-resource-actions">
 									<button
 										className="config-icon-btn"

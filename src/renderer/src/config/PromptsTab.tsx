@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Editor } from "@monaco-editor/react";
-import { FileEdit, Pencil, Trash2 } from "lucide-react";
+import { Check, FileEdit, Pencil, Trash2, X } from "lucide-react";
 import type {
 	CreatePiPromptTemplateInput,
 	PiPromptTemplateListResult,
@@ -8,32 +7,7 @@ import type {
 } from "../../../shared/types";
 import { t } from "../i18n";
 import { CloseIconButton } from "../components/ui/IconButton";
-import { setupMonaco } from "../utils/monacoSetup";
-
-/** 只初始化一次 Monaco loader */
-let monacoSetupOnce = false;
-function ensureMonaco() {
-	if (monacoSetupOnce) return;
-	monacoSetupOnce = true;
-	setupMonaco();
-}
-
-const DEFAULT_EDITOR_OPTIONS = {
-	minimap: { enabled: false },
-	lineNumbers: "on" as const,
-	folding: true,
-	fontSize: 13,
-	padding: { top: 10, bottom: 10 },
-	scrollBeyondLastLine: false,
-	wordWrap: "on" as const,
-	tabSize: 2,
-	insertSpaces: true,
-};
-
-/** 根据 html[data-theme] 返回 Monaco 主题 */
-function editorTheme(): "vs-dark" | "vs" {
-	return document.documentElement.getAttribute("data-theme") === "dark" ? "vs-dark" : "vs";
-}
+import { MonacoEditor } from "../components/ui/MonacoEditor";
 
 export function PromptsTab(props: {
 	data: PiPromptTemplateListResult;
@@ -63,7 +37,6 @@ export function PromptsTab(props: {
 	onSaveEdit: () => void;
 }) {
 	const { data } = props;
-	ensureMonaco();
 	const canCreate = props.newName.trim().length > 0 && props.newDescription.trim().length > 0;
 
 	// Prompt 重命名状态
@@ -196,10 +169,10 @@ export function PromptsTab(props: {
 											disabled={renameBusy}
 										/>
 										<button className="config-icon-btn" onClick={handleRename} disabled={renameBusy} title={t("common.confirm")}>
-											✓
+											<Check size={14} strokeWidth={2} />
 										</button>
 										<button className="config-icon-btn" onClick={() => setRenamingTemplate(null)} disabled={renameBusy} title={t("common.cancel")}>
-											✕
+											<X size={14} strokeWidth={2} />
 										</button>
 									</div>
 								) : (
@@ -269,16 +242,9 @@ export function PromptsTab(props: {
 							<div className="config-empty">{t("common.loading")}</div>
 						) : (
 							<div className="prompts-monaco-wrap">
-								<Editor
-									height="100%"
-									defaultLanguage="markdown"
+								<MonacoEditor
 									value={props.editContent}
-									theme={editorTheme()}
-									onChange={(val) => props.onChangeEditContent(val ?? "")}
-									options={{
-										...DEFAULT_EDITOR_OPTIONS,
-										readOnly: false,
-									}}
+									onChange={props.onChangeEditContent}
 								/>
 							</div>
 						)}

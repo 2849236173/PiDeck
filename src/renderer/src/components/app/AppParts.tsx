@@ -123,166 +123,14 @@ export type SessionModifiedFile = {
 
 type DiffFileHandler = (path: string, originalContent?: string, content?: string) => void;
 
-function countToolContentLines(value: unknown) {
-	if (typeof value !== "string" || !value) return 0;
-	return value.split(/\r\n|\r|\n/).length;
-}
 
-const FILE_PATH_KEYS = [
-	"filePath",
-	"file_path",
-	"path",
-	"targetPath",
-	"target_path",
-	"outputPath",
-	"output_path",
-	"file",
-	"fileName",
-	"filename",
-] as const;
 
-function getPathField(input: unknown) {
-	if (!input) return undefined;
-	// meta.args 可能被 AgentManager 序列化为 JSON 字符串（safeJson），需反解再查找路径字段。
-	if (typeof input === "string" && input.trim()) {
-		try { input = JSON.parse(input); } catch { return undefined; }
-	}
-	if (typeof input !== "object") return undefined;
-	const record = input as Record<string, unknown>;
-	for (const key of FILE_PATH_KEYS) {
-		const value = record[key];
-		if (typeof value === "string" && value.trim()) return value;
-	}
-	return undefined;
-}
 
-function collectPathFields(input: unknown) {
-	const paths = new Set<string>();
-	const primary = getPathField(input);
-	if (primary) paths.add(primary);
-	const record = input && typeof input === "object" ? (input as Record<string, unknown>) : undefined;
-	const nestedLists = [record?.edits, record?.files, record?.paths, record?.items];
-	for (const list of nestedLists) {
-		if (!Array.isArray(list)) continue;
-		for (const item of list) {
-			if (typeof item === "string" && item.trim()) paths.add(item);
-			const nestedPath = getPathField(item);
-			if (nestedPath) paths.add(nestedPath);
-		}
-	}
-	return [...paths];
-}
 
-function editChangedLineCount(edit: any) {
-	const oldLines = countToolContentLines(edit?.oldText ?? edit?.old_text);
-	const newLines = countToolContentLines(edit?.newText ?? edit?.new_text);
-	return Math.max(oldLines, newLines);
-}
 
-function getToolChangedLineCountForPath(toolName: string, args: any, path: string) {
-	// meta.args 可能被 AgentManager 序列化为 JSON 字符串
-	if (typeof args === "string" && args.trim()) {
-		try { args = JSON.parse(args); } catch { return 0; }
-	}
-	// 会话卡片只基于当前轮工具参数估算触达行数，不读取 Git 工作区，
-	// 避免提交后工作区清空导致历史会话修改摘要消失。
-	if (/edit|patch/i.test(toolName)) {
-		const edits = Array.isArray(args?.edits) ? args.edits : undefined;
-		if (edits) {
-			const pathScopedEdits = edits.filter((edit: any) => {
-				const editPath = getPathField(edit);
-				return !editPath || editPath === path;
-			});
-			return pathScopedEdits.reduce(
-				(total: number, edit: any) => total + editChangedLineCount(edit),
-				0,
-			);
-		}
-		return Math.max(
-			countToolContentLines(args?.oldText ?? args?.old_text),
-			countToolContentLines(args?.newText ?? args?.new_text),
-		);
-	}
-	if (/write|create/i.test(toolName)) {
-		return countToolContentLines(args?.content ?? args?.text ?? args?.data ?? args?.body);
-	}
-	return 0;
-}
 
-function isFileMutationTool(toolName: string) {
-	return /write|edit|create|patch/i.test(toolName);
-}
 
-function mergeModifiedFiles(
-	base: SessionModifiedFile[] | undefined,
-	fallback: SessionModifiedFile[],
-) {
-	const byPath = new Map<string, SessionModifiedFile>();
-	for (const file of fallback) byPath.set(file.path, file);
-	// 固化摘要通常包含运行结束时的准确累计结果；放到后面覆盖兜底结果。
-	for (const file of base ?? []) byPath.set(file.path, file);
-	return Array.from(byPath.values());
-}
 
-/** 从工具消息的 args 中提取写入后的文件新内容，用于 diff 展示。
- *  meta.args 可能被 AgentManager 序列化为 JSON 字符串（safeJson），需先反解。
- *  write/create 工具直接从 content 字段取；edit/patch 工具将 newText 应用到 originalContent 上得到结果。 */
-function getToolNewContentFromMessage(toolName: string, args: unknown, originalContent: string | undefined): string | undefined {
-	if (!args) return undefined;
-	let parsed = args;
-	if (typeof parsed === "string" && parsed.trim()) {
-		try { parsed = JSON.parse(parsed); } catch { return undefined; }
-	}
-	if (typeof parsed !== "object") return undefined;
-	const record = parsed as Record<string, unknown>;
-	if (/write|create/i.test(toolName) && typeof record.content === "string") return record.content;
-	if (/edit|patch/i.test(toolName) &&
-		typeof record.newText === "string" &&
-		typeof record.oldText === "string" &&
-		originalContent) {
-		const idx = originalContent.indexOf(record.oldText);
-		if (idx >= 0) {
-			return originalContent.slice(0, idx) + record.newText + originalContent.slice(idx + record.oldText.length);
-		}
-	}
-	return undefined;
-}
-
-function collectModifiedFilesFromToolMessages(messages: ChatMessage[]) {
-	const byPath = new Map<string, SessionModifiedFile>();
-	for (const message of messages) {
-		// meta 不可用时降级到 message.toolName（部分会话 JSONL 行不携带 meta）
-		const toolName = (message.meta?.toolName ?? (message as any).toolName) as string | undefined;
-		if (typeof toolName !== "string" || !isFileMutationTool(toolName)) continue;
-		const args = message.meta?.args;
-		// 优先从 args 提取路径；arg 不可用时降级到 details._piDeckFilePath（pi-deck-file-capture 扩展记录）
-		const filePaths = args ? collectPathFields(args) : [];
-		if (filePaths.length === 0) {
-			const detailsPath = (message as any).details?._piDeckFilePath as string | undefined;
-			if (detailsPath) filePaths.push(detailsPath);
-		}
-		for (const filePath of filePaths) {
-			const previous = byPath.get(filePath);
-			if (previous) byPath.delete(filePath);
-			// 从 args 中提取本次工具调用产生的新内容，用于 diff 对比展示
-			const originalContent = previous?.originalContent ??
-				(message.meta?.originalContent as string | undefined) ?? "";
-			byPath.set(filePath, {
-				path: filePath,
-				toolName,
-				status: String(message.meta?.status ?? "done"),
-				changedLines:
-					(previous?.changedLines ?? 0) +
-					getToolChangedLineCountForPath(toolName, args, filePath),
-				originalContent,
-				// 提取本次写入/编辑后的新内容，使 diff 点击时能直接使用会话级快照
-				// 而非降级到读磁盘（历史会话恢复时磁盘可能已变化或文件已删除）。
-				content: getToolNewContentFromMessage(toolName, args, originalContent) ?? previous?.content,
-			});
-		}
-	}
-	return Array.from(byPath.values());
-}
 
 export function EnvironmentDialog(props: {
 	status: PiInstallStatus | null;
@@ -2201,7 +2049,6 @@ export const TurnRow = memo(function TurnRow(props: {
 	onResendUserMessage?: (message: ChatMessage) => void;
 	onDeleteMessage?: (messageId: string) => void;
 	onEditMessage?: (messageId: string, newText: string) => void;
-	fileSummariesByMessage?: Record<string, SessionModifiedFile[]>;
 	/** Agent 正在处理请求或流式输出中时禁用编辑/删除等操作按钮 */
 	agentRunning?: boolean;
 	/** 打开多选分享弹框 */
@@ -2236,16 +2083,7 @@ export const TurnRow = memo(function TurnRow(props: {
 		.filter(Boolean)
 		.join("\n\n");
 
-	// 优先使用运行结束时固化到 assistant 消息的摘要；若本轮没有 assistant 文本或历史 id 对不上，
-	// 则直接从本轮 tool 消息兜底提取，保证纯工具调用（如 write）也能在卡片里展示。
-	const toolMessages = run.items.flatMap((item) =>
-		item.kind === "tool-group" ? item.messages : [],
-	);
-	const fallbackFileSummary = collectModifiedFilesFromToolMessages(toolMessages);
-	const fileSummary = mergeModifiedFiles(
-		props.fileSummariesByMessage?.[assistantMessages[0]?.message.id],
-		fallbackFileSummary,
-	);
+
 
 	const rowRef = useRef<HTMLElement | null>(null);
 	// 本轮没有任何可渲染内容时不输出空容器
@@ -2296,7 +2134,7 @@ export const TurnRow = memo(function TurnRow(props: {
 										<ThinkingBlock
 											text={thinking}
 											startedAt={run.startedAt}
-											endedAt={run.endedAt}
+											endedAt={item.message.timestamp > run.startedAt ? item.message.timestamp : run.endedAt}
 											showThinking={props.showThinking}
 										/>
 									)}
@@ -2385,14 +2223,7 @@ export const TurnRow = memo(function TurnRow(props: {
 								)}
 							</div>
 						)}
-						{/* 本轮修改文件摘要：放在工具和助手消息下方，即使本轮只有工具调用也展示 */}
-						{fileSummary && fileSummary.length > 0 && (
-							<SessionFileSummary
-								files={fileSummary}
-								onOpenFile={props.onOpenFile}
-								onDiffFile={props.onDiffFile}
-							/>
-						)}
+
 					</>
 			</div>
 		</article>
@@ -3792,42 +3623,60 @@ export function SessionFileSummary(props: {
 	onOpenFile?: (path: string) => void;
 	onDiffFile?: DiffFileHandler;
 }) {
-	const [expanded, setExpanded] = useState(false);
-	const visibleFiles = expanded ? props.files : props.files.slice(0, 4);
+	const [collapsed, setCollapsed] = useState(true);
+	const [fileListExpanded, setFileListExpanded] = useState(false);
+	const visibleFiles = fileListExpanded ? props.files : props.files.slice(0, 4);
 	const hiddenCount = Math.max(0, props.files.length - visibleFiles.length);
+
+	// 无文件时不渲染
+	if (props.files.length === 0) return null;
+
 	return (
 		<section className="session-file-summary-list-card" aria-label={t("drawer.modifiedFilesAria")}>
-			<div className="session-file-summary-title">
-				<span>{t("drawer.modifiedFiles")}</span>
-				<small>
+			<button
+				className="session-file-summary-header"
+				type="button"
+				onClick={() => setCollapsed((c) => !c)}
+				aria-expanded={!collapsed}
+			>
+				<ChevronDown
+					size={14}
+					className={`session-file-summary-chevron${collapsed ? "" : " open"}`}
+				/>
+				<span className="session-file-summary-title-span">{t("drawer.modifiedFiles")}</span>
+				<small className="session-file-summary-count">
 					{props.files.length} {t("app.files")}
 				</small>
-			</div>
-			<ul className="session-file-summary-list">
-				{visibleFiles.map((file) => {
-					const fileName = file.path.split(/[/\\]/).pop() ?? file.path;
-					return (
-						<li key={file.path}>
-							<button
-								className="session-file-summary-row"
-								type="button"
-								title={file.path}
-								onClick={() => props.onDiffFile?.(file.path, file.originalContent, file.content)}
-							>
-								<span className="session-file-summary-name">{fileName}</span>
-							</button>
-						</li>
-					);
-				})}
-			</ul>
-			{props.files.length > 4 && (
-				<button
-					className="session-file-summary-toggle"
-					type="button"
-					onClick={() => setExpanded((current) => !current)}
-				>
-					{expanded ? t("common.collapse") : t("drawer.moreFiles", { count: hiddenCount })}
-				</button>
+			</button>
+			{!collapsed && (
+				<>
+					<ul className="session-file-summary-list">
+						{visibleFiles.map((file) => {
+							const fileName = file.path.split(/[/\\]/).pop() ?? file.path;
+							return (
+								<li key={file.path}>
+									<button
+										className="session-file-summary-row"
+										type="button"
+										title={file.path}
+										onClick={() => props.onDiffFile?.(file.path, file.originalContent, file.content)}
+									>
+										<span className="session-file-summary-name">{fileName}</span>
+									</button>
+								</li>
+							);
+						})}
+					</ul>
+					{props.files.length > 4 && (
+						<button
+							className="session-file-summary-toggle"
+							type="button"
+							onClick={() => setFileListExpanded((current) => !current)}
+						>
+							{fileListExpanded ? t("common.collapse") : t("drawer.moreFiles", { count: hiddenCount })}
+						</button>
+					)}
+				</>
 			)}
 		</section>
 	);
