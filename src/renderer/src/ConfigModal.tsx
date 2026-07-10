@@ -14,6 +14,7 @@ import { LogsTab } from "./config/LogsTab";
 import { CloseIconButton } from "./components/ui/IconButton";
 import { t } from "./i18n";
 import { MonacoEditor } from "./components/ui/MonacoEditor";
+import { translateBuiltinPromptDescription } from "./composerBehavior";
 import type {
 	AuthFile,
 	ConfigTab,
@@ -939,10 +940,13 @@ function ConfigModalContent(props: ConfigModalProps) {
 	/** 刷新 prompt templates 列表 */
 	const refreshPrompts = async () => {
 		const res = await api.prompts.list();
-		// 过滤掉用户已删除的内置模板
-		res.templates = res.templates.filter(
-			(t) => t.userCreated || !deletedBuiltinNames.has(t.name),
-		);
+		// 过滤掉用户已删除的内置模板，同时翻译内置模板的 description
+		res.templates = res.templates
+			.filter((t) => t.userCreated || !deletedBuiltinNames.has(t.name))
+			.map((tpl) => ({
+				...tpl,
+				description: translateBuiltinPromptDescription(tpl),
+			}));
 		setPromptsData(res);
 	};
 

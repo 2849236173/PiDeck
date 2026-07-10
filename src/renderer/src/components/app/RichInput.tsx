@@ -107,7 +107,8 @@ export function parseRichInputChips(
 	// /skill：前置排除 : / 和 \w（字母/数字/下划线），避免路径段误识别；slash 命令整体 = 命令名 + 可选的 :参数名（如 /skill:writing-plans、/template:doc）。
 	// 冒号后须字母开头 + 字母数字/连字符，避免匹配 /a:b:c 这种异常文本。
 	// 后一字符若为 /，说明是路径（如 /usr/bin），不当作 skill。
-	const slashRe = /(?<![:/.\w#!~])(\/[a-zA-Z][a-zA-Z0-9_-]*(?::[a-zA-Z][a-zA-Z0-9_-]*)?)/g;
+	// 名称支持 Unicode 字母（中文、日文等），使用 \p{L} + u flag。
+	const slashRe = /(?<![:/.\w#!~])(\/[\p{L}][\p{L}\p{N}_-]*(?::[\p{L}][\p{L}\p{N}_-]*)?)/gu;
 	let m: RegExpExecArray | null;
 	while ((m = slashRe.exec(text)) !== null) {
 		const start = m.index;

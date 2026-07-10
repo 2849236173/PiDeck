@@ -51,6 +51,7 @@ import {
   buildComposerPromptSubmission,
   expandPromptTemplates,
   getComposerEnterIntent,
+  translateBuiltinPromptDescription,
 } from "./composerBehavior";
 import {
   getProjectAgentSessionDisplay,
@@ -1221,8 +1222,11 @@ export function App() {
     [commands],
   );
   const validCommandNames = useMemo(
-    () => new Set(mergedCommands.map((c) => c.name)),
-    [mergedCommands],
+    () => new Set([
+      ...mergedCommands.map((c) => c.name),
+      ...promptTemplateList.map((t) => t.name),
+    ]),
+    [mergedCommands, promptTemplateList],
   );
 
   /** 有效文件路径白名单：仅工作区真实存在的 @ 引用渲染为 chip */
@@ -3148,7 +3152,9 @@ export function App() {
     const allTemplates: typeof promptTemplateList = [];
     try {
       const globalResult = await api.prompts.list();
-      allTemplates.push(...globalResult.templates);
+      for (const tpl of globalResult.templates) {
+        allTemplates.push({ ...tpl, description: translateBuiltinPromptDescription(tpl) });
+      }
     } catch {
       // 全局列表失败时继续加载项目列表
     }

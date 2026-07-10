@@ -31,6 +31,48 @@ export type PromptTemplateInfo = {
 	content: string;
 };
 
+/** 内置 prompt 模板的中文 description 映射 */
+const BUILTIN_PROMPT_DESC_CN: Record<string, string> = {
+	review: "审查暂存的 Git 更改，检查 bug、安全问题和逻辑错误",
+	test: "为函数或组件编写全面的测试用例",
+	fix: "调试并修复问题，包含根因分析",
+	refactor: "重构代码以提升可读性和可维护性",
+	doc: "添加或改进文档和注释",
+explain: "用简洁的语言解释代码或架构",
+	commit: "根据暂存更改生成约定式提交信息",
+	"pi-system": "查看 pi 的默认系统提示词（身份、工具、行为准则）",
+	"skill-discipline": "技能执行纪律：何时及如何触发 agent 技能的规则",
+};
+
+/** 内置 prompt 模板的英文 description 映射（fallback） */
+const BUILTIN_PROMPT_DESC_EN: Record<string, string> = {
+	review: "Review staged git changes for bugs, security issues, and logic errors",
+	test: "Write tests for a function or component covering edge cases",
+	fix: "Debug and fix issues with root cause analysis",
+	refactor: "Refactor code for better readability and maintainability",
+	doc: "Add or improve documentation and comments",
+	explain: "Explain code or architecture in simple terms",
+	commit: "Generate a conventional commit message from staged changes",
+	"pi-system": "View pi's default system prompt (identity, tools, guidelines)",
+	"skill-discipline": "Skills execution discipline: rules for when and how to trigger agent skills",
+};
+
+/**
+ * 翻译内置 prompt 模板的 description（UI 展示用）。
+ * 非内置模板保持原样。
+ */
+export function translateBuiltinPromptDescription(
+	template: PromptTemplateInfo,
+): string {
+	if (!template.path.startsWith("builtin://")) return template.description;
+	// 根据 html[data-theme] 判断语言环境——中文用 CN 映射，其余用 EN
+	const isChinese =
+		typeof document !== "undefined" &&
+		document.documentElement.lang?.startsWith("zh");
+	const map = isChinese ? BUILTIN_PROMPT_DESC_CN : BUILTIN_PROMPT_DESC_EN;
+	return map[template.name] ?? template.description;
+}
+
 /**
  * 展开消息中的 prompt template 命令（/templateName）。
  *
