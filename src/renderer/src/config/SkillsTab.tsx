@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, FileEdit, Pencil, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
+import { Check, FileEdit, Pencil, ShoppingBag, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
 import type {
 	CreatePiSkillInput,
 	PiSkillListResult,
@@ -7,6 +7,7 @@ import type {
 	PiSkillSummary,
 } from "../../../shared/types";
 import { t } from "../i18n";
+import { SkillStoreTab } from "./SkillStoreTab";
 
 export function SkillsTab(props: {
 	data: PiSkillListResult;
@@ -27,17 +28,44 @@ export function SkillsTab(props: {
 	onRename: (skill: PiSkillSummary, newName: string) => Promise<void>;
 }) {
 	const { data } = props;
+	const [skillTab, setSkillTab] = useState<"local" | "store">("local");
 	const [locationPickerOpen, setLocationPickerOpen] = useState(false);
 	const canCreate = props.newName.trim() && props.newDescription.trim();
+	// 按选中的位置目录过滤 skill 列表
+	const filteredSkills = data.skills.filter((s) => s.sourceId === props.newLocationId);
 	const selectedLocation =
 		data.locations.find((location) => location.id === props.newLocationId) ??
 		data.locations[0];
 	return (
 		<div className="skills-tab">
-			<div className="config-toolbar">
+			{/* tab 切换栏 */}
+			<div className="prompts-tab-bar">
+				<button
+					className={`prompts-tab-btn ${skillTab === "local" ? "active" : ""}`}
+					onClick={() => setSkillTab("local")}
+				>
+					{t("config.nav.skills")}
+				</button>
+				<button
+					className={`prompts-tab-btn ${skillTab === "store" ? "active" : ""}`}
+					onClick={() => setSkillTab("store")}
+				>
+					<ShoppingBag size={14} strokeWidth={1.8} />
+					{t("config.promptStoreTab")}
+				</button>
+			</div>
+
+			{skillTab === "store" ? (
+				<SkillStoreTab
+					onImported={props.onRefresh}
+					locationId={props.newLocationId}
+				/>
+			) : (
+				<>
+					<div className="config-toolbar">
 				<div>
 					<span className="config-count">
-						{t("config.count.skills", { count: data.skills.length })}
+						{t("config.count.skills", { count: filteredSkills.length })}
 					</span>
 					<small className="skills-restart-hint">
 						{t("config.restartHint")}
@@ -125,10 +153,10 @@ export function SkillsTab(props: {
 			</section>
 
 			<div className="skills-list">
-				{data.skills.length === 0 ? (
+				{filteredSkills.length === 0 ? (
 					<div className="config-empty">{t("config.emptySkills")}</div>
 				) : (
-					data.skills.map((skill) => (
+					filteredSkills.map((skill) => (
 						<SkillCard
 							key={skill.id}
 							skill={skill}
@@ -140,6 +168,8 @@ export function SkillsTab(props: {
 					))
 				)}
 			</div>
+		</>
+			)}
 		</div>
 	);
 }

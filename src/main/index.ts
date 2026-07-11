@@ -64,6 +64,13 @@ import type {
 	CreatePiPromptTemplateInput,
 	CreatePiSkillInput,
 	CreateProjectSkillInput,
+	PiPromptTemplateSummary,
+	PromptStoreSearchResult,
+	PromptStoreSearchResponse,
+	PromptStoreRawItem,
+	PromptStoreItem,
+	YaoPromptListResult,
+	YaoPromptDetailResult,
 } from "../shared/types";
 import { ProjectStore } from "./projects/ProjectStore";
 import { FileSystemService } from "./fs/FileSystemService";
@@ -82,6 +89,7 @@ import { ConfigManager } from "./config/ConfigManager";
 import { TerminalSessionManager } from "./terminal/TerminalSessionManager";
 import { TelemetryService } from "./telemetry/TelemetryService";
 import { PromptManager } from "./prompts/PromptManager";
+import { YaoPromptManager } from "./prompts/YaoPromptManager";
 import { SkillManager } from "./skills/SkillManager";
 import { ExtensionManager } from "./extensions/ExtensionManager";
 import { ProjectResourceManager } from "./projects/ProjectResourceManager";
@@ -129,6 +137,7 @@ let piLocator: PiLocator;
 let agentManager: AgentManager;
 let configManager: ConfigManager;
 let promptManager: PromptManager;
+let yaoPromptManager: YaoPromptManager;
 let skillManager: SkillManager;
 let extensionManager: ExtensionManager;
 let projectResourceManager: ProjectResourceManager;
@@ -1799,6 +1808,286 @@ function registerIpc() {
 		return result;
 	});
 
+	// ── Prompt Store (prompts.chat) ──────────────────────────────────────
+	/** prompts.chat REST API 端点 */
+	const PROMPT_STORE_BASE = "https://prompts.chat/api";
+
+	/**
+	 * 搜索 prompts.chat 公开 prompt 市场。
+	 * 使用 REST API 搜索，返回结构化结果供用户浏览和选择导入。
+	 */
+	ipcMain.handle(ipcChannels.promptStoreSearch, async (_event, query: string, options?: {
+		limit?: number;
+		type?: string;
+		category?: string;
+		tag?: string;
+	}) => {
+		try {
+			const params = new URLSearchParams({ q: query });
+			if (options?.limit) params.set("perPage", String(options.limit));
+			if (options?.type) params.set("type", options.type);
+			if (options?.category) params.set("category", options.category);
+			if (options?.tag) params.set("tag", options.tag);
+
+			const url = `${PROMPT_STORE_BASE}/prompts?${params.toString()}`;
+			const response = await fetch(url, {
+				signal: AbortSignal.timeout(10_000),
+			});
+			if (!response.ok) {
+				throw new Error(`prompts.chat API 返回 ${response.status}`);
+			}
+			// API 返回原始结构，扁平化为 UI 消费的格式
+			const raw = (await response.json()) as PromptStoreSearchResponse;
+			const result: PromptStoreSearchResult = {
+				query,
+				count: raw.total,
+				prompts: raw.prompts.map(flattenPromptItem),
+			};
+			return result;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			void appLogger.warn("prompt-store", "Search failed", { query, error: message });
+			throw new Error(`搜索 prompt 商店失败: ${message}`);
+		}
+	});
+
+	/** 通过 ID 获取 prompts.chat 单个 prompt 的完整内容 */
+	ipcMain.handle(ipcChannels.promptStoreGet, async (_event, id: string) => {
+		try {
+			const url = `${PROMPT_STORE_BASE}/prompts/${encodeURIComponent(id)}`;
+			const response = await fetch(url, {
+				signal: AbortSignal.timeout(10_000),
+			});
+			if (!response.ok) {
+				throw new Error(`prompts.chat API 返回 ${response.status}`);
+			}
+			const raw = (await response.json()) as PromptStoreRawItem;
+			return flattenPromptItem(raw);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			void appLogger.warn("prompt-store", "Get prompt failed", { id, error: message });
+			throw new Error(`获取 prompt 详情失败: ${message}`);
+		}
+	});
+
+	/** 将 prompts.chat 原始 prompt 条目扁平化为 UI 消费的格式 */
+	function flattenPromptItem(raw: PromptStoreRawItem): PromptStoreItem {
+		return {
+			id: raw.id,
+			title: raw.title,
+			description: raw.description,
+			content: raw.content,
+			type: raw.type,
+			author: raw.author?.name ?? "",
+			category: raw.category?.name ?? "",
+			tags: raw.tags?.map((t) => t.tag?.name).filter(Boolean) ?? [],
+			votes: raw.voteCount ?? 0,
+			createdAt: raw.createdAt,
+		};
+	}
+
+	/**
+	 * 将 prompts.chat 的命名变量（${name} / ${name:default}）
+	 * 转换为 pi 的位置参数（$N / ${N:-default}）。
+	 * 同时生成 argument-hint。
+	 */
+	function convertStoreVarsToPiVars(content: string): { converted: string; argumentHint: string; varCount: number } {
+		// 收集所有 ${name} 和 ${name:default}，保留出现顺序
+		const varMap = new Map<string, { index: number; hasDefault: boolean; defaultVal?: string }>();
+		let nextIndex = 1;
+		// 先扫描所有变量并分配序号
+		const scanRegex = /\$\{([a-zA-Z_]\w*)(?::(.*?))?\}/g;
+		let scanMatch: RegExpExecArray | null;
+		while ((scanMatch = scanRegex.exec(content)) !== null) {
+			const varName = scanMatch[1];
+			if (!varMap.has(varName)) {
+				varMap.set(varName, {
+					index: nextIndex++,
+					hasDefault: scanMatch[2] !== undefined,
+					defaultVal: scanMatch[2],
+				});
+			}
+		}
+
+		// 如果没有变量，直接返回原文
+		if (varMap.size === 0) {
+			return { converted: content, argumentHint: "", varCount: 0 };
+		}
+
+		// 替换变量
+		let converted = content.replace(
+			/\$\{([a-zA-Z_]\w*)(?::(.*?))?\}/g,
+			(_match, varName: string, defaultVal?: string) => {
+				const info = varMap.get(varName)!;
+				if (defaultVal !== undefined) {
+					return `\${${info.index}:-${defaultVal}}`;
+				}
+				return `$${info.index}`;
+			},
+		);
+
+		// 生成 argument-hint：无默认值的用 <>, 有默认值的用 []
+		const hints: string[] = [];
+		for (let i = 1; i < nextIndex; i++) {
+			const entry = Array.from(varMap.entries()).find(([, v]) => v.index === i);
+			if (!entry) continue;
+			const [varName, info] = entry;
+			if (info.hasDefault) {
+				hints.push(`[${varName}:${info.defaultVal}]`);
+			} else {
+				hints.push(`<${varName}>`);
+			}
+		}
+		const argumentHint = hints.length > 0 ? hints.join(" ") : "";
+
+		return { converted, argumentHint, varCount: varMap.size };
+	}
+
+	/** 从 prompts.chat 导入 prompt 到本地 ~/.pi/agent/prompts/ */
+	ipcMain.handle(ipcChannels.promptStoreImport, async (_event, {
+		title,
+		description,
+		content,
+	}: {
+		title: string;
+		description: string;
+		content: string;
+	}) => {
+		try {
+			const name = title
+				.trim()
+				.toLowerCase()
+				.replace(/[^\p{L}\p{N}-]+/gu, "-")
+				.replace(/-+/g, "-")
+				.replace(/^-|-$/g, "");
+			if (!name) throw new Error("标题中未提取到有效文件名");
+
+			// 转换变量格式：prompts.chat 的 ${name} → pi 的 $N
+			const { converted, argumentHint, varCount } = convertStoreVarsToPiVars(content);
+
+			// 使用 PromptManager.create 来创建，统一命名规范
+			// 但如果 create 失败（模板已存在名），加后缀
+			const tryCreate = async (tryName: string): Promise<PiPromptTemplateSummary> => {
+				try {
+					return await promptManager.create({ name: tryName, description });
+				} catch {
+					// 名称冲突，加数字后缀重试
+					const match = tryName.match(/-(\d+)$/);
+					const nextNum = match ? parseInt(match[1], 10) + 1 : 2;
+					const suffixName = tryName.replace(/-\d+$/, "") + "-" + nextNum;
+					return tryCreate(suffixName);
+				}
+			};
+
+			// 如果有 argument-hint，在 frontmatter 中标注
+			const hintLine = argumentHint ? `\nargument-hint: ${argumentHint}` : "";
+			const frontmatter = `---\ndescription: ${description.replace(/\n/g, " ")}\nsource: prompts.chat${hintLine}\n---\n\n`;
+			const summary = await tryCreate(name);
+			await promptManager.writeContent(summary.path, frontmatter + converted);
+
+			void appLogger.info("prompt-store", "Imported prompt from store", {
+				title,
+				localName: summary.name,
+				variables: varCount,
+			});
+			return summary;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			void appLogger.warn("prompt-store", "Import failed", { title, error: message });
+			throw new Error(`导入 prompt 失败: ${message}`);
+		}
+	});
+
+	// ── Skill Store（prompts.chat skills） ─────────────────────────────
+	/** 搜索 prompts.chat 的公开 skill。复用 prompts 搜索，按 skill 关键词过滤 */
+	ipcMain.handle(ipcChannels.skillStoreSearch, async (_event, query: string) => {
+		try {
+			const params = new URLSearchParams({ q: query, perPage: "20" });
+			const url = `https://prompts.chat/api/prompts?${params.toString()}`;
+			const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+			if (!response.ok) throw new Error(`prompts.chat API 返回 ${response.status}`);
+			const raw = (await response.json()) as PromptStoreSearchResponse;
+			const result: PromptStoreSearchResult = {
+				query,
+				count: raw.total,
+				prompts: raw.prompts.map(flattenPromptItem),
+			};
+			return result;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(`搜索 skill 商店失败: ${message}`);
+		}
+	});
+
+	/** 从 prompts.chat 导入为本地 skill */
+	ipcMain.handle(ipcChannels.skillStoreImport, async (_event, item: PromptStoreItem, locationId: "pi-global" | "agents-global" = "pi-global") => {
+		try {
+			const name = item.title
+				.trim()
+				.toLowerCase()
+				.replace(/[^\p{L}\p{N}-]+/gu, "-")
+				.replace(/-+/g, "-")
+				.replace(/^-|-$/g, "");
+			if (!name) throw new Error("标题中未提取到有效文件名");
+
+			const { writeFile } = await import("node:fs/promises");
+
+			// 用 SkillManager 创建 skill（默认 pi-global，用户可通过 dropdown 切换）
+			const summary = await skillManager.create({
+				name,
+				description: item.description || item.title,
+				locationId: locationId ?? "pi-global",
+			});
+
+			// 覆盖 SKILL.md 为实际内容
+			const skillContent = `---\nname: ${name}\ndescription: ${(item.description || item.title).replace(/\n/g, " ")}\nsource: prompts.chat\n---\n\n# ${item.title}\n\n${item.content}`;
+			await writeFile(summary.path, skillContent, "utf8");
+
+			void appLogger.info("skill-store", "Imported skill from store", { title: item.title, localName: name });
+			return summary;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			void appLogger.warn("skill-store", "Import failed", { title: item.title, error: message });
+			throw new Error(`导入 skill 失败: ${message}`);
+		}
+	});
+
+	// ── Yao Open Prompts（中文提示词精选） ─────────────────────────────
+	ipcMain.handle(ipcChannels.yaoPromptsList, async () => {
+		try {
+			const result = await yaoPromptManager.list();
+			return result;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			void appLogger.warn("yao-prompts", "List failed", { error: message });
+			throw new Error(`读取中文提示词库失败: ${message}`);
+		}
+	});
+
+	ipcMain.handle(ipcChannels.yaoPromptsDetail, async (_event, slug: string, category: string) => {
+		try {
+			const result = await yaoPromptManager.detail(slug, category);
+			if (!result) throw new Error(`未找到提示词: ${slug}`);
+			return result;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			void appLogger.warn("yao-prompts", "Detail failed", { slug, category, error: message });
+			throw new Error(`读取提示词详情失败: ${message}`);
+		}
+	});
+
+	ipcMain.handle(ipcChannels.yaoPromptsImport, async (_event, slug: string, category: string) => {
+		try {
+			const result = await yaoPromptManager.importToPi(slug, category);
+			void appLogger.info("yao-prompts", "Imported to pi templates", { slug, localName: result.name });
+			return result;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			void appLogger.warn("yao-prompts", "Import failed", { slug, category, error: message });
+			throw new Error(`导入提示词失败: ${message}`);
+		}
+	});
+
 	ipcMain.handle(ipcChannels.extensionsList, () => extensionManager.list());
 	ipcMain.handle(ipcChannels.extensionsUninstall, async (_event, source: string, scope?: "user" | "project" | "unknown") => {
 		const result = await extensionManager.uninstall(source, scope);
@@ -2230,6 +2519,7 @@ app.whenReady().then(async () => {
 	piLocator = new PiLocator();
 	configManager = new ConfigManager();
 	promptManager = new PromptManager();
+	yaoPromptManager = new YaoPromptManager();
 	skillManager = new SkillManager();
 	extensionManager = new ExtensionManager(piLocator, () => settingsStore.get());
 	projectResourceManager = new ProjectResourceManager((projectId) => projectStore.get(projectId));

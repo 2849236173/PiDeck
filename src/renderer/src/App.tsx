@@ -51,6 +51,7 @@ import {
   buildComposerPromptSubmission,
   expandPromptTemplates,
   getComposerEnterIntent,
+  parseArgumentHint,
   translateBuiltinPromptDescription,
 } from "./composerBehavior";
 import {
@@ -501,7 +502,7 @@ export function App() {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [promptTemplatePickerOpen, setPromptTemplatePickerOpen] = useState(false);
   const [promptTemplateList, setPromptTemplateList] = useState<
-    Array<{ name: string; path: string; description: string; content: string }>
+    Array<{ name: string; path: string; description: string; content: string; argumentHint?: string }>
   >([]);
   const [composerModePickerOpen, setComposerModePickerOpen] = useState(false);
   const [thinkingPickerOpen, setThinkingPickerOpen] = useState(false);
@@ -3179,7 +3180,11 @@ export function App() {
     try {
       const globalResult = await api.prompts.list();
       for (const tpl of globalResult.templates) {
-        allTemplates.push({ ...tpl, description: translateBuiltinPromptDescription(tpl) });
+        allTemplates.push({
+            ...tpl,
+            description: translateBuiltinPromptDescription(tpl),
+            argumentHint: parseArgumentHint(tpl.content),
+        });
       }
     } catch {
       // 全局列表失败时继续加载项目列表
@@ -3205,6 +3210,7 @@ export function App() {
     path: string;
     description: string;
     content: string;
+    argumentHint?: string;
   }) {
     // 插入斜线命令形式，pi 会在发送时自动展开，末尾加空格分割后续输入
     setPrompt((prev) => {
@@ -4434,7 +4440,6 @@ ${goalTextRef.current}
                   onDragEnd={finishProjectDrag}
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    if (projectIsChat) return;
                     setProjectMenu({
                       ...adjustMenuPos(event.clientX, event.clientY, 200, 320),
                       project,

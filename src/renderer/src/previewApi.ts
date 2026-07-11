@@ -509,6 +509,44 @@ export function createPreviewApi(): PiDesktopApi {
 				scope: "project",
 			}),
 		},
+		promptStore: {
+			search: async (_query, _opts) => ({ query: _query ?? "", count: 0, prompts: [] }),
+			get: async (_id) => ({ id: _id, title: "", description: "", content: "", type: "TEXT", author: "", category: "", tags: [], votes: 0, createdAt: "" }),
+			import: async (data) => ({
+				name: data.title.toLowerCase().replace(/[^\w-]+/g, "-"),
+				path: `C:/Users/preview/.pi/agent/prompts/${data.title.toLowerCase().replace(/[^\w-]+/g, "-")}.md`,
+				description: data.description,
+				content: data.content,
+				userCreated: true,
+			}),
+		},
+		yaoPrompts: {
+			list: async () => ({ categories: [], prompts: [], repoPath: "" }),
+			detail: async () => ({ title: "", description: "", promptContent: "", fullContent: "" }),
+			import: async (_slug, _category) => ({
+				name: _slug,
+				path: `C:/Users/preview/.pi/agent/prompts/${_slug}.md`,
+				description: "Preview import",
+				content: "Preview content",
+				userCreated: true,
+			}),
+		},
+		skillStore: {
+			search: async () => ({ query: "", count: 0, prompts: [] }),
+			import: async (data, _locationId) => ({
+				name: data.title.toLowerCase().replace(/[^\w-]+/g, "-"),
+				path: `C:/Users/preview/.pi/agent/skills/${data.title.toLowerCase().replace(/[^\w-]+/g, "-")}/SKILL.md`,
+				description: data.description,
+				enabled: true,
+				valid: true,
+				warnings: [],
+				id: `pi-global:preview`,
+				dir: "",
+				sourceId: "pi-global",
+				sourceLabel: "Preview",
+				type: "directory",
+			}),
+		},
 		settings: {
 			get: async (): Promise<AppSettings> => ({ ...previewSettings }),
 			update: async (patch): Promise<AppSettings> => {

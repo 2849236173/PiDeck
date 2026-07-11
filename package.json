@@ -77,6 +77,10 @@
         "filter": [
           "*.ts"
         ]
+      },
+      {
+        "from": "resources/yao-prompts",
+        "to": "yao-prompts"
       }
     ],
     "extraMetadata": {
