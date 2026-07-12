@@ -75,7 +75,7 @@ export class AgentManager {
 
 	/**
 	 * 待处理的 Extension UI 请求。key 为 agentId，value 为 Map<requestId, { method, title, options }>。
-	 * 用于在 abor t时及时发送 cancellation 防止 pi 等待超时。
+	 * 用于在 abort 时及时发送 cancellation 防止 pi 等待超时。
 	 */
 	private readonly pendingUIRequests = new Map<string, Map<string, { method: string; title: string }>>();
 	/** abort 时正在等待 ask_question 响应的 agent，用于在工具结果中覆写 answer 为 null。 */
@@ -473,6 +473,7 @@ export class AgentManager {
 		const runtime = this.requireRuntime(input.agentId);
 		const trimmed = input.message.trim();
 		const hasImages = input.images && input.images.length > 0;
+		const agentMessage = input.agentMessage?.trim() || trimmed || "Describe this image.";
 		// 允许只有图片没有文字的情况发送
 		if (!trimmed && !hasImages) return;
 
@@ -527,7 +528,7 @@ export class AgentManager {
 		// 后续消息必须带 streamingBehavior 否则 pi 直接返回 error。这里自动兜底。
 		// images 用于传递粘贴/拖拽的图片，pi 会将 base64 图片直接传给支持视觉的模型。
 		try {
-			const agentMessage = input.agentMessage?.trim() || trimmed || "Describe this image.";
+			const promptIsExtensionCommand = await this.promptMatchesRegisteredExtensionCommand(runtime, agentMessage);
 			const requestPayload: Record<string, unknown> = {
 				type: "prompt",
 				message: agentMessage,
@@ -554,6 +555,12 @@ export class AgentManager {
 					response.error ?? "图片消息发送失败",
 				);
 				this.emitState();
+			} else if (promptIsExtensionCommand) {
+				// 机制：Pi 扩展命令可在 prompt 阶段直接执行并返回，不进入 agent run。
+				// 证据：@earendil-works/pi-coding-agent/dist/core/agent-session.js 中 AgentSession.prompt()
+				//      先调用 _tryExecuteExtensionCommand()；命中后 return，不再调用 _runAgentPrompt()。
+				// 推导：不能等 agent_end；只有 Pi get_state 明确报告无剩余工作时才恢复 idle。
+				this.scheduleIdleCheckAfterExtensionCommand(input.agentId);
 			}
 		} catch (error) {
 			// 超时或进程崩溃后，需要明确提示用户重启 Agent
@@ -1759,6 +1766,24 @@ export class AgentManager {
 		);
 	}
 
+	private async promptMatchesRegisteredExtensionCommand(runtime: AgentRuntime, message: string): Promise<boolean> {
+		const trimmed = message.trim();
+		if (!trimmed.startsWith("/")) return false;
+
+		const commandName = trimmed.slice(1).split(/\s+/, 1)[0];
+		if (!commandName) return false;
+
+		const response = await runtime.process.client
+			.request({ type: "get_commands" }, 10_000)
+			.catch(() => undefined);
+		const commands = (response?.data as { commands?: unknown[] } | undefined)?.commands ?? [];
+		return commands.some((command) => {
+			if (!command || typeof command !== "object") return false;
+			const typed = command as { name?: unknown; source?: unknown };
+			return typed.name === commandName && typed.source === "extension";
+		});
+	}
+
 	/** 设置某 agent 的 RPC 日志记录开关 */
 	setRpcLogging(agentId: string, enabled: boolean) {
 		if (enabled) {
@@ -2038,13 +2063,36 @@ export class AgentManager {
 	}
 
 	/**
-	 * 处理 pi 扩展发起的 UI 请求（ctx.ui.select/confirm/input/editor/setWidget）。
-	 * 对话类请求写入消息流等待用户回答；setWidget 是 fire-and-forget，转发给渲染进程作为轻量状态块。
+	 * 处理 pi 扩展发起的 UI 请求。
+	 * 对话类请求写入消息流等待用户回答；fire-and-forget 请求只转发给渲染进程或忽略。
 	 */
 	private handleUIRequest(agentId: string, typed: Record<string, any>) {
 		const method = String(typed.method ?? "");
 		const requestId = String(typed.id ?? "");
 		// pi RPC 协议将 setWidget / dialog 字段放在顶层，不嵌套 params
+		if (method === "notify") {
+			this.emit(ipcChannels.agentsUiRequest, {
+				agentId,
+				requestId,
+				method,
+				title: "",
+				message: String(typed.message ?? ""),
+				notifyType: typed.notifyType,
+			});
+			return;
+		}
+
+		if (method === "set_editor_text") {
+			this.emit(ipcChannels.agentsUiRequest, {
+				agentId,
+				requestId,
+				method,
+				title: "",
+				text: String(typed.text ?? ""),
+			});
+			return;
+		}
+
 		if (method === "setWidget") {
 			// Plan Mode 等扩展会频繁刷新 widget；只走 IPC 状态，不落入会话消息，避免 JSONL 被进度噪声污染。
 			this.emit(ipcChannels.agentsUiRequest, {
@@ -2060,6 +2108,7 @@ export class AgentManager {
 		}
 		// 其他非对话 UI 方法暂不占用桌面 UI 空间。
 		if (["setStatus", "setTitle"].includes(method)) return;
+		if (!["select", "confirm", "input", "editor"].includes(method)) return;
 
 		// select 无选项时自动取消，不等用户响应
 		if (method === "select" && (!Array.isArray(typed.options) || typed.options.length === 0)) {
@@ -2092,6 +2141,7 @@ export class AgentManager {
 
 		// 通知渲染进程显示交互卡片
 		this.emit(ipcChannels.agentsUiRequest, request);
+		this.scheduleUIRequestTimeout(agentId, requestId, typed.timeout);
 	}
 
 	/**
@@ -3003,7 +3053,71 @@ export class AgentManager {
 		);
 	}
 
+	private scheduleUIRequestTimeout(agentId: string, requestId: string, timeout: unknown) {
+		if (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0) return;
 
+		const timer = setTimeout(() => {
+			const pending = this.pendingUIRequests.get(agentId);
+			if (!pending?.has(requestId)) return;
+
+			pending.delete(requestId);
+			if (pending.size === 0) this.pendingUIRequests.delete(agentId);
+
+			const messages = this.messages.get(agentId);
+			if (messages) {
+				const idx = messages.findIndex(
+					(msg) =>
+						msg.role === "system" &&
+						msg.meta?.type === "askQuestion" &&
+						(msg.meta as Record<string, unknown>).uiRequest &&
+						((msg.meta as Record<string, unknown>).uiRequest as Record<string, unknown>).requestId === requestId,
+				);
+				if (idx !== -1) {
+					messages.splice(idx, 1);
+					this.messages.set(agentId, messages);
+					this.scheduleMessageEmit(agentId, false);
+				}
+			}
+
+			this.emit(ipcChannels.agentsUiRequest, { agentId, requestId, completed: true, cancelled: true });
+		}, Math.floor(timeout));
+		timer.unref?.();
+	}
+
+	private scheduleIdleCheckAfterExtensionCommand(agentId: string) {
+		const timer = setTimeout(() => {
+			void this.markIdleIfPiReportsNoWork(agentId);
+		}, 100);
+		timer.unref?.();
+	}
+
+	private async markIdleIfPiReportsNoWork(agentId: string) {
+		const runtime = this.agents.get(agentId);
+		if (!runtime || runtime.tab.status !== "running") return;
+		if ((this.pendingUIRequests.get(agentId)?.size ?? 0) > 0) return;
+		if (this.activeAssistantMessageIds.has(agentId)) return;
+		if (this.toolExecutingByAgent.get(agentId)) return;
+
+		const response = await runtime.process.client
+			.request({ type: "get_state" }, 10_000)
+			.catch(() => undefined);
+		if (!response?.success || !response.data) return;
+
+		const state = response.data as {
+			isStreaming?: boolean;
+			isCompacting?: boolean;
+			pendingMessageCount?: number;
+		};
+		if (state.isStreaming || state.isCompacting || (state.pendingMessageCount ?? 0) > 0) return;
+
+		runtime.tab.status = "idle";
+		this.streamingThinking.delete(agentId);
+		this.emitThinking(agentId, "");
+		this.emitState();
+		void this.getRuntimeState(agentId)
+			.then((state) => this.emit(ipcChannels.agentsRuntimeState, { agentId, state }))
+			.catch(() => undefined);
+	}
 
 	private extractToolResultText(result: unknown) {
 		if (!result || typeof result !== "object") return "";
