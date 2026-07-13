@@ -4869,7 +4869,7 @@ ${goalTextRef.current}
                         />
                         <div className="conversation-body">
                           <div className="conversation-title">
-                            <strong>
+                            <strong title={session.name || t("common.untitled")}>
                               {session.name || t("common.untitled")}
                             </strong>
                             {session.source && session.source !== "pi" && (
@@ -5063,7 +5063,7 @@ ${goalTextRef.current}
                             >
                               <span className="session-node-marker" aria-hidden="true" />
                               <div className="conversation-body">
-                                <div className="conversation-title"><strong>{session.name || t("common.untitled")}</strong></div>
+                                <div className="conversation-title"><strong title={session.name || t("common.untitled")}>{session.name || t("common.untitled")}</strong></div>
                               </div>
                             </button>
                           ))}

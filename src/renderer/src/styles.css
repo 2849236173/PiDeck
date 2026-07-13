@@ -1184,17 +1184,28 @@ body:not(.is-list-resizing)
   overflow: hidden;
 }
 .project-avatar {
-  /* 项目节点改用普通文件夹图标，不再用首字母色块，降低左侧目录树的信息噪音。 */
-  background: transparent;
+  /* 项目节点保留文件夹图标，但加极轻的底色容器，让项目树根比会话行更有识别度。 */
+  background: color-mix(in srgb, var(--color-bg-muted) 72%, var(--color-bg-panel));
   color: var(--color-text-secondary);
   font-size: var(--font-size-caption);
+}
+.project-group > .conversation.active:first-child .project-avatar {
+  background: color-mix(in srgb, var(--color-accent-soft) 78%, var(--color-bg-panel));
+  color: var(--color-accent);
 }
 .chat-project .project-avatar {
   color: var(--color-accent);
 }
 .project-avatar.chat-avatar {
   color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+:root[data-theme="dark"] .project-avatar {
+  /* 暗色下项目 icon 容器只做层级提示，避免浅色 muted 混合后显得发灰发脏。 */
+  background: color-mix(in srgb, var(--color-bg-panel) 58%, transparent);
+}
+:root[data-theme="dark"] .project-avatar.chat-avatar {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 @keyframes pulse-running {
   0%,
@@ -1252,9 +1263,32 @@ body:not(.is-list-resizing)
   margin-bottom: 8px;
 }
 .project-group.chat-project-group {
-  margin-bottom: 8px;
-  padding-bottom: 8px;
+  /* 内置聊天区不是普通项目目录，使用轻量卡片感与下面的真实项目树分开。 */
+  margin: 0 0 10px;
+  padding: 4px 4px 10px;
   border-bottom: 1px solid var(--color-border-subtle);
+}
+.project-group.chat-project-group > .conversation:first-child {
+  min-height: 42px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--color-bg-muted) 58%, transparent);
+  border-radius: var(--radius-lg);
+}
+.project-group.chat-project-group > .conversation:first-child:hover {
+  background: color-mix(in srgb, var(--color-bg-hover) 76%, transparent);
+}
+.project-group.chat-project-group > .conversation.active:first-child {
+  background: color-mix(in srgb, var(--color-accent-soft) 52%, var(--color-bg-muted));
+}
+:root[data-theme="dark"] .project-group.chat-project-group > .conversation:first-child {
+  /* 内置聊天区在暗色下保持“面板入口”感，但不做高亮卡片。 */
+  background: color-mix(in srgb, var(--color-bg-panel) 48%, transparent);
+}
+:root[data-theme="dark"] .project-group.chat-project-group > .conversation:first-child:hover {
+  background: color-mix(in srgb, var(--color-bg-hover) 72%, transparent);
+}
+:root[data-theme="dark"] .project-group.chat-project-group > .conversation.active:first-child {
+  background: color-mix(in srgb, var(--color-accent-soft) 66%, var(--color-bg-panel));
 }
 .project-group > .conversation:first-child {
   grid-template-columns: 24px minmax(0, 1fr) max-content;
@@ -1263,10 +1297,18 @@ body:not(.is-list-resizing)
   border-radius: var(--radius-md);
   color: var(--color-text-secondary);
 }
+.project-group > .conversation:first-child .conversation-title strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.project-group > .conversation:not(.active):first-child .conversation-title strong {
+  color: color-mix(in srgb, var(--color-text-primary) 86%, var(--color-text-secondary));
+}
 .project-group > .conversation.active:first-child {
-  background: var(--color-bg-active);
+  /* 项目行作为树根节点，active 只做轻量提示；避免整行大面积绿色抢走会话内容注意力。 */
+  background: color-mix(in srgb, var(--color-accent-soft) 62%, transparent);
   box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--color-accent) 16%, transparent);
+    color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 .project-group > .conversation.project-draggable:first-child {
   cursor: grab;
@@ -1283,9 +1325,10 @@ body:not(.is-list-resizing)
     color-mix(in srgb, var(--color-accent) 32%, transparent);
 }
 .chat-project-guide {
+  margin-top: 2px;
   color: color-mix(
     in srgb,
-    var(--color-accent) 58%,
+    var(--color-accent) 46%,
     var(--color-text-secondary)
   );
   font-size: var(--font-size-micro);
@@ -1293,9 +1336,17 @@ body:not(.is-list-resizing)
 
 /* ── Worktree 工作区 ── */
 .worktree-children {
-  margin-left: 28px;
-  border-left: 1px solid var(--color-border-subtle);
-  padding-left: 6px;
+  /* 工作区是项目下的二级容器：用轻量左线 + 微弱底色表达归属，不再只靠缩进。 */
+  margin: 2px 4px 4px 26px;
+  border-left: 1px solid color-mix(in srgb, var(--color-accent) 18%, var(--color-border-subtle));
+  padding: 2px 0 2px 6px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: color-mix(in srgb, var(--color-bg-muted) 56%, transparent);
+}
+:root[data-theme="dark"] .worktree-children {
+  /* 暗色下 worktree 容器需要更低对比，只保留左线作为归属提示。 */
+  border-left-color: color-mix(in srgb, var(--color-accent) 16%, var(--color-border-subtle));
+  background: color-mix(in srgb, var(--color-bg-muted) 38%, transparent);
 }
 .worktree-main-header-only {
   margin-top: 2px;
@@ -1351,11 +1402,11 @@ body:not(.is-list-resizing)
   color: var(--color-text-secondary);
 }
 .worktree-row:hover {
-  background: var(--color-hover);
+  background: var(--color-bg-hover);
 }
 .worktree-row.active {
   color: var(--color-text-primary);
-  background: var(--color-active);
+  background: color-mix(in srgb, var(--color-accent-soft) 54%, transparent);
 }
 /* 删除 worktree 时的淡出动画 */
 .worktree-row.worktree-removing {
@@ -1367,8 +1418,11 @@ body:not(.is-list-resizing)
 .worktree-row .worktree-branch-icon {
   display: inline-flex;
   align-items: center;
-  color: var(--color-text-muted);
+  color: var(--color-text-tertiary);
   flex-shrink: 0;
+}
+.worktree-row.active .worktree-branch-icon {
+  color: var(--color-accent);
 }
 .worktree-row .worktree-branch-name {
   flex: 1;
@@ -1376,6 +1430,8 @@ body:not(.is-list-resizing)
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-family-business);
+  font-size: var(--font-size-caption);
+  font-weight: 500;
 }
 .worktree-row .worktree-remove {
   opacity: 0;
@@ -1402,24 +1458,24 @@ body:not(.is-list-resizing)
 /* worktree 行的目录名副信息，低对比避免与分支名争夺注意力 */
 .worktree-row .worktree-dir-meta {
   flex-shrink: 0;
-  max-width: 90px;
+  max-width: 82px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-size-caption);
-  color: var(--color-text-muted);
+  font-size: var(--font-size-micro);
+  color: var(--color-text-tertiary);
   font-family: var(--font-family-business);
 }
 .worktree-sessions-more {
   display: block;
-  width: 100%;
+  width: calc(100% - 8px);
   box-sizing: border-box;
-  margin-left: 18px;
+  margin: 2px 0 2px 8px;
   padding: 3px 8px;
   border: none;
   background: transparent;
   color: var(--color-text-tertiary);
-  font-size: var(--font-size-small);
+  font-size: var(--font-size-caption);
   text-align: left;
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -1427,11 +1483,15 @@ body:not(.is-list-resizing)
 }
 .worktree-sessions-more:hover {
   color: var(--color-accent);
-  background: var(--color-hover);
+  background: var(--color-bg-hover);
 }
 .worktree-nested-row {
-  margin-left: 18px;
-  width: calc(100% - 18px);
+  margin-left: 8px;
+  width: calc(100% - 8px);
+}
+.worktree-children .worktree-nested-row {
+  /* 子工作区里的会话/Agent 已经处在二级容器内，缩进收窄避免出现“楼梯越走越深”。 */
+  padding-left: 20px;
 }
 .worktree-sandbox-toolbar {
   display: flex;
@@ -1439,7 +1499,7 @@ body:not(.is-list-resizing)
   justify-content: flex-start;
   gap: 6px;
   min-height: 22px;
-  margin: 4px 0 2px;
+  margin: 5px 0 2px;
   padding: 0 4px 0 6px;
   color: var(--color-text-tertiary);
   font-size: var(--font-size-caption);
@@ -1462,11 +1522,13 @@ body:not(.is-list-resizing)
   color: var(--color-text-tertiary);
   font-size: var(--font-size-caption);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  opacity: 0.72;
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
 }
 .worktree-create-btn:hover {
   background: var(--color-bg-hover);
   color: var(--color-accent);
+  opacity: 1;
 }
 
 /* ── Worktree 创建对话框 ── */
@@ -1509,9 +1571,9 @@ body:not(.is-list-resizing)
   box-sizing: border-box;
   padding: 8px 10px;
   font-size: var(--font-size-body);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
-  background: var(--color-bg-input);
+  background: var(--color-bg-panel);
   color: var(--color-text-primary);
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -1525,8 +1587,8 @@ body:not(.is-list-resizing)
   margin: 8px 0 0;
   padding: 6px 8px;
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--color-bg-input) 86%, var(--color-accent) 14%);
-  font-size: var(--font-size-small);
+  background: color-mix(in srgb, var(--color-bg-muted) 86%, var(--color-accent) 14%);
+  font-size: var(--font-size-caption);
   color: var(--color-text-secondary);
   font-family: var(--font-family-business);
 }
@@ -1538,16 +1600,17 @@ body:not(.is-list-resizing)
 }
 .worktree-create-actions button {
   padding: 7px 14px;
-  font-size: var(--font-size-small);
+  font-size: var(--font-size-caption);
   border-radius: var(--radius-md);
   cursor: pointer;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border-subtle);
   background: var(--color-bg-panel);
   color: var(--color-text-primary);
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
 .worktree-create-actions button:hover:not(:disabled) {
-  background: var(--color-hover);
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
 }
 .worktree-create-actions button:disabled {
   opacity: 0.5;
@@ -1559,7 +1622,11 @@ body:not(.is-list-resizing)
   border-color: var(--color-accent);
 }
 .worktree-create-actions .worktree-create-confirm:hover:not(:disabled) {
-  filter: brightness(1.1);
+  /* 确认按钮 hover 必须保持明确的主按钮对比度，避免被通用 hover 白底覆盖。 */
+  border-color: var(--color-accent-strong);
+  background: var(--color-accent-strong);
+  color: var(--color-text-inverse);
+  box-shadow: var(--focus-ring);
 }
 
 .filter-indicator {
@@ -1587,6 +1654,15 @@ body:not(.is-list-resizing)
   padding: 0;
   border-radius: var(--radius-md);
   background: transparent;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.project-group > .conversation:first-child:hover .project-row-actions,
+.project-group > .conversation:first-child:focus-within .project-row-actions {
+  /* 项目操作属于辅助动作，默认收起能显著降低左栏视觉噪音。 */
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .project-action,
@@ -1631,10 +1707,11 @@ body:not(.is-list-resizing)
   grid-template-columns: minmax(0, 1fr);
   min-height: 28px;
   padding: 4px 6px 4px 28px;
-  margin: 2px 0 0 8px;
+  margin: 1px 0 0 8px;
   background: transparent;
   color: var(--color-text-secondary);
   border-radius: var(--radius-md);
+  transition: background 0.1s ease;
 }
 .agent-row::before {
   display: none;
@@ -1656,9 +1733,9 @@ body:not(.is-list-resizing)
   font-weight: 500;
 }
 .agent-row.active {
-  background: var(--color-bg-active);
+  background: color-mix(in srgb, var(--color-accent-soft) 46%, transparent);
   box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--color-accent) 14%, transparent);
+    color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 .agent-row.active .conversation-title strong {
   color: var(--color-text-primary);
@@ -1715,17 +1792,34 @@ body:not(.is-list-resizing)
   background: var(--color-bg-hover);
 }
 .session-row.active {
-  background: var(--color-bg-active);
+  background: color-mix(in srgb, var(--color-accent-soft) 46%, transparent);
   box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--color-accent) 14%, transparent);
+    color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 .session-row .conversation-title {
   display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
 }
 .session-row .conversation-title strong {
-  color: var(--color-text-secondary);
+  /* 历史会话标题保持单行；用文字渐隐代替省略号，避免“被硬切断”的视觉感受。 */
+  flex: 1;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-tertiary);
   font-size: var(--font-size-caption);
-  font-weight: 500;
+  font-weight: 400;
+  line-height: var(--line-height-caption);
+  white-space: nowrap;
+  text-overflow: clip;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+}
+.session-row:hover .conversation-title strong,
+.session-row.active .conversation-title strong {
+  color: var(--color-text-secondary);
 }
 .session-node-marker {
   display: none;
