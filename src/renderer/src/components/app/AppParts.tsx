@@ -2439,13 +2439,19 @@ export const TurnRow = memo(function TurnRow(props: {
 		(i) => i.kind === "message" && i.message.role === "assistant",
 	).length;
 
-	const [executionExpanded, setExecutionExpanded] = useState(!isComplete);
-	// 输出完毕后自动折叠执行过程
+	// 执行过程默认展开（agent 处理中），输出完毕后自动折叠。
+	// 使用 agentRunning 而非 isStreaming：后者在多步工具调用之间会短暂 flicker 为 false，
+	// 导致过早折叠工具输出；agentRunning 在整个 agent 处理生命周期内始终为 true。
+	const [executionExpanded, setExecutionExpanded] = useState(
+		!isComplete || Boolean(props.agentRunning),
+	);
 	useEffect(() => {
-		if (isComplete && !props.isStreaming) {
+		if (props.agentRunning) {
+			setExecutionExpanded(true);
+		} else if (isComplete) {
 			setExecutionExpanded(false);
 		}
-	}, [isComplete, props.isStreaming]);
+	}, [isComplete, props.agentRunning]);
 
 	const rowRef = useRef<HTMLElement | null>(null);
 	// 本轮没有任何可渲染内容时不输出空容器
