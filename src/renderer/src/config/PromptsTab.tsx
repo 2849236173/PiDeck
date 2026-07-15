@@ -7,7 +7,7 @@ import type {
 } from "../../../shared/types";
 import { t } from "../i18n";
 import { CloseIconButton } from "../components/ui/IconButton";
-import { MonacoEditor } from "../components/ui/MonacoEditor";
+import { LazyMonacoEditor } from "../components/ui/LazyMonacoEditor";
 import { PromptStoreTab } from "./PromptStoreTab";
 
 export function PromptsTab(props: {
@@ -269,7 +269,7 @@ export function PromptsTab(props: {
 							<div className="config-empty">{t("common.loading")}</div>
 						) : (
 							<div className="prompts-monaco-wrap">
-								<MonacoEditor
+								<LazyMonacoEditor
 									value={props.editContent}
 									onChange={props.onChangeEditContent}
 								/>

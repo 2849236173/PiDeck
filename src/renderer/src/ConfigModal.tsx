@@ -13,7 +13,7 @@ import { ImTab } from "./config/ImTab";
 import { LogsTab } from "./config/LogsTab";
 import { CloseIconButton } from "./components/ui/IconButton";
 import { t } from "./i18n";
-import { MonacoEditor } from "./components/ui/MonacoEditor";
+import { LazyMonacoEditor } from "./components/ui/LazyMonacoEditor";
 import { translateBuiltinPromptDescription } from "./composerBehavior";
 import type {
 	AuthFile,
@@ -1480,7 +1480,7 @@ function ConfigModalContent(props: ConfigModalProps) {
 										<div className="config-empty">{t("common.loading")}</div>
 									) : (
 										<div className="prompts-monaco-wrap">
-											<MonacoEditor
+											<LazyMonacoEditor
 												value={editGlobalContent}
 												onChange={setEditGlobalContent}
 											/>

@@ -42,7 +42,7 @@ import {
 } from "lucide-react";
 import { createPreviewApi } from "./previewApi";
 import { createBrowserApi } from "./browserApi";
-import { ConfigModal } from "./ConfigModal";
+const ConfigModal = lazy(() => import("./ConfigModal").then((m) => ({ default: m.ConfigModal })));
 import { TrustConfirmModal } from "./components/app/TrustConfirmModal";
 import { TerminalDock } from "./components/terminal/TerminalDock";
 import { FeishuLinkIndicator } from "./components/feishu/FeishuLinkIndicator";
@@ -430,7 +430,7 @@ function isPendingAgentId(agentId?: string) {
 
 const EDITOR_LOGO_URLS: Record<string, string> = {
   vscode: new URL("./assets/editors/vscode.png", import.meta.url).href,
-  cursor: new URL("./assets/editors/cursor.ico", import.meta.url).href,
+  cursor: new URL("./assets/editors/cursor.png", import.meta.url).href,
   zed: new URL("./assets/editors/zed.png", import.meta.url).href,
   idea: new URL("./assets/editors/idea.svg", import.meta.url).href,
   webstorm: new URL("./assets/editors/webstorm.svg", import.meta.url).href,
@@ -6761,6 +6761,7 @@ ${goalTextRef.current}
         />
       </Suspense>
       )}
+      <Suspense fallback={null}>
       <ConfigModal
         open={configOpen}
         onClose={() => setConfigOpen(false)}
@@ -6768,6 +6769,7 @@ ${goalTextRef.current}
           // 配置保存后不再自动 reload,用户可通过 Restart 按钮手动重载
         }}
       />
+      </Suspense>
 
       {confirmDialog && (
         <ConfirmDialog

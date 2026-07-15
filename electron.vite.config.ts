@@ -1,6 +1,46 @@
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import type { Plugin } from "vite";
+
+/**
+ * KaTeX 字体精简 Vite 插件
+ *
+ * katex.min.css 中的每个 @font-face 声明了三种格式（woff2 / woff / truetype），
+ * Electron 的 Chromium 只需 woff2（最高压缩比）。本插件在构建时移除 woff 和 truetype
+ * 的 src 引用，使 Vite 不再将 .ttf 和 .woff 文件复制到产物目录。
+ *
+ * 效果：59 个字体文件 → 19 个 woff2 文件，节省 ~1.2MB。
+ */
+function katexWoff2OnlyPlugin(): Plugin {
+	const KATEX_CSS = /katex[\\\/]dist[\\\/]katex\.min\.css/;
+	// 匹配 @font-face 块，提取 src 属性中仅保留 woff2 的 url
+	const FONT_FACE_RE =
+		/@font-face\s*\{([^}]*?src\s*:\s*)([^}]*?)\};?/gi;
+
+	return {
+		name: "katex-woff2-only",
+		enforce: "pre",
+		transform(code, id) {
+			if (!KATEX_CSS.test(id)) return;
+
+			const replaced = code.replace(FONT_FACE_RE, (_match, prefix, srcValue) => {
+				// 从 src 中提取 woff2 的 url() 部分
+				const woff2Match = srcValue.match(/url\([^)]+\)\s*format\(['"]?woff2['"]?\)/i);
+				if (!woff2Match) {
+					// 没有 woff2 格式（理论上不存在）→ 仅保留 url() 引用，去掉 format 声明
+					const firstUrl = srcValue.match(/url\([^)]+\)/i);
+					if (firstUrl) return `@font-face{${prefix}${firstUrl[0]};}`;
+					return _match;
+				}
+				// 只保留 woff2 这一行，去掉后续的逗号和其它格式
+				return `@font-face{${prefix}${woff2Match[0]};}`;
+			});
+
+			return { code: replaced, map: null };
+		},
+	};
+}
 
 export default defineConfig({
   main: {
@@ -22,7 +62,7 @@ export default defineConfig({
         "@shared": resolve("src/shared"),
       },
     },
-    plugins: [react()],
+    plugins: [react(), katexWoff2OnlyPlugin()],
     build: {
       rollupOptions: {
         // 多入口：主窗口 index.html + 桌面宠物悬浮窗 pet.html

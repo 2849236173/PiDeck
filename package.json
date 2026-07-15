@@ -78,6 +78,7 @@
     "productName": "PiDeck",
     "asar": true,
     "compression": "maximum",
+    "afterPack": "./scripts/after-pack-cleanup.js",
     "npmRebuild": false,
     "directories": {
       "output": "release",
@@ -99,6 +100,13 @@
       {
         "from": "resources/yao-prompts",
         "to": "yao-prompts"
+      },
+      {
+        "from": "build/pets",
+        "to": "pets",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "extraMetadata": {

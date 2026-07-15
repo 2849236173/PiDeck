@@ -3,11 +3,33 @@ import { readFile, stat, readdir } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { join, extname } from "node:path";
 import type { PetManifest } from "../../shared/types";
-import clawdSprite from "../../../build/pets/clawd-3/spritesheet.webp?asset";
-import cacheCapySprite from "../../../build/pets/cache-capy/spritesheet.webp?asset";
-import duoSprite from "../../../build/pets/duo/spritesheet.webp?asset";
-import octohackSprite from "../../../build/pets/octohack/spritesheet.webp?asset";
-import fangjiaSprite from "../../../build/pets/fangjia/spritesheet.webp?asset";
+import { is } from "@electron-toolkit/utils";
+
+/**
+ * 宠物 sprite 资源路径：开发模式从项目 build/pets 目录读取（与 extraResources 的 from 一致），
+ * 打包后从 process.resourcesPath/pets（extraResources 的 to）读取，
+ * 避免将 6.2MB 的 webp 精灵图打包进 app.asar。
+ */
+function petResourcesDir(): string {
+	const base = is.dev
+		? join(app.getAppPath(), "build")
+		: process.resourcesPath;
+	return join(base, "pets");
+}
+
+/** 内置宠物清单，spritePath 为运行时路径，构建时通过 extraResources 分发出 asar */
+const BUILTIN_PETS = [
+	{ id: "clawd", displayName: "Clawd", description: "A tiny pixel Clawd companion made from your sticker GIFs.", dir: "clawd-3", file: "spritesheet.webp" },
+	{ id: "cache-capy", displayName: "Cache Capy", description: "A calm capybara carrying a tiny cache box for patient builds.", dir: "cache-capy", file: "spritesheet.webp" },
+	{ id: "duo", displayName: "Duo", description: "Learning companion with expressive chibi sprite poses.", dir: "duo", file: "spritesheet.webp" },
+	{ id: "octohack", displayName: "OctoHack", description: "A tiny Octocat-inspired chibi digital pet with a black cat head, cream face, whiskers, tentacle limbs, and a blue-dotted tentacle tail.", dir: "octohack", file: "spritesheet.webp" },
+	{ id: "fangjia", displayName: "FangJia", description: "FangJia is the mascot of switchbase.vip.", dir: "fangjia", file: "spritesheet.webp" },
+];
+
+/** 构造内置宠物的运行时绝对路径 */
+function builtinSpritePath(pet: (typeof BUILTIN_PETS)[number]): string {
+	return join(petResourcesDir(), pet.dir, pet.file);
+}
 
 /**
  * PetPackageManager —— 内置 + petdex 双轨宠物包管理。
@@ -34,15 +56,14 @@ async function fileExists(p: string): Promise<boolean> {
 type PetDexManifest = { id: string; displayName?: string; description?: string; spritesheetPath: string };
 
 export class PetPackageManager {
-	// 内置宠物包：随应用打包，优先级高于同名 petdex 社区包（list 中 byId 去重时先放入）。
+	// 内置宠物包：通过 extraResources 分发，不经过 asar。
 	// 限定这 5 个为默认可选项，避免随机占盘与体积膨胀。
-	private readonly builtin = [
-		{ id: "clawd", displayName: "Clawd", description: "A tiny pixel Clawd companion made from your sticker GIFs.", spritePath: clawdSprite },
-		{ id: "cache-capy", displayName: "Cache Capy", description: "A calm capybara carrying a tiny cache box for patient builds.", spritePath: cacheCapySprite },
-		{ id: "duo", displayName: "Duo", description: "Learning companion with expressive chibi sprite poses.", spritePath: duoSprite },
-		{ id: "octohack", displayName: "OctoHack", description: "A tiny Octocat-inspired chibi digital pet with a black cat head, cream face, whiskers, tentacle limbs, and a blue-dotted tentacle tail.", spritePath: octohackSprite },
-		{ id: "fangjia", displayName: "FangJia", description: "FangJia is the mascot of switchbase.vip.", spritePath: fangjiaSprite },
-	];
+	private readonly builtin = BUILTIN_PETS.map((p) => ({
+		id: p.id,
+		displayName: p.displayName,
+		description: p.description,
+		spritePath: builtinSpritePath(p),
+	}));
 
 	async list(): Promise<PetManifest[]> {
 		const byId = new Map<string, PetManifest>();

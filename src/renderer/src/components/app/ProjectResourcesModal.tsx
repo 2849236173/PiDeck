@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Check, FileEdit, Pencil, ToggleLeft, ToggleRight, Trash2, X } from "lucide-react";
-import { MonacoEditor } from "../ui/MonacoEditor";
+import { LazyMonacoEditor } from "../ui/LazyMonacoEditor";
 import type {
 	PiExtensionSummary,
 	PiPromptTemplateSummary,
@@ -373,7 +373,7 @@ export function ProjectResourcesModal(props: {
 								<div className="config-empty">{t("common.loading")}</div>
 							) : (
 								<div className="prompts-monaco-wrap">
-									<MonacoEditor
+									<LazyMonacoEditor
 										value={editContent}
 										onChange={setEditContent}
 									/>
@@ -525,7 +525,7 @@ export function ProjectResourcesModal(props: {
 								<div className="config-empty">{t("common.loading")}</div>
 							) : (
 								<div className="prompts-monaco-wrap">
-									<MonacoEditor
+									<LazyMonacoEditor
 										value={editProjectPromptContent}
 										onChange={setEditProjectPromptContent}
 									/>
