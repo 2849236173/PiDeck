@@ -239,17 +239,28 @@ export class SessionScanner {
       }
     }
 
-    // New pi-subagents runs carry an explicit marker. The path/fork checks retain compatibility
-    // with older runs, but require the generated child name so ordinary nested sessions survive.
+    // 检测子会话：pi-subagents 的内部 worker/reviewer 会话。
+    // 不在顶层列表显示，而是设置 parentSessionPath 供 UI 嵌套渲染。
     const hasLegacySubagentName = latestSessionInfoName?.startsWith("subagent-") === true;
     const hasLegacyOwnedPath = Boolean(this.parentSessionFileForSubagentPath(filePath));
-    if (
-      source === "pi"
-      && (
+    let parentSessionPath: string | undefined;
+    if (source === "pi") {
+      const isSubagentChild =
         hasSubagentChildMarker
-        || (hasLegacySubagentName && (hasLegacyOwnedPath || Boolean(forkParentSession)))
-      )
-    ) return null;
+        || (hasLegacySubagentName && (hasLegacyOwnedPath || Boolean(forkParentSession)));
+
+      if (isSubagentChild) {
+        // 优先从路径布局推断父会话（标准 run-N/session.jsonl 布局）
+        parentSessionPath = this.parentSessionFileForSubagentPath(filePath);
+        // 路径推断失败时尝试 forkParentSession 字段（如 "parent-session.jsonl"）
+        if (!parentSessionPath && forkParentSession) {
+          const resolved = join(dirname(filePath), forkParentSession);
+          if (existsSync(resolved)) {
+            parentSessionPath = resolved;
+          }
+        }
+      }
+    }
 
     if (source === "codex" && codexSourcePath && !codexParentThreadId) {
       const fallbackInfo = this.readCodexThreadInfo(codexSourcePath);
@@ -277,6 +288,7 @@ export class SessionScanner {
       codexParentThreadId,
       codexAgentRole,
       codexAgentNickname,
+      parentSessionPath,
     };
   }
 

@@ -88,11 +88,17 @@ test("hides persisted pi-subagents runs without deleting them or unrelated neste
 		assert.equal(visiblePaths.has(parentFile), true);
 		assert.equal(visiblePaths.has(nestedUserFile), true);
 		assert.equal(visiblePaths.has(lookalikeFile), true);
-		assert.equal(visiblePaths.has(workerFile), false);
-		assert.equal(visiblePaths.has(reviewerFile), false);
+		// 子会话仍然在摘要列表中，但标记了父会话路径
+		assert.equal(visiblePaths.has(workerFile), true);
+		assert.equal(visiblePaths.has(reviewerFile), true);
 		assert.equal(summaries.some(summary => summary.name === "subagent-worker-manual-0"), true);
 		assert.equal(existsSync(workerFile), true);
 		assert.equal(existsSync(reviewerFile), true);
+		// 验证子会话的 parentSessionPath 指向正确的父会话文件
+		const workerSummary = summaries.find(s => s.filePath === workerFile);
+		assert.equal(workerSummary.parentSessionPath, parentFile);
+		const reviewerSummary = summaries.find(s => s.filePath === reviewerFile);
+		assert.equal(reviewerSummary.parentSessionPath, parentFile);
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}
@@ -140,12 +146,25 @@ test("handles orphan, fork, rename and imported-session compatibility without fa
 		const summaries = await new SessionScanner().list(projectPath);
 		const visiblePaths = new Set(summaries.map(summary => summary.filePath));
 
-		assert.equal(visiblePaths.has(orphanFile), false);
-		assert.equal(visiblePaths.has(renamedChildFile), false);
-		assert.equal(visiblePaths.has(legacyForkFile), false);
+		// 子会话包含在摘要列表中，但标记了 parentSessionPath
+		assert.equal(visiblePaths.has(orphanFile), true);
+		assert.equal(visiblePaths.has(renamedChildFile), true);
+		assert.equal(visiblePaths.has(legacyForkFile), true);
 		assert.equal(visiblePaths.has(manualForkFile), true);
-		assert.equal(visiblePaths.has(markedCustomFile), false);
+		assert.equal(visiblePaths.has(markedCustomFile), true);
 		assert.equal(visiblePaths.has(importedFile), true);
+		// orphan: 路径可推断父会话（尽管父文件不存在）
+		const orphanSummary = summaries.find(s => s.filePath === orphanFile);
+		assert.equal(orphanSummary.parentSessionPath, join(piDir, "deleted-parent.jsonl"));
+		// renamedChild: 路径可推断父会话
+		const renamedSummary = summaries.find(s => s.filePath === renamedChildFile);
+		assert.equal(renamedSummary.parentSessionPath, join(piDir, "renamed-parent.jsonl"));
+		// legacyFork: 标准 .jsonl 文件路径不可推断父会话，fork parent 文件不存在
+		const forkSummary = summaries.find(s => s.filePath === legacyForkFile);
+		assert.equal(forkSummary.parentSessionPath, undefined);
+		// markedCustomFile: 显式标记，路径不可推断父会话（无 parentSessionPath）
+		const customSummary = summaries.find(s => s.filePath === markedCustomFile);
+		assert.equal(customSummary.parentSessionPath, undefined);
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}

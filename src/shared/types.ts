@@ -116,6 +116,8 @@ export type SessionSummary = {
 	filePath: string;
 	projectPath?: string;
 	name?: string;
+	/** 子会话：关联的父会话文件路径。有该字段时不在会话列表顶层显示，而是嵌套在父会话下。 */
+	parentSessionPath?: string;
 	preview: string;
 	updatedAt: number;
 	messageCount: number;

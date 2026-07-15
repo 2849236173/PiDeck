@@ -6059,8 +6059,8 @@ ${goalTextRef.current}
               project={drawerContentPanel === "sessions" ? sessionsProject : undefined}
               files={files}
               sessions={(sessionsProjectId && sessionSourceFilter[sessionsProjectId]) ? sessions.filter(
-                (s) => (sessionSourceFilter[sessionsProjectId]!)!.has(s.source ?? "pi"),
-              ) : sessions}
+                (s) => !s.parentSessionPath && (sessionSourceFilter[sessionsProjectId]!)!.has(s.source ?? "pi"),
+              ).concat(sessions.filter(s => s.parentSessionPath)) : sessions}
               sessionsLoading={sessionHistoryLoading}
               gitChangedFiles={gitChangedFiles}
               expandedDirs={expandedDirs}

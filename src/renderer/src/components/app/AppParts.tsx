@@ -4369,23 +4369,54 @@ function SessionsPanel(props: {
 		}
 	}
 
+	// 计算子会话到父会话的分组映射
+	const parentToChildren = useMemo(() => {
+		const map = new Map<string, SessionSummary[]>();
+		for (const s of props.sessions) {
+			if (s.parentSessionPath) {
+				const list = map.get(s.parentSessionPath) ?? [];
+				list.push(s);
+				map.set(s.parentSessionPath, list);
+			}
+		}
+		return map;
+	}, [props.sessions]);
+	// 仅显示顶层会话（非子会话）的计数
+	const parentSessions = useMemo(() =>
+		props.sessions.filter(s => !s.parentSessionPath),
+		[props.sessions],
+	);
+	const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+	const toggleParent = useCallback((filePath: string) => {
+		setExpandedParents(prev => {
+			const next = new Set(prev);
+			if (next.has(filePath)) next.delete(filePath);
+			else next.add(filePath);
+			return next;
+		});
+	}, []);
+
 	return (
 		<div className="sessions-panel">
 			<div className="panel-action-row">
-				<span>{t("drawer.sessionCount", { count: props.sessions.length })}</span>
+				<span>{t("drawer.sessionCount", { count: parentSessions.length })}</span>
 				<button onClick={props.onRefresh}>{t("common.refresh")}</button>
 			</div>
-			{props.sessions.length === 0 && (
+			{parentSessions.length === 0 && (
 				<div className="sessions-empty">
 					<strong>{t("drawer.sessionEmptyTitle")}</strong>
 					<span>{t("drawer.sessionEmptyDesc")}</span>
 				</div>
 			)}
-			{props.sessions.map((session) => (
+			{parentSessions.map((session) => {
+				const children = parentToChildren.get(session.filePath);
+				const isExpanded = expandedParents.has(session.filePath);
+				return (
 				<div
 					key={session.filePath}
-					className="session-card"
+					className="session-card-group"
 				>
+					<div className="session-card">
 					{renamingPath === session.filePath ? (
 						<div className="session-rename-row">
 							<input
@@ -4507,7 +4538,43 @@ function SessionsPanel(props: {
 						</div>
 					)}
 				</div>
-			))}
+					{children && children.length > 0 && (
+						<div className="session-card-children-header">
+							<button
+								className="session-card-expand-btn"
+								title={isExpanded ? t("drawer.collapseSubagentSessions") : t("drawer.expandSubagentSessions")}
+								onClick={() => toggleParent(session.filePath)}
+							>
+								{isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+								<span>{t("drawer.subagentSessionCount", { count: children.length })}</span>
+							</button>
+						</div>
+					)}
+					{isExpanded && children?.map((child) => (
+						<div key={child.filePath} className="session-card session-card-child">
+							<div className="session-card-display">
+								<button
+									className="session-card-inner"
+									onClick={() => props.onOpen(child)}
+									title={child.filePath}
+								>
+									<div className="session-card-title">
+										<strong>{child.name || t("common.untitled")}</strong>
+										<span className="session-source-badge subagent">{t("drawer.subagentSession")}</span>
+										<small>
+											{new Date(child.updatedAt).toLocaleString()} ·{" "}
+											{t("drawer.sessionMessages", {
+												count: child.messageCount,
+											})}
+										</small>
+									</div>
+								</button>
+							</div>
+						</div>
+					))}
+				</div>
+				);
+			})}
 			{deleteConfirmSession && (
 				<div className="session-delete-confirm-backdrop" onClick={() => setDeleteConfirmSession(null)}>
 					<section
