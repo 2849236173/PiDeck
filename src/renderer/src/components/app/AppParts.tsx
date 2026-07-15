@@ -54,6 +54,8 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	ChevronsUpDown,
+	MoveDown,
+	MoveUp,
 	ChevronsDownUp,
 	GitBranch,
 	Brain,
@@ -703,6 +705,7 @@ export function ModelPicker(props: {
 	const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 	const normalizedSearch = modelPickerSearch.trim().toLowerCase();
 	const selectedItemRef = useRef<HTMLButtonElement | null>(null);
+	const modelPickerListRef = useRef<HTMLDivElement | null>(null);
 	const currentModelKey = props.current?.provider && props.current?.modelId
 		? `${props.current.provider}/${props.current.modelId}`
 		: undefined;
@@ -870,7 +873,15 @@ export function ModelPicker(props: {
 						)}
 					</div>
 				</div>
-				<div className="picker-palette-list">
+				<div className="picker-palette-list" ref={modelPickerListRef}>
+					<button
+						type="button"
+						className="picker-palette-scroll-btn picker-palette-scroll-top"
+						title={t("app.modelScrollToTop")}
+						onClick={() => modelPickerListRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
+					>
+						<MoveUp size={14} strokeWidth={1.8} aria-hidden="true" />
+					</button>
 					{/* 收藏分区：置于最顶部，可折叠 */}
 					{favorites.length > 0 && (
 						<div className="model-group model-favorites-group">
@@ -917,6 +928,17 @@ export function ModelPicker(props: {
 					{favorites.length === 0 && sortedProviders.length === 0 && (
 						<div className="picker-palette-empty">{t("app.modelPickerEmpty")}</div>
 					)}
+					<button
+						type="button"
+						className="picker-palette-scroll-btn picker-palette-scroll-bottom"
+						title={t("app.modelScrollToBottom")}
+						onClick={() => {
+							const el = modelPickerListRef.current;
+							if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+						}}
+					>
+						<MoveDown size={14} strokeWidth={1.8} aria-hidden="true" />
+					</button>
 				</div>
 			</div>
 		</div>
