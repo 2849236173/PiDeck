@@ -156,6 +156,16 @@ let previewSettings: AppSettings = {
 	petPatrolEnabled: true,
 	petPatrolPauseMin: 5,
 	favoriteModels: [],
+
+	fontSize: "default",
+	uiFontSize: null,
+	chatFontSize: null,
+	inputFontSize: null,
+	zoomFactor: 1,
+	fontFamilyBase: "system",
+	fontFamilyBaseCustom: "",
+	fontFamilyMono: "commit-mono",
+	fontFamilyMonoCustom: "",
 };
 
 export function createPreviewApi(): PiDesktopApi {

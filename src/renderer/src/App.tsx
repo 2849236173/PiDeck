@@ -876,6 +876,17 @@ export function App() {
     petPatrolEnabled: true,
     petPatrolPauseMin: 5,
     favoriteModels: [],
+
+    // 字体配置：与 main SettingsStore 默认值保持一致，避免启动时闪烁
+    fontSize: "default",
+    uiFontSize: null,
+    chatFontSize: null,
+    inputFontSize: null,
+    zoomFactor: 1,
+    fontFamilyBase: "system",
+    fontFamilyBaseCustom: "",
+    fontFamilyMono: "commit-mono",
+    fontFamilyMonoCustom: "",
   });
   const [settingsNotice, setSettingsNotice] = useState("");
   const [piProxyNotice, setPiProxyNotice] = useState("");
@@ -1250,6 +1261,44 @@ export function App() {
     media.addEventListener?.("change", applyTheme);
     return () => media.removeEventListener?.("change", applyTheme);
   }, [settings.theme, settings.lightBackground]);
+
+  // 字号与命名字体预设由 data 属性选择 CSS token；只有 custom 字体需要注入用户输入。
+  useEffect(() => {
+    const root = document.documentElement;
+    const uiFontSize = settings.uiFontSize ?? settings.fontSize;
+    const chatFontSize = settings.chatFontSize ?? settings.fontSize;
+    const inputFontSize = settings.inputFontSize ?? settings.fontSize;
+    root.dataset.uiFontSize = uiFontSize;
+    root.dataset.chatFontSize = chatFontSize;
+    root.dataset.inputFontSize = inputFontSize;
+    // 旧属性保留，兼容外部依赖或测试仍读取 dataset.fontSize 的场景
+    root.dataset.fontSize = settings.fontSize;
+    root.dataset.fontBase = settings.fontFamilyBase;
+    root.dataset.fontMono = settings.fontFamilyMono;
+
+    const baseCustomFont = settings.fontFamilyBaseCustom.trim();
+    if (settings.fontFamilyBase === "custom" && baseCustomFont) {
+      root.style.setProperty("--font-family-base", baseCustomFont);
+    } else {
+      root.style.removeProperty("--font-family-base");
+    }
+
+    const monoCustomFont = settings.fontFamilyMonoCustom.trim();
+    if (settings.fontFamilyMono === "custom" && monoCustomFont) {
+      root.style.setProperty("--font-family-mono", monoCustomFont);
+    } else {
+      root.style.removeProperty("--font-family-mono");
+    }
+  }, [
+    settings.fontSize,
+    settings.uiFontSize,
+    settings.chatFontSize,
+    settings.inputFontSize,
+    settings.fontFamilyBase,
+    settings.fontFamilyBaseCustom,
+    settings.fontFamilyMono,
+    settings.fontFamilyMonoCustom,
+  ]);
 
   /** 当前会话中 agent 修改过的文件(从 tool 消息 meta 中提取) */
   // 优化:只在消息数量变化时才重新计算,减少不必要的遍历

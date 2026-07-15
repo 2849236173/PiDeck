@@ -22,9 +22,11 @@
 
 :root {
   color-scheme: light;
+  /* 默认 UI 基础字体族。 */
   --font-family-base:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
-    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+    "PingFang SC", "HarmonyOS Sans SC", "Hiragino Sans GB",
+    "Noto Sans CJK SC", sans-serif;
   --font-family-brand: "PiDeckPlantin", Georgia, "Times New Roman", serif;
   --font-family-mono:
     "PiDeckCommitMono", ui-monospace, SFMono-Regular, Menlo, Consolas,
@@ -34,6 +36,8 @@
   --font-size-caption: 12px;
   --font-size-control: 13px;
   --font-size-body: 14px;
+  --font-size-chat: 15px;
+  --font-size-input: 14px;
   --font-size-title: 16px;
   --font-size-brand: 18px;
   --font-size-heading: 20px;
@@ -42,6 +46,7 @@
   --line-height-caption: 18px;
   --line-height-control: 20px;
   --line-height-body: 22px;
+  --line-height-input: 22px;
   --line-height-title: 24px;
   --line-height-heading: 28px;
   --color-bg-app: #f3f4f1;
@@ -135,6 +140,23 @@
   color: var(--color-text-primary);
 }
 
+:root[data-font-base="sans"] {
+  --font-family-base:
+    "Inter", "Segoe UI", "Microsoft YaHei", "PingFang SC",
+    "HarmonyOS Sans SC", "Noto Sans CJK SC", sans-serif;
+}
+
+:root[data-font-base="serif"] {
+  --font-family-base:
+    Georgia, "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC",
+    "SimSun", serif;
+}
+
+:root[data-font-mono="system-mono"] {
+  --font-family-mono:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
 :root[data-theme="light"][data-light-background="white"] {
   --color-bg-app: #ffffff;
   --color-bg-sidebar: #fcfcfc;
@@ -188,6 +210,110 @@
   --color-border-subtle: #d6e8dc;
   --color-border-strong: #c5d9cc;
 }
+
+/* 字号预设：拆分为 UI / 会话正文 / 输入框三轨，各自通过 data 属性切换。
+   - data-ui-font-size 控制 sidebar、按钮、列表、弹窗等 UI 字号
+     （micro / caption / control / body / title / brand / heading / logo）
+   - data-chat-font-size 控制会话正文 --font-size-chat
+   - data-input-font-size 控制 composer 输入框 --font-size-input
+   控件高度 token 不随字号变化。 */
+:root[data-ui-font-size="compact"] {
+  --font-size-micro: 10px;
+  --font-size-caption: 11px;
+  --font-size-control: 12px;
+  --font-size-body: 13px;
+  --font-size-title: 15px;
+  --font-size-brand: 17px;
+  --font-size-heading: 18px;
+  --font-size-logo: 33px;
+  --line-height-micro: 15px;
+  --line-height-caption: 17px;
+  --line-height-control: 18px;
+  --line-height-body: 20px;
+  --line-height-title: 22px;
+  --line-height-heading: 26px;
+}
+:root[data-ui-font-size="medium"] {
+  --font-size-micro: 12px;
+  --font-size-caption: 13px;
+  --font-size-control: 14px;
+  --font-size-body: 15px;
+  --font-size-title: 17px;
+  --font-size-brand: 19px;
+  --font-size-heading: 21px;
+  --font-size-logo: 38px;
+  --line-height-micro: 18px;
+  --line-height-caption: 20px;
+  --line-height-control: 22px;
+  --line-height-body: 23px;
+  --line-height-title: 26px;
+  --line-height-heading: 30px;
+}
+:root[data-ui-font-size="large"] {
+  --font-size-micro: 13px;
+  --font-size-caption: 14px;
+  --font-size-control: 15px;
+  --font-size-body: 16px;
+  --font-size-title: 18px;
+  --font-size-brand: 20px;
+  --font-size-heading: 22px;
+  --font-size-logo: 40px;
+  --line-height-micro: 19px;
+  --line-height-caption: 21px;
+  --line-height-control: 23px;
+  --line-height-body: 24px;
+  --line-height-title: 28px;
+  --line-height-heading: 32px;
+}
+:root[data-ui-font-size="xlarge"] {
+  --font-size-micro: 14px;
+  --font-size-caption: 15px;
+  --font-size-control: 16px;
+  --font-size-body: 18px;
+  --font-size-title: 20px;
+  --font-size-brand: 22px;
+  --font-size-heading: 25px;
+  --font-size-logo: 45px;
+  --line-height-micro: 20px;
+  --line-height-caption: 22px;
+  --line-height-control: 24px;
+  --line-height-body: 27px;
+  --line-height-title: 31px;
+  --line-height-heading: 36px;
+}
+
+:root[data-chat-font-size="compact"] {
+  --font-size-chat: 14px;
+}
+:root[data-chat-font-size="medium"] {
+  --font-size-chat: 16px;
+}
+:root[data-chat-font-size="large"] {
+  --font-size-chat: 18px;
+}
+:root[data-chat-font-size="xlarge"] {
+  --font-size-chat: 20px;
+}
+
+:root[data-input-font-size="compact"] {
+  --font-size-input: 13px;
+  --line-height-input: 20px;
+}
+:root[data-input-font-size="medium"] {
+  --font-size-input: 15px;
+  --line-height-input: 23px;
+}
+:root[data-input-font-size="large"] {
+  --font-size-input: 16px;
+  --line-height-input: 24px;
+}
+:root[data-input-font-size="xlarge"] {
+  --font-size-input: 18px;
+  --line-height-input: 27px;
+}
+
+/* 兼容性：旧的全局 fontSize 仍作为三轨未设置时的默认值，
+   由 JS 在 documentElement.dataset.fontSize 上保留。 */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --color-bg-app: #111315;
@@ -3585,7 +3711,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
   min-width: 0;
   overflow-x: clip;
   color: var(--color-text-primary);
-  font-size: 15px;
+  font-size: var(--font-size-chat);
   line-height: 1.68;
 }
 
@@ -4239,7 +4365,7 @@ body.is-terminal-resizing .terminal-resize-handle::before {
   white-space: pre-wrap;
   line-height: 1.6;
   color: var(--color-text-primary);
-  font-size: var(--font-size-body);
+  font-size: var(--font-size-chat);
 }
 .user-turn-meta {
   display: inline-flex;
@@ -5552,8 +5678,8 @@ body.is-composer-resizing .composer-resize-handle::after {
   background: transparent;
   color: var(--color-text-primary);
   padding: 10px 12px;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-body);
+  font-size: var(--font-size-input);
+  line-height: var(--line-height-input);
   font-family: var(--font-family-base);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -8591,6 +8717,11 @@ body.is-composer-resizing .composer-resize-handle::after {
   gap: var(--space-2);
   margin: var(--space-3) 0;
 }
+.setting-divider {
+  margin: var(--space-2) 0;
+  border: 0;
+  border-top: 1px solid var(--color-border-subtle);
+}
 .setting-field > span,
 .setting-field .ui-field-label {
   color: var(--color-text-secondary);
@@ -8692,6 +8823,42 @@ body.is-composer-resizing .composer-resize-handle::after {
   color: var(--color-text-tertiary);
   font-size: var(--font-size-caption);
   line-height: var(--line-height-caption);
+}
+.setting-zoom-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.setting-zoom-control {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.setting-zoom-button {
+  width: var(--control-height-lg);
+  height: var(--control-height-lg);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-panel);
+}
+.setting-zoom-button:hover:not(:disabled),
+.setting-zoom-button:active:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
+}
+.setting-zoom-button:disabled {
+  cursor: not-allowed;
+  background: var(--color-bg-muted);
+  color: var(--color-text-tertiary);
+}
+.setting-zoom-value {
+  min-width: 4ch;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-business);
+  font-size: var(--font-size-control);
+  text-align: center;
 }
 .setting-field input:disabled {
   background: var(--color-bg-muted);
