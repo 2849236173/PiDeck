@@ -206,6 +206,9 @@ export function groupToolMessages(messages: ChatMessage[]): RenderMessage[] {
 		currentRun.push({ kind: "message", message });
 	}
 
+	// 暂存区：已 flush 但无 assistant 消息的 run（如 ask_question 场景），等待后续消息合并
+	let pendingRun: (MessageItem | ToolGroupItem | ThinkingGroupItem)[] | null = null;
+
 	for (const message of messages) {
 		if (isThinkingOnly(message)) {
 			flushTools();
@@ -215,15 +218,44 @@ export function groupToolMessages(messages: ChatMessage[]): RenderMessage[] {
 			currentThinking.push(message);
 			runEndedAt = message.timestamp;
 		} else if (message.role === "assistant") {
+			// 有暂存 run 时先合并到当前 run
+			if (pendingRun) {
+				currentRun.push(...pendingRun);
+				pendingRun = null;
+			}
 			appendRunMessage(message);
 		} else if (message.role === "tool") {
 			flushThinking();
 			if (currentRun.length === 0) runStartedAt = message.timestamp;
 			currentTools.push(message);
 		} else {
-			flushRun();
+			// 若已有暂存 run（前一次 ask_question 未合并），先 flush 掉
+			if (pendingRun) {
+				currentRun.push(...pendingRun);
+				pendingRun = null;
+				flushRun();
+			}
+			// 用户消息：若当前 run 有工具但无 assistant 消息，暂存起来等待后续合并
+			const hasToolsWithoutAssistant =
+				currentRun.length > 0 &&
+				currentRun.every((i) => i.kind !== "message" || i.message.role !== "assistant");
+			if (hasToolsWithoutAssistant) {
+				flushTools();
+				flushThinking();
+				pendingRun = [...currentRun];
+				currentRun = [];
+				runStartedAt = 0;
+				runEndedAt = 0;
+			} else {
+				flushRun();
+			}
 			result.push({ kind: "message", message });
 		}
+	}
+	// 最后 flush 当前 run（含合并后的暂存 run）
+	if (pendingRun) {
+		currentRun.push(...pendingRun);
+		pendingRun = null;
 	}
 	flushRun();
 

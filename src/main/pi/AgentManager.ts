@@ -2847,12 +2847,31 @@ export class AgentManager {
 		// 如果是后者（如 tool_execution_end 不带 args），直接复用已有字符串避免 double encoding。
 		const argsMeta = typeof args === "string" ? args : this.truncateForDetail(this.safeJson(args));
 		// 提取 ask_question 详情用于渲染提问卡片；支持批量（questions 数组）和单问题两种格式。
-		const askDetails =
-			toolName === "ask_question" &&
-				result && typeof result === "object" &&
-				((result as any).details?.question || Array.isArray((result as any).details?.answers))
-			? (result as any).details
-			: undefined;
+		// pi RPC 返回格式可能为 result.details 嵌套 或 result 顶层（无 details 包装）
+		const askDetails = (() => {
+			if (toolName !== "ask_question" || !result || typeof result !== "object") return undefined;
+			// 格式 1: result.details.question 或 result.details.answers（批量）
+			if ((result as any).details?.question || Array.isArray((result as any).details?.answers)) {
+				return (result as any).details;
+			}
+			// 格式 2: result.question（无 details 包装）
+			if ((result as any).question) {
+				return result as any;
+			}
+			// 格式 3: 从 args 回退读取提问内容（当 result 仅为简单值如选中项字符串时）
+			let parsedArgs: unknown = args;
+			if (typeof args === "string") { try { parsedArgs = JSON.parse(args); } catch { parsedArgs = undefined; } }
+			if (parsedArgs && typeof parsedArgs === "object" && (parsedArgs as any).question) {
+				return {
+					question: (parsedArgs as any).question,
+					options: (parsedArgs as any).options,
+					answer: typeof result === "string" ? result : (result as any).value ?? (result as any).answer,
+					answered: true,
+					answerLabel: typeof result === "string" ? result : (result as any).value ?? (result as any).answer,
+				};
+			}
+			return undefined;
+		})();
 		const askCard = (() => {
 			if (!askDetails) return undefined;
 			// abort 时覆写 answer 为 null、answered 为 false，确保卡片显示"已取消"

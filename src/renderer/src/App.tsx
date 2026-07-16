@@ -21,6 +21,7 @@ import {
   ChevronDown,
   Code,
   Info,
+  MessageCircle,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -1241,6 +1242,22 @@ export function App() {
     }
     return undefined;
   }, [activeMessages]);
+  // 从 activeUiRequest 提取正在进行的交互式请求（select/confirm/input/editor）
+  // 这是 ask_question 在 pi RPC 模式下的表现方式：pi 通过 extension_ui_request 将
+  // 等待用户回答的对话框发送到桌面端，包含 requestId、title、options 等完整信息。
+  const activeUiAsk = useMemo(() => {
+    if (!activeUiRequest) return undefined;
+    return Object.values(activeUiRequest).find(
+      (req) => !req.completed && ["select", "confirm", "input", "editor"].includes(req.method),
+    );
+  }, [activeUiRequest]);
+  // dialog 显示条件：仅当有活跃的交互式 UI 请求时
+  const showAskDialog = activeUiAsk !== undefined;
+  // 用 body class 控制内联 ask 卡片的显示
+  useEffect(() => {
+    document.body.classList.toggle("ask-dialog-open", showAskDialog);
+    return () => document.body.classList.remove("ask-dialog-open");
+  }, [showAskDialog]);
 
   const isAwaitingAssistant = Boolean(
     activeAgent &&
@@ -3847,14 +3864,30 @@ ${text}
     setSendBehaviorMenuOpen(false);
     // 发送后强制重置自动高度：避免粘贴多行内容后 scrollHeight 残留导致 composer 无法恢复默认高度。
     // 下一帧 DOM 同步后再跑一次 syncComposerAutoHeight，让最终高度以清空后的 scrollHeight 为准。
+    // 发送后固定 composer 高度，不再自动适配内容高度
+    // 让输入框保持固定大小，超出部分滚动显示
     setComposerAutoHeight(COMPOSER_MIN_HEIGHT);
-    requestAnimationFrame(() => syncComposerAutoHeight());
 
     // 在发送前本地展开 prompt template 命令（/name → 完整内容），
     // 避免依赖 pi 的展开导致用户附加文本丢失以及特殊符号干扰
     // 同时提取模板的 description 作为元数据发给 pi agent，让其了解本次 prompt 意图
     const { message: expandedMessage, description: templateDescription } = expandPromptTemplates(message, promptTemplateList);
     await submitPromptSnapshot(activeAgentId, expandedMessage, images, undefined, currentComposerAgentMode, templateDescription);
+    // 用 MutationObserver 监听消息列表 DOM 变化，新消息出现时滚动到底部
+    const scrollOnNewMessage = () => {
+      const timeline = timelineRef.current;
+      if (!timeline) return;
+      const list = timeline.querySelector(".message-list");
+      if (!list) return;
+      const observer = new MutationObserver(() => {
+        if (!autoScrollRef.current) return;
+        timeline.scrollTo({ top: timeline.scrollHeight, behavior: "instant" });
+      });
+      observer.observe(list, { childList: true, subtree: false });
+      // 8 秒后自动断开，避免累积
+      setTimeout(() => observer.disconnect(), 8000);
+    };
+    requestAnimationFrame(scrollOnNewMessage);
   }
 
   async function sendPromptAsFollowUp() {
@@ -3874,9 +3907,23 @@ ${text}
     setAttachedImages([]);
     setSuggestionsOpen(false);
     setSendBehaviorMenuOpen(false);
+    // 发送后固定 composer 高度
     setComposerAutoHeight(COMPOSER_MIN_HEIGHT);
-    requestAnimationFrame(() => syncComposerAutoHeight());
     await submitPromptSnapshot(activeAgentId, message, images, "followUp", currentComposerAgentMode);
+    // 用 MutationObserver 监听消息列表 DOM 变化
+    const scrollOnNewMessage = () => {
+      const timeline = timelineRef.current;
+      if (!timeline) return;
+      const list = timeline.querySelector(".message-list");
+      if (!list) return;
+      const observer = new MutationObserver(() => {
+        if (!autoScrollRef.current) return;
+        timeline.scrollTo({ top: timeline.scrollHeight, behavior: "instant" });
+      });
+      observer.observe(list, { childList: true, subtree: false });
+      setTimeout(() => observer.disconnect(), 8000);
+    };
+    requestAnimationFrame(scrollOnNewMessage);
   }
 
   /** 处理 /goal 命令 */
@@ -7006,6 +7053,89 @@ ${goalTextRef.current}
         </div>
       )}
 
+    {/* ask_question 弹出 dialog - 仅在 pi 通过 extension_ui_request 发送交互请求时显示 */}
+    {showAskDialog && activeUiAsk && (
+      <div className="modal-backdrop" onClick={undefined}>
+        <div className="ask-dialog" onClick={(e) => e.stopPropagation()}>
+          <div className="ask-dialog-header">
+            <MessageCircle size={16} />
+            <span>{t("ask.toolName")}</span>
+            {/* 关闭按钮：点击后取消当前请求，select 类型会提示模型默认选第一项 */}
+            <button
+              className="ask-dialog-close-btn"
+              title={t("common.close")}
+              onClick={() => {
+                const isSelect = activeUiAsk.method === "select" && Array.isArray(activeUiAsk.options) && activeUiAsk.options.length > 0;
+                if (isSelect) {
+                  showToast(t("ask.cancelHint"));
+                }
+                if (activeUiAsk.requestId && activeAgentId) {
+                  api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { cancelled: true });
+                }
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="ask-dialog-question">{activeUiAsk.title || t("ask.pending")}</div>
+          {activeUiAsk.options && activeUiAsk.options.length > 0 ? (
+            <div className="ask-dialog-options">
+              {activeUiAsk.options.map((opt, i) => {
+                const val = typeof opt === "string" ? opt : String((opt as any).value ?? (opt as any).label ?? opt);
+                const label = typeof opt === "string" ? opt : (opt as any).label ?? val;
+                return (
+                  <button
+                    key={i}
+                    className="ask-dialog-option"
+                    onClick={() => {
+                      if (activeUiAsk.requestId && activeAgentId) {
+                        api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { value: val });
+                      }
+                    }}
+                  >
+                    <span className="ask-dialog-option-marker">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : activeUiAsk.method === "input" || activeUiAsk.method === "editor" ? (
+            <div className="ask-dialog-input-area">
+              <input
+                id="ask-dialog-input"
+                className="ask-dialog-input"
+                placeholder={activeUiAsk.placeholder || ""}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && activeUiAsk.requestId && activeAgentId) {
+                    const value = (e.target as HTMLInputElement).value;
+                    api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { value });
+                  }
+                }}
+              />
+              <button
+                className="ask-dialog-submit-btn"
+                onClick={() => {
+                  const value = (document.getElementById("ask-dialog-input") as HTMLInputElement)?.value ?? "";
+                  if (activeUiAsk.requestId && activeAgentId) {
+                    api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { value });
+                  }
+                }}
+              >
+                {t("common.submit")}
+              </button>
+            </div>
+
+          ) : null}
+          {/* select 类型取消提示 */}
+          {activeUiAsk.method === "select" && Array.isArray(activeUiAsk.options) && activeUiAsk.options.length > 0 && (
+            <div className="ask-dialog-cancel-hint">
+              <Info size={12} />
+              <span>{t("ask.cancelHint")}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
     </div>
   );
 }

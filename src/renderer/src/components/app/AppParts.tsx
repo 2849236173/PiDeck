@@ -2461,7 +2461,9 @@ export const TurnRow = memo(function TurnRow(props: {
 		return -1;
 	})();
 	const hasExecutionProcess = lastAssistantIndex > 0;
-	const executionItems = hasExecutionProcess ? (run.items as (ThinkingGroupItem | ToolGroupItem | MessageItem)[]).slice(0, lastAssistantIndex) : [];
+	const executionItems = hasExecutionProcess
+		? (run.items as (ThinkingGroupItem | ToolGroupItem | MessageItem)[]).slice(0, lastAssistantIndex)
+		: (run.items as (ThinkingGroupItem | ToolGroupItem | MessageItem)[]);
 	const finalMessageItem = lastAssistantIndex >= 0 ? (run.items[lastAssistantIndex] as MessageItem) : null;
 
 	const toolCount = executionItems.filter((i) => i.kind === "tool-group").length;
@@ -2549,9 +2551,10 @@ export const TurnRow = memo(function TurnRow(props: {
 	const summaryText = summaryParts.length > 0 ? `执行过程: ${summaryParts.join(" ")}` : "";
 
 	// 是否有任何需要折叠的内容（非最终回答条目 + 最终回答的思考）
-	const hasFoldableContent = lastAssistantIndex > 0 || hasFinalThinking;
+	// 当没有 assistant 消息时，只要有工具/思考也需要折叠（如 ask_question 场景）
+	const hasFoldableContent = lastAssistantIndex > 0 || hasFinalThinking || run.items.some((i) => i.kind !== "message");
 
-	// 没有助手指令消息的情况：整轮只含工具/思考，直接扁平渲染
+	// 没有助手指令消息的情况：整轮只含工具/思考，用执行过程折叠渲染
 	if (lastAssistantIndex === -1) {
 		return (
 			<article ref={rowRef} className="turn-row" data-message-id={run.id}>
@@ -2563,16 +2566,30 @@ export const TurnRow = memo(function TurnRow(props: {
 							<span className="turn-row-duration">{formatDuration(duration)}</span>
 						)}
 					</div>
-					{run.items.map((item) => {
-						if (item.kind === "thinking-group") {
-							if (!props.showThinking) return null;
-							return <ThinkingBlock key={item.id} text={item.text} startedAt={item.startedAt} endedAt={item.endedAt} showThinking={props.showThinking} />;
-						}
-						if (item.kind === "tool-group") {
-							return <ToolGroupCard key={item.id} group={item} onDiffFile={props.onDiffFile} />;
-						}
-						return null;
-					})}
+					{/* 执行过程概要（含工具/思考），默认折叠 */}
+					{hasFoldableContent && summaryText && (
+						<div className="execution-summary">
+							<button
+								type="button"
+								className="execution-summary-toggle"
+								onClick={() => setExecutionExpanded((prev) => !prev)}
+								aria-expanded={executionExpanded}
+								title={executionExpanded ? t("common.collapse") : t("common.expand")}
+							>
+								{executionExpanded ? (
+									<ChevronDown size={14} aria-hidden="true" />
+								) : (
+									<ChevronRight size={14} aria-hidden="true" />
+								)}
+								<span>{summaryText}</span>
+							</button>
+							{executionExpanded && (
+								<div className="execution-summary-details">
+									{executionItems.map(renderExecutionItem)}
+								</div>
+							)}
+						</div>
+					)}
 				</div>
 			</article>
 		);

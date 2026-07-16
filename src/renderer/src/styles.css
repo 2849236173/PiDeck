@@ -5082,6 +5082,11 @@ body.is-terminal-resizing .terminal-resize-handle::before {
 .tool-card--ask {
   background: transparent;
 }
+/* ask dialog 打开时隐藏内联卡片的展开内容，避免重复显示 */
+body.ask-dialog-open .tool-card--ask .tool-card-content,
+body.ask-dialog-open .ask-card-preview {
+  display: none;
+}
 .tool-card--ask .tool-card-icon {
   color: var(--color-info);
 }
@@ -5180,6 +5185,159 @@ body.is-terminal-resizing .terminal-resize-handle::before {
   flex-shrink: 0;
   stroke-width: 2.5;
 }
+
+/* ask_question 弹出 dialog */
+.ask-dialog {
+  display: grid;
+  gap: 16px;
+  width: min(480px, calc(100vw - 64px));
+  max-height: min(80vh, 600px);
+  padding: 24px;
+  margin: 24px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-panel);
+  box-shadow: var(--shadow-modal);
+  overflow-y: auto;
+}
+.ask-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-accent);
+  font-weight: 600;
+  font-size: var(--font-size-control);
+}
+.ask-dialog-question {
+  font-size: var(--font-size-title);
+  line-height: var(--line-height-title);
+  word-break: break-word;
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+.ask-dialog-options {
+  display: grid;
+  gap: 8px;
+}
+.ask-dialog-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+}
+.ask-dialog-option-marker {
+  font-size: var(--font-size-control);
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+.ask-dialog-option-desc {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-tertiary);
+}
+.ask-dialog-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.ask-dialog-close-btn:hover {
+  background: var(--color-bg-muted);
+  color: var(--color-text-primary);
+}
+.ask-dialog-cancel-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-panel));
+  color: var(--color-warning);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-text);
+}
+.ask-dialog-cancel-hint svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-warning, #d97706);
+}
+.ask-dialog-waiting {
+  font-size: var(--font-size-caption);
+  color: var(--color-text-tertiary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ask-dialog-waiting::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: ask-dialog-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ask-dialog-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* ask dialog 选项按钮 */
+.ask-dialog-option {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: all 0.12s ease;
+}
+.ask-dialog-option:hover {
+  border-color: var(--color-accent);
+  background: var(--color-bg-active);
+}
+.ask-dialog-input-area {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.ask-dialog-submit-btn {
+  flex-shrink: 0;
+  height: var(--control-height-lg);
+  padding: 0 16px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: var(--color-text-on-accent, #fff);
+  font-size: var(--font-size-control);
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.ask-dialog-submit-btn:hover {
+  opacity: 0.85;
+}
+.ask-dialog-input {
+  width: 100%;
+  height: var(--control-height-lg);
+  padding: 0 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-control);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.ask-dialog-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: var(--focus-ring);
+}
+
 
 /* 内联提问卡片（实时会话中 system 消息形式） */
 .ask-question-card {
