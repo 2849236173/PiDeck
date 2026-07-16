@@ -347,28 +347,7 @@ export function AuthTab(props: {
 											onChange={(v) => props.onUpdate(name, "key", v)}
 										/>
 									</div>
-									<div className="config-form-row">
-										<label>{t("config.field.model")}</label>
-										<ConfigComboboxInput
-											value={typeof auth.model === "string" ? auth.model : ""}
-											options={(() => {
-												const modelOptions: Array<{ value: string; label?: string }> = [];
-												if (props.modelsData) {
-													for (const [pName, provider] of Object.entries(props.modelsData.providers)) {
-														for (const model of provider.models) {
-															const label = model.name && model.name !== model.id
-																? `${model.name} (${pName})`
-																: `${model.id} (${pName})`;
-															modelOptions.push({ value: model.id, label });
-														}
-													}
-												}
-												return modelOptions;
-											})()}
-											onChange={(v) => props.onUpdate(name, "model", v)}
-											placeholder={t("config.settings.selectModel")}
-										/>
-									</div>
+
 								</div>
 							)}
 						</div>

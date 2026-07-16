@@ -5436,11 +5436,6 @@ ${goalTextRef.current}
                     : activeProject?.name) ??
                   "PiDeck"}
               </strong>
-              {activeAgent && (
-                <span className="chat-agent-id-hint">
-                  {activeAgent.id.slice(0, 8)}
-                </span>
-              )}
             </div>
           </div>
           <div
@@ -5895,18 +5890,7 @@ ${goalTextRef.current}
                   />
                 ) : undefined
               }
-              pathIndicator={
-                !composerMode && !drawer && activeAgent?.sessionPath ? (
-                  <button
-                    className="composer-path-chip"
-                    onClick={() => api.files.open(activeAgent.sessionPath!)}
-                    title={t("app.openSessionFile")}
-                  >
-                    <FolderOpen size={12} />
-                    <span>{activeAgent.sessionPath}</span>
-                  </button>
-                ) : undefined
-              }
+
             />
             <RichInput
               ref={composerTextareaRef}
@@ -6482,6 +6466,11 @@ ${goalTextRef.current}
             void window.piDesktop.rpcLogs.openFile(agentMenu.agent.id);
             setAgentMenu(null);
           }}
+          onOpenSessionFile={() => {
+            const path = agentMenu.agent.sessionPath;
+            if (path) void api.files.open(path);
+            setAgentMenu(null);
+          }}
           onCloseAgent={() => {
             void closeAgent(agentMenu.agent.id);
             setAgentMenu(null);
@@ -6508,6 +6497,10 @@ ${goalTextRef.current}
             void copySidebarSession(sessionMenu.projectId, sessionMenu.session);
           }}
           // 历史会话的 RPC 日志在 agent 启动后再通过右键菜单开启记录
+          onOpenSessionFile={() => {
+            void api.files.open(sessionMenu.session.filePath);
+            setSessionMenu(null);
+          }}
           onDeleteSession={() => {
             const session = sessionMenu.session;
             setSessionMenu(null);

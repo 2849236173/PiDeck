@@ -1415,6 +1415,14 @@ export function EmptyState(props: { hasProject: boolean; onCreate: () => void })
 					<em className="empty-tagline-yours">{t("app.emptyTaglineYours")}</em>
 				</span>
 			</div>
+			<p className="empty-subtitle">
+				{t("app.emptySubtitle").split("\n").map((line, i) => (
+					<Fragment key={i}>
+						{i > 0 && <br />}
+						<span className="empty-subtitle-line">{line}</span>
+					</Fragment>
+				))}
+			</p>
 			{props.hasProject ? (
 				<button onClick={props.onCreate}>{t("app.createAgent")}</button>
 			) : (
@@ -5201,6 +5209,7 @@ export function AgentContextMenu(props: {
 	onToggleRpcLogging?: () => void;
 	isRpcLogging?: boolean;
 	onOpenLogFile?: () => void;
+	onOpenSessionFile?: () => void;
 	onCloseAgent: () => void;
 }) {
 	return (
@@ -5219,6 +5228,11 @@ export function AgentContextMenu(props: {
 					{props.actionLoading === "export" && <span className="mini-loader" />}
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 				</button>
+				{props.menu.agent.sessionPath && (
+					<button disabled={Boolean(props.actionLoading)} onClick={props.onOpenSessionFile}>
+						{t("menu.openAgentSessionFile")}
+					</button>
+				)}
 				<button disabled={Boolean(props.actionLoading)} onClick={props.onToggleRpcLogging}>
 					{props.isRpcLogging ? `✓ ${t("menu.rpcLoggingOn")}` : t("menu.rpcLogging")}
 				</button>
@@ -5240,6 +5254,7 @@ export function SessionContextMenu(props: {
 	onRename: () => void;
 	onExport: () => void;
 	onCopySession: () => void;
+	onOpenSessionFile?: () => void;
 	onShowLogs?: () => void;
 	onDeleteSession: () => void;
 }) {
@@ -5258,6 +5273,9 @@ export function SessionContextMenu(props: {
 				<button disabled={Boolean(props.actionLoading)} onClick={props.onExport}>
 					{props.actionLoading === "export" && <span className="mini-loader" />}
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
+				</button>
+				<button disabled={Boolean(props.actionLoading)} onClick={props.onOpenSessionFile}>
+					{t("menu.openSessionFile")}
 				</button>
 				<button disabled={Boolean(props.actionLoading)} onClick={props.onShowLogs}>{t("menu.rpcLogs")}</button>
 				<button
