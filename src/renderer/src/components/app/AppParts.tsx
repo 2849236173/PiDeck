@@ -1779,7 +1779,7 @@ const statusLabel =
 			data-tool-kind={isSkillRead ? "skill" : getToolKind(toolName)}
 			data-message-id={props.message.id}
 		>
-			<div className="tool-card-header">
+			<div className={`tool-card-header${diffTarget ? " has-diff" : ""}`}>
 				<button
 					className="tool-card-trigger"
 					onClick={() => setExpanded((v) => !v)}
@@ -3925,6 +3925,7 @@ export function DrawerContent(props: {
 	onClose: () => void;
 	onFileContextMenu: (node: FileTreeNode, x: number, y: number) => void;
 	onRefreshFiles: () => void;
+	onOpenFolder?: () => void;
 	onRefreshSessions: () => void;
 	onOpenSession: (session: SessionSummary) => void;
 	onRenameSession: (filePath: string, newName: string) => void;
@@ -3956,14 +3957,6 @@ export function DrawerContent(props: {
 					</button>
 					<button
 						disabled={props.pinned}
-						title={props.pinned ? t("drawer.pinnedCannotCollapse") : t("drawer.collapsePanel")}
-						aria-label={t("drawer.collapsePanel")}
-						onClick={props.onCollapse}
-					>
-						<ChevronRight size={16} />
-					</button>
-					<button
-						disabled={props.pinned}
 						title={props.pinned ? t("drawer.pinnedCannotClose") : t("drawer.closePanel")}
 						aria-label={t("drawer.closePanel")}
 						onClick={props.onClose}
@@ -3985,6 +3978,7 @@ export function DrawerContent(props: {
 					onToggleDirectory={props.onToggleDirectory}
 					onFileContextMenu={props.onFileContextMenu}
 					onRefreshFiles={props.onRefreshFiles}
+					onOpenFolder={props.onOpenFolder}
 					onDiffFile={props.onDiffFile}
 					onOpenFile={props.onOpenFile}
 					onViewFile={props.onViewFile}
@@ -4016,6 +4010,7 @@ function FilesPanel(props: {
 	onToggleDirectory: (path: string) => void;
 	onFileContextMenu: (node: FileTreeNode, x: number, y: number) => void;
 	onRefreshFiles: () => void;
+	onOpenFolder?: () => void;
 	onDiffFile?: DiffFileHandler;
 	onOpenFile?: (path: string) => void;
 	onViewFile?: (path: string) => void;
@@ -4045,7 +4040,15 @@ function FilesPanel(props: {
 		<div className="files-panel">
 			<div className="panel-action-row">
 				<span>{t("drawer.fileItems", { count: props.files.length })}</span>
-				<button onClick={props.onRefreshFiles}>{t("common.refresh")}</button>
+				<div className="panel-action-buttons">
+					{props.onOpenFolder && (
+						<button onClick={props.onOpenFolder} title={t("drawer.openFolder")}>
+							<Folder size={14} />
+							{t("drawer.openFolder")}
+						</button>
+					)}
+					<button onClick={props.onRefreshFiles}>{t("common.refresh")}</button>
+				</div>
 			</div>
 			{props.modifiedFiles.length > 0 && (
 				<div className="modified-files-section">

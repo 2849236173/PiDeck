@@ -17,7 +17,7 @@ const TERMINAL_THEMES = {
 	"pi-soft": {
 		label: "Pi Soft",
 		xterm: {
-			background: "#f0f1ed",
+			background: "#ffffff",
 			foreground: "#243244",
 			cursor: "#16a34a",
 			selectionBackground: "#d9f0e0",

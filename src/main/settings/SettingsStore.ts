@@ -150,7 +150,8 @@ export class SettingsStore {
         : isMac
           ? "hiddenInset" as const
           : "hidden" as const,
-      trafficLightPosition: { x: 14, y: 14 },
+      // 系统标题栏模式下红绿灯由 macOS 控制，不设置避免与侧栏 logo 重叠。
+      ...(!useNative && isMac ? { trafficLightPosition: { x: 14, y: 14 } as const } : {}),
     };
   }
 

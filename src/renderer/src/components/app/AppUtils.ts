@@ -100,6 +100,29 @@ export type AgentRunItem = {
 
 export type RenderMessage = MessageItem | ToolGroupItem | ThinkingGroupItem | AgentRunItem;
 
+export function getMultiSelectImageCaptureIds(
+	items: RenderMessage[],
+	selectedIds: Set<string>,
+): Set<string> {
+	const ids = new Set<string>();
+	for (const item of items) {
+		if (item.kind === "message") {
+			if (selectedIds.has(item.message.id)) ids.add(item.message.id);
+			continue;
+		}
+		if (item.kind === "agent-run") {
+			const hasSelectedAssistant = item.items.some(
+				(sub) =>
+					sub.kind === "message" &&
+					sub.message.role === "assistant" &&
+					selectedIds.has(sub.message.id),
+			);
+			if (hasSelectedAssistant) ids.add(item.id);
+		}
+	}
+	return ids;
+}
+
 /* ── 消息分组 ── */
 
 export function groupToolMessages(messages: ChatMessage[]): RenderMessage[] {

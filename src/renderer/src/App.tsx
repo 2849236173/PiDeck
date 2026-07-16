@@ -110,6 +110,7 @@ import {
 import { BrowserPanel } from "./components/app/BrowserPanel";
 import {
   groupToolMessages,
+  getMultiSelectImageCaptureIds,
   applySuggestion,
   buildOutline,
   buildSuggestionItems,
@@ -1174,65 +1175,6 @@ export function App() {
     ? runtimeStateByAgent[activeAgentId]
     : undefined;
 
-  // 多选分享：弹框中选择消息后复制为文本/Markdown/图片
-  const handleMultiSelectCopy = useCallback(async (selectedIds: Set<string>, kind: "text" | "markdown" | "image") => {
-    // 图片模式：先截图再关弹框（避免 React re-render 导致 DOM 移位）
-    if (kind === "image") {
-      try {
-        const { toBlob: toBlobImg } = await import("html-to-image");
-        const el = document.querySelector(".message-list");
-        if (!el) return;
-        const blob = await toBlobImg(el as HTMLElement, {
-          pixelRatio: Math.min(2, window.devicePixelRatio || 1),
-          backgroundColor: getComputedStyle(document.documentElement).getPropertyValue("--color-bg-panel") || undefined,
-          // 截图时给消息列表添加内边距，避免文字贴边
-          style: { padding: "24px" },
-          filter: (node) =>
-            !(node instanceof HTMLElement) ||
-            (!node.classList.contains("turn-row-actions") &&
-              !node.classList.contains("user-turn-actions") &&
-              !node.classList.contains("copy-menu-popover")),
-        });
-        if (blob) {
-          await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-          showToast(t("copy.asImageCopied"));
-        }
-      } catch {
-        // 截图失败也给提示
-        showToast(t("copy.failed"));
-      }
-      setMultiSelectOpen(false);
-      return;
-    }
-
-    // 文本 / Markdown：关闭弹框后复制
-    async function doCopyText() {
-      const selected = activeMessages
-        .filter((m) => selectedIds.has(m.id))
-        .sort((a, b) => a.timestamp - b.timestamp);
-      if (selected.length === 0) return;
-
-      const separator = "\n\n---\n\n";
-      const content =
-        kind === "text"
-          ? selected.map((m) => {
-              let text = m.text;
-              text = text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, "");
-              text = text.replace(/<thinking>[\s\S]*?<\/thinking>/g, "");
-              text = text.replace(/<skill\s+name="[^"]*"[^>]*>[\s\S]*?<\/skill>/gi, "");
-              return text.trim();
-            }).join(separator)
-          : selected.map((m) => m.text).join(separator);
-
-      await navigator.clipboard.writeText(content);
-      showToast(kind === "text" ? t("copy.asTextCopied") : t("copy.asMarkdownCopied"));
-    }
-
-    // 先执行复制再关弹框，确保 toast 在弹框消失后仍然弹出
-    await doCopyText();
-    setMultiSelectOpen(false);
-  }, [activeMessages]);
-
   // 消息分页:超过 100 条消息时启用,大幅减少输入卡顿
   // 首屏 100 条,每次加载 100 条,一页一页懒加载
   const {
@@ -1257,6 +1199,72 @@ export function App() {
     () => groupToolMessages(paginatedMessages),
     [paginatedMessages],
   );
+
+  // 多选分享：图片只克隆已勾选的可见消息，避免截到整屏会话或被滚动容器裁掉。
+  const handleMultiSelectCopy = useCallback(async (selectedIds: Set<string>, kind: "text" | "markdown" | "image") => {
+    if (kind === "image") {
+      try {
+        const { toBlob: toBlobImg } = await import("html-to-image");
+        const source = document.querySelector(".message-list") as HTMLElement | null;
+        if (!source) return;
+
+        const captureIds = getMultiSelectImageCaptureIds(renderedRuns, selectedIds);
+        const clone = source.cloneNode(true) as HTMLElement;
+        for (const item of Array.from(clone.children)) {
+          if (!(item instanceof HTMLElement)) continue;
+          const id = item.dataset.messageId;
+          if (!id || !captureIds.has(id)) item.remove();
+        }
+        clone.classList.add("multi-select-image-export");
+        clone.style.width = `${Math.max(source.clientWidth, source.scrollWidth)}px`;
+        clone.style.padding = "24px";
+        clone.style.background = getComputedStyle(document.documentElement).getPropertyValue("--color-bg-panel") || "#fff";
+        document.body.appendChild(clone);
+        let blob: Blob | null = null;
+        try {
+          blob = await toBlobImg(clone, {
+            pixelRatio: Math.min(2, window.devicePixelRatio || 1),
+            backgroundColor: getComputedStyle(document.documentElement).getPropertyValue("--color-bg-panel") || undefined,
+            filter: (node) =>
+              !(node instanceof HTMLElement) ||
+              (!node.classList.contains("turn-row-actions") &&
+                !node.classList.contains("user-turn-actions") &&
+                !node.classList.contains("copy-menu-popover")),
+          });
+        } finally {
+          clone.remove();
+        }
+        if (blob) {
+          await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+          showToast(t("copy.asImageCopied"));
+        }
+      } catch {
+        showToast(t("copy.failed"));
+      }
+      setMultiSelectOpen(false);
+      return;
+    }
+
+    const selected = activeMessages
+      .filter((m) => selectedIds.has(m.id))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (selected.length === 0) return;
+
+    const separator = "\n\n---\n\n";
+    const content = kind === "text"
+      ? selected.map((m) => {
+          let text = m.text;
+          text = text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, "");
+          text = text.replace(/<thinking>[\s\S]*?<\/thinking>/g, "");
+          text = text.replace(/<skill\s+name="[^"]*"[^>]*>[\s\S]*?<\/skill>/gi, "");
+          return text.trim();
+        }).join(separator)
+      : selected.map((m) => m.text).join(separator);
+
+    await navigator.clipboard.writeText(content);
+    showToast(kind === "text" ? t("copy.asTextCopied") : t("copy.asMarkdownCopied"));
+    setMultiSelectOpen(false);
+  }, [activeMessages, renderedRuns]);
 
   const lastUserMessageId = useMemo(() => {
     for (let i = activeMessages.length - 1; i >= 0; i--) {
@@ -4907,7 +4915,10 @@ ${goalTextRef.current}
                     </button>
                   </div>
                 )}
-                {!isCollapsed && (
+                {!isCollapsed &&
+                  (projectDisplay.visibleChildren.length > 0 ||
+                    projectSessionsLoading ||
+                    projectDisplay.hiddenChildCount > 0) && (
                   <div className="session-card">
                     {projectDisplay.visibleChildren.map((child) => {
                     const subagentGroupKey = `${project.id}:${child.key}`;
@@ -5337,28 +5348,17 @@ ${goalTextRef.current}
                     : activeProject?.name) ??
                   "PiDeck"}
               </strong>
-              {activeAgent && (
-                <span className={`agent-status-badge status-${activeAgent.status}`}>
-                  {activeAgent.status === "running"
-                    ? t("app.statusRunning")
-                    : activeAgent.status === "starting"
-                      ? t("app.statusStarting")
-                      : activeAgent.status === "error"
-                        ? t("app.statusError")
-                        : t("app.statusIdle")}
-                </span>
-              )}
-              {activeAgent && (
-                <span className="chat-agent-id" title={activeAgent.id}>
-                  AgentId: {activeAgent.id.slice(0, 8)}
-                </span>
-              )}
             </div>
           </div>
           <div
             className={`chat-header-actions${activeAgent?.status === "starting" ? " loading" : ""}`}
           >
             <>
+              {activeAgent && (
+                <span className="chat-agent-id" title={activeAgent.id}>
+                  AgentId: {activeAgent.id.slice(0, 8)}
+                </span>
+              )}
               <SessionStatus
                 state={activeRuntimeState}
                 duration={
@@ -5673,8 +5673,8 @@ ${goalTextRef.current}
           {showScrollToBottom && (
             <button
               className="scroll-to-bottom-btn"
-              // 按钮脱离滚动容器后，由 composer 实际高度决定 bottom，避免输入框增高或图片预览时遮挡。
-              style={{ bottom: Math.max(24, composerOffsetHeight + 18) }}
+              // 按钮脱离滚动容器后，由 composer 实际高度 + 终端高度决定 bottom，避免输入框增高或终端打开时遮挡。
+              style={{ bottom: Math.max(24, terminalRowHeight + composerOffsetHeight + 18) }}
               onClick={scrollToBottom}
               title={t("app.scrollToBottom")}
             >
@@ -6126,6 +6126,10 @@ ${goalTextRef.current}
               onRefreshFiles={() => {
                 refreshFiles(activeProjectId);
                 refreshGitChangedFiles(activeProjectId);
+              }}
+              onOpenFolder={() => {
+                const p = projects.find((p) => p.id === activeProjectId);
+                if (p) void api.files.open(p.path);
               }}
               onRefreshSessions={() =>
                 refreshSessions(sessionsProjectId ?? activeProjectId)
