@@ -614,6 +614,8 @@ export function ComposerToolbar(props: {
 	onCancelPlan?: () => void;
 	/** 在思考按钮后插入的额外指示器（如飞书链接状态） */
 	feishuIndicator?: ReactNode;
+	/** 会话文件路径卡片,渲染在思考按钮之后、feishuIndicator 之后 */
+	pathIndicator?: ReactNode;
 
 }) {
 	const ctxPercent = props.state?.contextPercent;
@@ -666,6 +668,7 @@ export function ComposerToolbar(props: {
 				{t("app.think")}: {thinkingDisplay}
 			</button>
 			{props.feishuIndicator}
+			{props.pathIndicator}
 
 			{showCompact && (
 				<button

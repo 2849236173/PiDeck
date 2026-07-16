@@ -33,6 +33,7 @@ import {
   Globe,
   Pin,
   Pencil,
+  ArrowUp,
   Square,
   Terminal,
   Filter,
@@ -5736,6 +5737,18 @@ ${goalTextRef.current}
                   />
                 ) : undefined
               }
+              pathIndicator={
+                !composerMode && !drawer && activeAgent?.sessionPath ? (
+                  <button
+                    className="composer-path-chip"
+                    onClick={() => api.files.open(activeAgent.sessionPath!)}
+                    title={t("app.openSessionFile")}
+                  >
+                    <FolderOpen size={12} />
+                    <span>{activeAgent.sessionPath}</span>
+                  </button>
+                ) : undefined
+              }
             />
             <RichInput
               ref={composerTextareaRef}
@@ -5837,49 +5850,31 @@ ${goalTextRef.current}
               />
             )}
             <div className="composer-footer">
-              <span
-                className={composerMode ? "composer-mode-status" : ""}
-                onClick={
-                  !composerMode && !drawer && activeAgent?.sessionPath
-                    ? () => api.files.open(activeAgent.sessionPath!)
-                    : undefined
-                }
-                role={!composerMode && !drawer && activeAgent?.sessionPath ? "button" : undefined}
-                tabIndex={!composerMode && !drawer && activeAgent?.sessionPath ? 0 : undefined}
-                title={
-                  !composerMode && !drawer && activeAgent?.sessionPath
-                    ? t("app.openSessionFile")
-                    : undefined
-                }
-              >
-                {composerStatusText}
-              </span>
-              {activeAgent?.status === "running" && (
-                <button className="stop-send" onClick={() => abortAgent()}>
-                  {t("app.stop")}
-                </button>
+              {composerMode && (
+                <span className="composer-mode-status">{composerStatusText}</span>
               )}
-              <div className="send-button-group">
-                <button
-                  disabled={
-                    isAgentStarting ||
-                    !activeAgentId ||
-                    (!prompt.trim() && attachedImages.length === 0)
-                  }
-                  className={
-                    isAgentBusy && (prompt.trim() || attachedImages.length > 0)
-                      ? "queue-send"
-                      : ""
-                  }
-                  onClick={sendPrompt}
-                >
-                  {isAgentBusy && (prompt.trim() || attachedImages.length > 0)
-                    ? t("app.composerAttach")
-                    : t("app.send")}
-                </button>
-                {isAgentBusy &&
-                  (prompt.trim() || attachedImages.length > 0) && (
-                    <div className="send-behavior-menu-wrap">
+              <div className="footer-actions">
+                <div className="send-behavior-menu-wrap">
+                  {isAgentBusy ? (
+                    <button className="btn-circle stop" onClick={() => abortAgent()} title={t("app.stop")}>
+                      <Square size={18} strokeWidth={0} fill="currentColor" />
+                    </button>
+                  ) : (
+                    <button
+                      disabled={
+                        isAgentStarting ||
+                        !activeAgentId ||
+                        (!prompt.trim() && attachedImages.length === 0)
+                      }
+                      className="btn-circle send"
+                      onClick={sendPrompt}
+                      title={t("app.send")}
+                    >
+                      <ArrowUp size={18} strokeWidth={2.5} />
+                    </button>
+                  )}
+                  {isAgentBusy &&
+                    (prompt.trim() || attachedImages.length > 0) && (
                       <button
                         className="send-behavior-toggle"
                         title={t("app.sendBehaviorTitle")}
@@ -5887,20 +5882,20 @@ ${goalTextRef.current}
                       >
                         <ChevronDown size={14} />
                       </button>
-                      {sendBehaviorMenuOpen && (
-                        <div className="send-behavior-menu">
-                          <button onClick={sendPrompt}>
-                            <strong>{t("app.sendSteerTitle")}</strong>
-                            <span>{t("app.sendSteerDesc")}</span>
-                          </button>
-                          <button onClick={sendPromptAsFollowUp}>
-                            <strong>{t("app.sendFollowUpTitle")}</strong>
-                            <span>{t("app.sendFollowUpDesc")}</span>
-                          </button>
-                        </div>
-                      )}
+                    )}
+                  {sendBehaviorMenuOpen && (
+                    <div className="send-behavior-menu">
+                      <button onClick={sendPrompt}>
+                        <strong>{t("app.sendSteerTitle")}</strong>
+                        <span>{t("app.sendSteerDesc")}</span>
+                      </button>
+                      <button onClick={sendPromptAsFollowUp}>
+                        <strong>{t("app.sendFollowUpTitle")}</strong>
+                        <span>{t("app.sendFollowUpDesc")}</span>
+                      </button>
                     </div>
                   )}
+                </div>
               </div>
             </div>
           </div>
