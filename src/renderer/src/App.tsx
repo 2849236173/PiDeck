@@ -7272,23 +7272,25 @@ ${goalTextRef.current}
               })}
               <div className="ask-dialog-custom-input">
                 <input
+                  id="ask-dialog-custom-field"
                   className="ask-dialog-custom-field"
                   placeholder={t("ask.customPlaceholder")}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && activeUiAsk.requestId && activeAgentId) {
-                      const value = (e.target as HTMLInputElement).value;
-                      if (value.trim()) {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const value = (e.target as HTMLInputElement).value.trim();
+                      if (value && activeUiAsk.requestId && activeAgentId) {
                         api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { value });
                       }
                     }
                   }}
                 />
                 <button
+                  type="button"
                   className="ask-dialog-submit-btn"
-                  onClick={(e) => {
-                    const input = (e.currentTarget.parentElement?.querySelector(".ask-dialog-custom-field") as HTMLInputElement);
-                    const value = input?.value ?? "";
-                    if (value.trim() && activeUiAsk.requestId && activeAgentId) {
+                  onClick={() => {
+                    const value = (document.getElementById("ask-dialog-custom-field") as HTMLInputElement)?.value?.trim() ?? "";
+                    if (value && activeUiAsk.requestId && activeAgentId) {
                       api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { value });
                     }
                   }}
