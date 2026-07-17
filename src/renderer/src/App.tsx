@@ -457,6 +457,7 @@ interface UiRequest {
 	options?: string[];
 	placeholder?: string;
 	prefill?: string;
+	allowOther?: boolean;
 	completed?: boolean;
 	value?: string;
 	cancelled?: boolean;
@@ -7223,7 +7224,30 @@ ${goalTextRef.current}
             </button>
           </div>
           <div className="ask-dialog-question">{activeUiAsk.title || t("ask.pending")}</div>
-          {activeUiAsk.options && activeUiAsk.options.length > 0 ? (
+          {activeUiAsk.method === "confirm" ? (
+            <div className="ask-dialog-options ask-dialog-options-confirm">
+              <button
+                className="ask-dialog-option"
+                onClick={() => {
+                  if (activeUiAsk.requestId && activeAgentId) {
+                    api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { confirmed: true });
+                  }
+                }}
+              >
+                {t("common.true")}
+              </button>
+              <button
+                className="ask-dialog-option"
+                onClick={() => {
+                  if (activeUiAsk.requestId && activeAgentId) {
+                    api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { confirmed: false });
+                  }
+                }}
+              >
+                {t("common.false")}
+              </button>
+            </div>
+          ) : activeUiAsk.options && activeUiAsk.options.length > 0 ? (
             <div className="ask-dialog-options">
               {activeUiAsk.options.map((opt, i) => {
                 const val = typeof opt === "string" ? opt : String((opt as any).value ?? (opt as any).label ?? opt);
@@ -7242,29 +7266,32 @@ ${goalTextRef.current}
                   </button>
                 );
               })}
-            </div>
-          ) : activeUiAsk.method === "confirm" ? (
-            <div className="ask-dialog-options ask-dialog-options-confirm">
-              <button
-                className="ask-dialog-option ask-dialog-option-yes"
-                onClick={() => {
-                  if (activeUiAsk.requestId && activeAgentId) {
-                    api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { confirmed: true });
-                  }
-                }}
-              >
-                {t("common.true")}
-              </button>
-              <button
-                className="ask-dialog-option ask-dialog-option-no"
-                onClick={() => {
-                  if (activeUiAsk.requestId && activeAgentId) {
-                    api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { confirmed: false });
-                  }
-                }}
-              >
-                {t("common.false")}
-              </button>
+              <div className="ask-dialog-custom-input">
+                <input
+                  className="ask-dialog-custom-field"
+                  placeholder={t("ask.customPlaceholder")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && activeUiAsk.requestId && activeAgentId) {
+                      const value = (e.target as HTMLInputElement).value;
+                      if (value.trim()) {
+                        api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { value });
+                      }
+                    }
+                  }}
+                />
+                <button
+                  className="ask-dialog-submit-btn"
+                  onClick={(e) => {
+                    const input = (e.currentTarget.parentElement?.querySelector(".ask-dialog-custom-field") as HTMLInputElement);
+                    const value = input?.value ?? "";
+                    if (value.trim() && activeUiAsk.requestId && activeAgentId) {
+                      api.agents.sendUiResponse(activeAgentId, activeUiAsk.requestId, { value });
+                    }
+                  }}
+                >
+                  {t("common.submit")}
+                </button>
+              </div>
             </div>
           ) : activeUiAsk.method === "input" || activeUiAsk.method === "editor" ? (
             <div className="ask-dialog-input-area">

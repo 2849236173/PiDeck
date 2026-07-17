@@ -2427,6 +2427,7 @@ export class AgentManager {
 			options: typed.options as string[] | undefined,
 			placeholder: typed.placeholder as string | undefined,
 			prefill: typed.prefill as string | undefined,
+			allowOther: typed.allowOther === true,
 		};
 
 		// 记录 pending UI 请求，用于 abort 时自动 cancel

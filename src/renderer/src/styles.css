@@ -5426,23 +5426,13 @@ body.ask-dialog-open .ask-question-card.pending {
 }
 .ask-dialog-options-confirm {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   justify-content: center;
-  margin-top: 8px;
 }
 .ask-dialog-options-confirm .ask-dialog-option {
-  flex: 0 1 120px;
+  flex: 1;
   justify-content: center;
-  padding: 12px 20px;
-  font-weight: 600;
-}
-.ask-dialog-option-yes {
-  color: var(--color-success, #57ab5a);
-  border-color: var(--color-success, #57ab5a);
-}
-.ask-dialog-option-no {
-  color: var(--color-danger, #e5534b);
-  border-color: var(--color-danger, #e5534b);
+  text-align: center;
 }
 .ask-dialog-option {
   display: flex;
@@ -5535,6 +5525,27 @@ body.ask-dialog-open .ask-question-card.pending {
 .ask-dialog-option:hover {
   border-color: var(--color-accent);
   background: var(--color-bg-active);
+}
+.ask-dialog-custom-input {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+.ask-dialog-custom-field {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-control);
+  font-family: var(--font-family-base);
+  outline: none;
+}
+.ask-dialog-custom-field:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 .ask-dialog-input-area {
   display: flex;
