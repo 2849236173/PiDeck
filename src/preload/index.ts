@@ -44,6 +44,13 @@ import type {
 	FileTreeNode,
 	ForkMessage,
 	GitBranchInfo,
+	CommitDetail,
+	GitCommitFileDiff,
+	GitWorkspaceDiffGroup,
+	GitWorkspaceFileDiff,
+	CommitEntry,
+	GitRef,
+	BranchDiffResult,
 	WorktreeEntry,
 	PiCliUpdateResult,
 	PiCommand,
@@ -63,6 +70,7 @@ import type {
 	PromptStoreItem,
 	ScratchPadData,
 	SendPromptInput,
+	SendPromptResult,
 	SessionSummary,
 	TerminalDataEvent,
 	TerminalExitEvent,
@@ -119,6 +127,12 @@ const api = {
 				ipcChannels.projectsToggleWorktreeEnabled,
 				projectId,
 			) as Promise<Project | null>,
+		// 选择聊天记录目录（系统文件选择器，默认当前目录）
+		chooseChatPath: () =>
+			ipcRenderer.invoke(ipcChannels.projectsChooseChatPath) as Promise<string | null>,
+		// 设置聊天记录目录
+		setChatPath: (path: string) =>
+			ipcRenderer.invoke(ipcChannels.projectsSetChatPath, path) as Promise<Project | null>,
 	},
 	projectResources: {
 		list: (projectId: string) =>
@@ -245,12 +259,6 @@ const api = {
 				ipcChannels.gitOriginalContent,
 				filePath,
 			) as Promise<string>,
-		// 获取工作区中对比 HEAD 有变更的文件列表
-		changedFiles: (projectId: string) =>
-			ipcRenderer.invoke(
-				ipcChannels.gitChangedFiles,
-				projectId,
-			) as Promise<{ path: string; status: string }[]>,
 		// 列出项目的 git worktree（排除主工作区）
 		worktreeList: (projectId: string) =>
 			ipcRenderer.invoke(
@@ -271,6 +279,87 @@ const api = {
 				projectId,
 				worktreePath,
 			) as Promise<boolean>,
+		// Git 增强：提交历史、分支对比、Graph
+		commitLog: (projectId: string, options?: { maxEntries?: number; ref?: string; path?: string; allBranches?: boolean }) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitCommitLog,
+				projectId,
+				options,
+			) as Promise<CommitEntry[]>,
+		// Git 引用（分支 / 远程分支 / Tag）
+		refs: (projectId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitRefs,
+				projectId,
+			) as Promise<GitRef[]>,
+		// 分支对比概要（变更文件 + ahead/behind）
+		branchCompare: (projectId: string, base: string, target: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitBranchCompare,
+				projectId,
+				base,
+				target,
+			) as Promise<BranchDiffResult>,
+		// 单个 commit 详情
+		commitDetail: (projectId: string, ref: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitCommitDetail,
+				projectId,
+				ref,
+			) as Promise<CommitDetail | null>,
+		// 提交历史中单个文件相对第一父提交的两侧内容
+		commitFileDiff: (projectId: string, ref: string, filePath: string, originalPath?: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitCommitFileDiff,
+				projectId,
+				ref,
+				filePath,
+				originalPath,
+			) as Promise<GitCommitFileDiff | null>,
+		// 两个 ref 间单个文件的 diff
+		diffFileBetween: (projectId: string, ref1: string, ref2: string, filePath: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitDiffFileBetween,
+				projectId,
+				ref1,
+				ref2,
+				filePath,
+			) as Promise<string>,
+		// Git 工作区状态（VS Code 风格分组：Staged/Unstaged/Untracked/Merge）
+		status: (projectId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitStatus,
+				projectId,
+			) as Promise<import("../shared/types").GitResourceGroups>,
+		// Git Changes 中单个文件的两侧快照（按点击惰性读取）
+		workspaceFileDiff: (projectId: string, group: GitWorkspaceDiffGroup, filePath: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitWorkspaceFileDiff,
+				projectId,
+				group,
+				filePath,
+			) as Promise<GitWorkspaceFileDiff | null>,
+		// Stage 文件
+		stage: (projectId: string, paths: string[]) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitStage,
+				projectId,
+				paths,
+			) as Promise<void>,
+		// Unstage 文件
+		unstage: (projectId: string, paths: string[]) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitUnstage,
+				projectId,
+				paths,
+			) as Promise<void>,
+		// Commit
+		commit: (projectId: string, message: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.gitCommit,
+				projectId,
+				message,
+			) as Promise<void>,
 	},
 	pi: {
 		check: () =>
@@ -291,6 +380,20 @@ const api = {
 		/** 检查 npm 是否可用 */
 		checkNpm: () =>
 			ipcRenderer.invoke(ipcChannels.piCheckNpm) as Promise<NpmAvailabilityResult>,
+	},
+	/** WSL 相关操作（仅 Windows 有效） */
+	wsl: {
+		/** 获取已安装的 WSL 发行版列表 */
+		listDistros: () =>
+			ipcRenderer.invoke(ipcChannels.wslListDistros) as Promise<string[]>,
+		/** 验证 WSL 连接：检查 distro + user 是否可达，以及 pi 是否已安装 */
+		validateConnection: (distro: string, user: string) =>
+			ipcRenderer.invoke(ipcChannels.wslValidateConnection, distro, user) as Promise<{
+				ok: boolean;
+				whoami: string;
+				piVersion: string;
+				error: string;
+			}>,
 	},
 	logs: {
 		list: (query?: AppLogQuery) =>
@@ -316,6 +419,8 @@ const api = {
 	},
 	app: {
 		info: () => ipcRenderer.invoke(ipcChannels.appInfo) as Promise<AppInfo>,
+		preferredSystemLanguages: () =>
+			ipcRenderer.invoke(ipcChannels.appPreferredSystemLanguages) as Promise<string[]>,
 		checkUpdate: () =>
 			ipcRenderer.invoke(ipcChannels.appCheckUpdate) as Promise<AppUpdateInfo>,
 		downloadUpdate: (asset: { name: string; url: string }) =>
@@ -333,6 +438,8 @@ const api = {
 			) as Promise<FeedbackEnvironment>,
 		openExternal: (url: string) =>
 			ipcRenderer.invoke(ipcChannels.appOpenExternal, url) as Promise<void>,
+		onOpenInBrowser: (callback: (url: string) => void) =>
+			subscribe(ipcChannels.appOpenInBrowser, callback),
 		restart: () => ipcRenderer.invoke(ipcChannels.appRestart) as Promise<void>,
 		rendererLog: (
 			level: AppLogLevel,
@@ -413,6 +520,14 @@ const api = {
 			ipcRenderer.invoke(ipcChannels.skillStoreSearch, query) as Promise<PromptStoreSearchResult>,
 		import: (item: PromptStoreItem, locationId?: string) =>
 			ipcRenderer.invoke(ipcChannels.skillStoreImport, item, locationId) as Promise<PiSkillSummary>,
+	},
+	skillHub: {
+		search: (query: string, page?: number) =>
+			ipcRenderer.invoke(ipcChannels.skillHubSearch, query, page ?? 1) as Promise<import("../shared/types").SkillHubSearchResult>,
+		detail: (slug: string) =>
+			ipcRenderer.invoke(ipcChannels.skillHubDetail, slug) as Promise<import("../shared/types").SkillHubDetail | null>,
+		install: (slug: string, installDir: string) =>
+			ipcRenderer.invoke(ipcChannels.skillHubInstall, slug, installDir) as Promise<import("../shared/types").SkillHubInstallResult>,
 	},
 	yaoPrompts: {
 		list: () =>
@@ -548,7 +663,7 @@ const api = {
 		stop: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.agentsStop, agentId) as Promise<void>,
 		prompt: (input: SendPromptInput) =>
-			ipcRenderer.invoke(ipcChannels.agentsPrompt, input) as Promise<void>,
+			ipcRenderer.invoke(ipcChannels.agentsPrompt, input) as Promise<SendPromptResult>,
 		abort: (agentId: string) =>
 			ipcRenderer.invoke(ipcChannels.agentsAbort, agentId) as Promise<void>,
 		exportHtml: (agentId: string) =>
@@ -621,6 +736,12 @@ const api = {
 				agentId,
 				provider,
 				modelId,
+			) as Promise<AgentRuntimeState>,
+		/** 刷新模型配置，让运行中的 agent 重新加载 models.json */
+		refreshModels: (agentId: string) =>
+			ipcRenderer.invoke(
+				ipcChannels.agentsRefreshModels,
+				agentId,
 			) as Promise<AgentRuntimeState>,
 		cycleThinking: (agentId: string) =>
 			ipcRenderer.invoke(

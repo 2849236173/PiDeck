@@ -169,10 +169,19 @@ when appropriate. If unsure whether a skill is needed, follow the rule:
  * frontmatter 支持 description、argument-hint 等元数据。
  */
 export class PromptManager {
-	private readonly promptsDir: string;
+	private promptsDir: string;
 
-	constructor(home = homedir()) {
-		this.promptsDir = join(home, ".pi", "agent", "prompts");
+	constructor(home?: string) {
+		this.promptsDir = join(home ?? homedir(), ".pi", "agent", "prompts");
+	}
+
+	/** 配置 WSL 模式（通过 \\wsl$ UNC 访问 WSL 内文件） */
+	configureWsl(distro: string | null, user?: string) {
+		if (distro && user) {
+			this.promptsDir = join(`\\\\wsl$\\${distro}\\home\\${user}`, ".pi", "agent", "prompts");
+		} else {
+			this.promptsDir = join(homedir(), ".pi", "agent", "prompts");
+		}
 	}
 
 	getDir(): string {

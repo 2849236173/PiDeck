@@ -69,6 +69,7 @@
     "make-icon": "node scripts/make-icon.js"
   },
   "dependencies": {
+    "@astron-team/skillhub": "^0.1.8",
     "@electron-toolkit/utils": "^4.0.0",
     "@larksuiteoapi/node-sdk": "^1.67.0",
     "@radix-ui/react-dialog": "^1.1.19",

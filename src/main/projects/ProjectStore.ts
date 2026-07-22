@@ -9,7 +9,9 @@ const CHAT_PROJECT_NAME = "Chat";
 
 export class ProjectStore {
   private readonly filePath = join(app.getPath("userData"), "projects.json");
-  private readonly chatProjectPath = join(app.getPath("userData"), "chat-workspace");
+  private readonly chatPathFile = join(app.getPath("userData"), "chat-path.json");
+  // 聊天工作区目录：默认在 userData 下，用户可在侧栏聊天项目设置中改为任意目录并持久化。
+  private chatProjectPath = join(app.getPath("userData"), "chat-workspace");
   private projects: Project[] = [];
 
   async load() {
@@ -19,6 +21,8 @@ export class ProjectStore {
     } catch {
       this.projects = [];
     }
+    // 先读取用户自定义的聊天目录（若存在），再据此修正内置聊天项目路径。
+    await this.loadChatProjectPath();
     const chatChanged = this.ensureChatProject();
     const orderChanged = this.ensureSortOrder();
     const changed = chatChanged || orderChanged;
@@ -40,17 +44,60 @@ export class ProjectStore {
     return this.projects.find(project => project.id === id);
   }
 
-  async chooseAndAdd() {
+  getChatProjectPath() {
+    return this.chatProjectPath;
+  }
+
+  /**
+   * 设置内置聊天项目的会话目录并持久化。
+   * 更新内存中的聊天项目路径、写入 chat-path.json，并确保目标目录存在。
+   * 返回更新后的聊天项目（便于主进程向渲染端广播 projects:changed）。
+   */
+  async setChatProjectPath(path: string) {
+    const normalized = this.normalizeProjectPath(path);
+    this.chatProjectPath = normalized;
+    await writeFile(this.chatPathFile, JSON.stringify({ path: normalized }), "utf8");
+    const chat = this.projects.find(
+      (project) => this.isChatProject(project) || project.id === CHAT_PROJECT_ID,
+    );
+    if (chat) chat.path = normalized;
+    await mkdir(normalized, { recursive: true });
+    await this.save();
+    return chat ?? null;
+  }
+
+  /** 读取用户自定义的聊天目录；不存在或解析失败时回退到默认 chat-workspace。 */
+  private async loadChatProjectPath() {
+    try {
+      const raw = await readFile(this.chatPathFile, "utf8");
+      const parsed = JSON.parse(raw) as { path?: string };
+      if (parsed.path) this.chatProjectPath = this.normalizeProjectPath(parsed.path);
+    } catch {
+      // 无自定义路径时保持默认 userData/chat-workspace
+    }
+  }
+
+  async chooseAndAdd(environment?: "windows" | "wsl") {
     const result = await dialog.showOpenDialog({
       title: "选择项目目录",
       properties: ["openDirectory"],
     });
 
     if (result.canceled || result.filePaths.length === 0) return null;
-    return this.add(result.filePaths[0]);
+    let projectPath = result.filePaths[0];
+
+    // WSL 模式：将 Windows 路径（如 C:\Users\14012\project）转为 WSL 格式（/mnt/c/Users/14012/project）
+    if (environment === "wsl") {
+      projectPath = projectPath
+        .replace(/^([A-Za-z]):\\/, (_: string, d: string) => `/mnt/${d.toLowerCase()}/`)
+        .replace(/\\/g, '/');
+    }
+
+    return this.add(projectPath, undefined, environment);
   }
 
-  async add(path: string, worktreeParentId?: string) {
+  /** 添加项目，可指定所属环境（缺省 windows） */
+  async add(path: string, worktreeParentId?: string, environment?: "windows" | "wsl") {
     const normalizedPath = this.normalizeProjectPath(path);
     const existing = this.projects.find(project => this.sameProjectPath(project.path, normalizedPath));
     if (existing) {
@@ -71,6 +118,8 @@ export class ProjectStore {
       path: normalizedPath,
       lastOpenedAt: Date.now(),
       sortOrder: this.nextSortOrder(),
+      // 兼容旧数据：environment 缺省视为 windows
+      environment: environment || "windows",
       ...(worktreeParentId ? { worktreeParentId } : {}),
     };
 
@@ -219,12 +268,21 @@ export class ProjectStore {
   }
 
   private normalizeProjectPath(path: string) {
+    // WSL Linux 路径（/mnt/d/xxx、/home/user/...）不能走 Windows path.resolve/normalize，
+    // 否则 /mnt/d/xxx 会被解析为 D:\mnt\d\xxx。仅去除尾部斜杠。
+    if (process.platform === "win32" && path.startsWith("/")) {
+      return path.replace(/\/+$/, "");
+    }
     return normalize(resolve(path));
   }
 
   private sameProjectPath(a: string, b: string) {
     const left = this.normalizeProjectPath(a);
     const right = this.normalizeProjectPath(b);
+    // WSL 路径保留原始大小写（Linux 文件系统区分大小写）
+    if (process.platform === "win32" && a.startsWith("/") && b.startsWith("/")) {
+      return left === right;
+    }
     return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
   }
 

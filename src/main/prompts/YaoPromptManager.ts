@@ -22,13 +22,17 @@ export class YaoPromptManager {
 	private readonly bundledDir: string;
 	private readonly promptManager: PromptManager;
 
-	constructor(home = homedir()) {
-		// 开发时 resources/yao-prompts/ 在项目根目录，打包后在 process.resourcesPath/yao-prompts/
+	constructor(home?: string) {
 		const base = app.isPackaged
 			? process.resourcesPath
 			: join(app.getAppPath(), "resources");
 		this.bundledDir = join(base, "yao-prompts");
 		this.promptManager = new PromptManager(home);
+	}
+
+	/** 配置 WSL 模式，委托给内部 PromptManager */
+	configureWsl(distro: string | null, user?: string) {
+		this.promptManager.configureWsl(distro, user);
 	}
 
 	/**

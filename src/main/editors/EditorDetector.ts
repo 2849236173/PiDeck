@@ -377,14 +377,29 @@ async function resolveLaunchableCommand(command: string): Promise<string | null>
 	return null;
 }
 
+/** 将 WSL Linux 路径转为 Windows 可访问格式，供外部编辑器使用 */
+function toWindowsCompatiblePath(path: string): string {
+	if (!path.startsWith("/")) return path;
+	// /mnt/d/tmp → D:\tmp
+	const mntMatch = path.match(/^\/mnt\/([a-z])\/(.*)/);
+	if (mntMatch) {
+		return `${mntMatch[1].toUpperCase()}:\\${mntMatch[2].replace(/\//g, '\\')}`;
+	}
+	// /home/user/... → \\wsl$\<distro>\home\user\...（通过 WSL 网络共享）
+	// distro 无法从路径本身推断，回退到原路径（VS Code 可能通过 WSL remote 连接）
+	return path;
+}
+
 export async function openProjectInEditor(editor: ExternalEditor, projectPath: string) {
 	// 防御性解析:即便 listConfiguredExternalEditors 把 stored command 修好了,
 	// 也兜底处理从历史 settings.json 直接传过来的 legacy editor 对象,避免
 	// spawn 走 ENOENT 再回退打开资源管理器。
 	const launchCommand = (await resolveLaunchableCommand(editor.command)) ?? editor.command;
+	// WSL 项目路径转换：/mnt/d/tmp → D:\tmp，/home/user/... → \\wsl$\...\home\user\...
+	const resolvedPath = toWindowsCompatiblePath(projectPath);
 	return new Promise<void>((resolve, reject) => {
 		const needsCmd = process.platform === "win32" && /\.(cmd|bat)$/i.test(launchCommand);
-		const launchArgs = [...(editor.args ?? []), ...(editor.id === "vscode" ? ["--new-window"] : []), projectPath];
+		const launchArgs = [...(editor.args ?? []), ...(editor.id === "vscode" ? ["--new-window"] : []), resolvedPath];
 		const command = needsCmd ? (process.env.ComSpec || "cmd.exe") : launchCommand;
 		const args = needsCmd
 			// Windows 批处理启动 GUI 程序时使用 start 更可靠；第一个空字符串是窗口标题占位。
@@ -398,7 +413,7 @@ export async function openProjectInEditor(editor: ExternalEditor, projectPath: s
 			command,
 			args,
 			originalCommand: editor.command,
-			projectPath,
+			projectPath: resolvedPath,
 			needsCmd,
 		});
 

@@ -8,7 +8,9 @@ import {
   useRef,
   useState,
   useCallback,
+  useTransition,
   type PointerEvent,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import ReactMarkdown from "react-markdown";
@@ -32,6 +34,7 @@ import {
   Wrench,
   Minus,
   FolderOpen,
+  FolderCog,
   Globe,
   Pin,
   Pencil,
@@ -40,6 +43,8 @@ import {
   Terminal,
   Filter,
   GitBranch,
+  GitGraph,
+  Minimize2,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -64,6 +69,22 @@ import {
   isSameSessionPath,
 } from "./agentListDisplay";
 import { resolveLocale, setI18nLocale, t } from "./i18n";
+import { mergeAgentRuntimeState } from "./utils/agentRuntimeState";
+import {
+  acknowledgeUnknownPrompt,
+  canDiscardQueuedPrompt,
+  canRetractQueuedPromptToInput,
+  claimIdleHead,
+  claimNextSteerPrompt,
+  enqueuePrompt,
+  migrateQueuedPrompts,
+  QUEUED_PROMPT_LIMIT,
+  QUEUED_PROMPT_VISIBLE,
+  replaceAgentQueue,
+  resolveClaimedPrompt,
+  retractPrompt,
+  type QueuedPromptSnapshot,
+} from "./utils/queuedPromptQueue";
 import {
   pruneTerminalDockState,
   setTerminalDockCollapsed,
@@ -80,7 +101,6 @@ import {
   AgentContextMenu,
   BranchSelector,
   ComposerToolbar,
-  ThinkingIndicator,
   CompactionCard,
   ConversationOutline,
   DiagnosticMessageCard,
@@ -98,6 +118,7 @@ import {
   PromptSuggestions,
   SessionContextMenu,
   SessionManagerModal,
+  RespondingIndicator,
   SessionStatus,
 
   ComposerModePicker,
@@ -111,7 +132,8 @@ import {
   type DrawerPanel,
   type SessionModifiedFile,
 } from "./components/app/AppParts";
-import { BrowserPanel } from "./components/app/BrowserPanel";
+import { GitPanel } from "./components/app/GitPanel";
+import { BrowserPanel, navigateTo } from "./components/app/BrowserPanel";
 import {
   groupToolMessages,
   getMultiSelectImageCaptureIds,
@@ -124,6 +146,10 @@ import {
   flattenFiles,
   matches,
   mergeCommands,
+  getToolFilePath,
+  getToolNewContent,
+  getToolChangedLineCount,
+  countTextLines,
   type MessageItem,
 } from "./components/app/AppUtils";
 import {
@@ -164,6 +190,9 @@ import type {
   OpenCodeSessionSummary,
   FileTreeNode,
   GitBranchInfo,
+  CommitEntry,
+  GitChangedFile,
+  GitResourceGroupType,
   WorktreeEntry,
   ImageContent,
   PiCommand,
@@ -223,81 +252,8 @@ function withTimeout<T>(
   });
 }
 
-function countContentLines(value: unknown) {
-  if (typeof value !== "string") return 0;
-  if (!value) return 0;
-  return value.split(/\r\n|\r|\n/).length;
-}
 
-function getToolChangedLineCount(toolName: string, args: any) {
-  // meta.args 可能被 AgentManager 序列化为 JSON 字符串
-  if (typeof args === "string" && args.trim()) {
-    try { args = JSON.parse(args); } catch { return 0; }
-  }
-  // 会话结束摘要只能使用 renderer 已收到的工具参数,不能重新 diff 工作区;
-  // 这里按编辑/写入工具的输入估算"本次触达行数",避免把用户在会话外的改动也计入。
-  if (/edit|patch/i.test(toolName)) {
-    const edits = Array.isArray(args?.edits) ? args.edits : undefined;
-    if (edits) {
-      return edits.reduce((total: number, edit: any) => {
-        const oldLines = countContentLines(edit?.oldText ?? edit?.old_text);
-        const newLines = countContentLines(edit?.newText ?? edit?.new_text);
-        return total + Math.max(oldLines, newLines);
-      }, 0);
-    }
-    return Math.max(
-      countContentLines(args?.oldText ?? args?.old_text),
-      countContentLines(args?.newText ?? args?.new_text),
-    );
-  }
-  if (/write|create/i.test(toolName)) {
-    return countContentLines(args?.content ?? args?.text ?? args?.data ?? args?.body);
-  }
-  return 0;
-}
 
-function getToolFilePath(args: any) {
-  // meta.args 可能被 AgentManager 序列化为 JSON 字符串（safeJson），需反解为对象再查找路径字段。
-  if (typeof args === "string" && args.trim()) {
-    try { args = JSON.parse(args); } catch { return undefined; }
-  }
-  return typeof args?.filePath === "string"
-    ? args.filePath
-    : typeof args?.file_path === "string"
-      ? args.file_path
-      : typeof args?.path === "string"
-        ? args.path
-        : typeof args?.targetPath === "string"
-          ? args.targetPath
-          : typeof args?.target_path === "string"
-            ? args.target_path
-            : typeof args?.outputPath === "string"
-              ? args.outputPath
-              : typeof args?.output_path === "string"
-                ? args.output_path
-                : typeof args?.file === "string"
-                  ? args.file
-                  : typeof args?.fileName === "string"
-                    ? args.fileName
-                    : typeof args?.filename === "string"
-                      ? args.filename
-                      : undefined;
-}
-
-/** Extract new file content from tool args for historical diff display */
-function getToolNewContent(toolName: string, args: any, originalContent?: string): string | undefined {
-  // meta.args 可能是 JSON 字符串，反解后再提取内容字段。
-  if (!args) return undefined;
-  if (typeof args === "string" && args.trim()) {
-    try { args = JSON.parse(args); } catch { return undefined; }
-  }
-  if (/write|create/i.test(toolName) && typeof args.content === "string") return args.content;
-  if (/edit|patch/i.test(toolName) && typeof args.oldText === "string" && typeof args.newText === "string" && originalContent) {
-    const idx = originalContent.indexOf(args.oldText);
-    if (idx >= 0) return originalContent.slice(0, idx) + args.newText + originalContent.slice(idx + args.oldText.length);
-  }
-  return undefined;
-}
 
 function displayProjectDirectoryName(project: Project) {
   if (isChatProject(project)) return "Chat";
@@ -483,6 +439,16 @@ function migrateAgentRecord<T>(
   return next;
 }
 
+/** Agent 运行时暂存在 renderer、尚未提交给 pi 的消息。 */
+type QueuedPrompt = QueuedPromptSnapshot;
+
+class PromptDeliveryUnknownError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PromptDeliveryUnknownError";
+  }
+}
+
 export function App() {
   if (missingElectronPreload) {
     return (
@@ -507,6 +473,8 @@ export function App() {
   const [agents, setAgents] = useState<AgentTab[]>([]);
   const [pendingAgents, setPendingAgents] = useState<PendingAgentTab[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>();
+  const activeProjectIdRef = useRef<string | undefined>(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
   const [activeAgentId, setActiveAgentId] = useState<string>();
   // 切换 agent（新会话/恢复会话）时刷新设置，使 pi agent 的 hideThinkingBlock 立即生效
   useEffect(() => {
@@ -516,6 +484,8 @@ export function App() {
   }, [activeAgentId]);
   const activeAgentIdRef = useRef<string | undefined>(activeAgentId);
   activeAgentIdRef.current = activeAgentId;
+  const agentsRef = useRef<AgentTab[]>(agents);
+  agentsRef.current = agents;
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
     new Set(),
   );
@@ -526,10 +496,6 @@ export function App() {
     Record<string, ChatMessage[]>
   >({});
   const [files, setFiles] = useState<FileTreeNode[]>([]);
-  /** Git 工作区中对比 HEAD 有变更的文件列表（用于右侧面板展示）。 */
-  const [gitChangedFiles, setGitChangedFiles] = useState<
-    { path: string; status: string }[]
-  >([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionsByProject, setSessionsByProject] = useState<
     Record<string, SessionSummary[]>
@@ -547,6 +513,8 @@ export function App() {
   const [runtimeStateByAgent, setRuntimeStateByAgent] = useState<
     Record<string, AgentRuntimeState>
   >({});
+  const runtimeStateByAgentRef = useRef<Record<string, AgentRuntimeState>>({});
+  runtimeStateByAgentRef.current = runtimeStateByAgent;
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [promptTemplatePickerOpen, setPromptTemplatePickerOpen] = useState(false);
@@ -556,6 +524,9 @@ export function App() {
   const [composerModePickerOpen, setComposerModePickerOpen] = useState(false);
   const [thinkingPickerOpen, setThinkingPickerOpen] = useState(false);
   const [sendBehaviorMenuOpen, setSendBehaviorMenuOpen] = useState(false);
+  const sendBehaviorMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 如果用户在 Agent 忙碌时开始撰写，保持分段发送控件，避免 Agent 恰好结束时按钮在手边消失。
+  const [busyDraftByAgent, setBusyDraftByAgent] = useState<Record<string, boolean>>({});
   const [sessionFeishuBotId, setSessionFeishuBotId] = useState<
     string | undefined
   >(undefined);
@@ -566,6 +537,9 @@ export function App() {
   const [promptByAgent, setPromptByAgent] = useState<Record<string, string>>(
     {},
   );
+  // contentEditable 的实时值不等待大型 App 完成渲染；发送路径始终从这里读取最新草稿。
+  const livePromptByAgentRef = useRef<Record<string, string>>({});
+  const [, startPromptTransition] = useTransition();
   /** 当前正在重启的 Agent，用于仅给对应会话显示 loading，避免切到其他 Agent 后仍被全局禁用。 */
   const [restartingAgentId, setRestartingAgentId] = useState<string | null>(null);
   /** 用户点击 ask_question 取消/abort 后的过渡标记，立即隐藏运行指示器。 */
@@ -639,9 +613,13 @@ export function App() {
   const [composerAgentModes, setComposerAgentModes] = useState<Record<string, ComposerAgentMode>>({});
   /** 当前 agent 的发送模式，按 agentId 隔离。 */
   const currentComposerAgentMode = composerAgentModes[activeAgentId ?? ""] ?? "normal";
+  const setComposerAgentModeForAgent = (agentId: string, mode: ComposerAgentMode) => {
+    setComposerAgentModes((prev) => ({ ...prev, [agentId]: mode }));
+  };
   const setCurrentComposerAgentMode = (mode: ComposerAgentMode) => {
-    if (!activeAgentId) return;
-    setComposerAgentModes((prev) => ({ ...prev, [activeAgentId]: mode }));
+    const targetAgentId = activeAgentIdRef.current;
+    if (!targetAgentId) return;
+    setComposerAgentModeForAgent(targetAgentId, mode);
   };
   /** Goal 状态 */
   const [goalText, setGoalText] = useState<string>("");
@@ -660,6 +638,11 @@ export function App() {
   const GOAL_MAX_CONTINUATIONS = 5;
   /** 上一次 isAgentBusy 状态,用于检测 busy→idle 转换 */
   const prevIsAgentBusyRef = useRef(false);
+  /** 客户端队列按 agent 记录 flush 锁，避免 tool-end 与 idle 并发投递。 */
+  const queueFlushByAgentRef = useRef<Set<string>>(new Set());
+  const [queuedPrompts, setQueuedPrompts] = useState<Record<string, QueuedPrompt[]>>({});
+  const queuedPromptsRef = useRef<Record<string, QueuedPrompt[]>>({});
+  const activeQueuedPrompts = activeAgentId ? (queuedPrompts[activeAgentId] ?? []) : [];
 
   /** 当前 agent 流式思考的实时文本,agent_end 时清空 */
   const [multiSelectOpen, setMultiSelectOpen] = useState(false);
@@ -793,14 +776,27 @@ export function App() {
       return next;
     });
   }, []);
-  /** Editor tab：文件中转查看/差异查看。最多 5 个，超出移除最早打开的那个。 */
+  /** Editor tab：文件中转查看/差异查看。条数与正文估算内存双重受限。 */
+  const EDITOR_TAB_LIMIT = 5;
+  const EDITOR_TAB_TEXT_BUDGET = 24 * 1024 * 1024;
   interface EditorTab {
     id: string;
     filePath: string;
     mode: "view" | "diff";
     originalContent: string;
     modifiedContent?: string;
+    /** 历史提交 Diff 必须只读，不能把旧快照误保存回当前工作区。 */
+    allowSave: boolean;
+    /** 同一文件在不同提交中可以有多个历史 Diff，使用该 key 避免互相覆盖。 */
+    tabKey?: string;
+    /** 历史 Diff 在标签中追加短 hash，便于区分同一路径的不同提交。 */
+    label?: string;
+    /** Git Diff 覆盖在 Git drawer 上，不允许切换成 Editor drawer 破坏原面板状态。 */
+    preserveDrawer?: boolean;
+    /** 仅用于内存淘汰，不改变 tab 的可见排列顺序。 */
+    lastAccess: number;
   }
+  const editorTabAccessSequenceRef = useRef(0);
   const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   /** 当前活跃 tab 派生数据 */
@@ -821,18 +817,54 @@ export function App() {
     (path: string, content: string) => api.files.writeContent(path, content),
     [],
   );
-  /** 打开（或切换到已存在的）编辑器 tab。已打开时跳转；未打开时新增，超过 5 个淘汰最早 tab。 */
+  const editorTabTextBytes = (tab: EditorTab) =>
+    (tab.originalContent.length + (tab.modifiedContent?.length ?? 0)) * 2;
+  const trimEditorTabs = (tabs: EditorTab[], protectedId: string) => {
+    const next = [...tabs];
+    let textBytes = next.reduce((sum, tab) => sum + editorTabTextBytes(tab), 0);
+    while (
+      next.length > 1 &&
+      (next.length > EDITOR_TAB_LIMIT || textBytes > EDITOR_TAB_TEXT_BUDGET)
+    ) {
+      const candidates = next.filter((tab) => tab.id !== protectedId);
+      if (candidates.length === 0) break;
+      const oldest = candidates.reduce((left, right) => left.lastAccess <= right.lastAccess ? left : right);
+      const index = next.findIndex((tab) => tab.id === oldest.id);
+      const [removed] = next.splice(index, 1);
+      if (removed) textBytes -= editorTabTextBytes(removed);
+    }
+    return next;
+  };
+  /** 打开或切换 tab。命中时更新访问序号；超条数/正文预算时淘汰最久未访问项。 */
   const openEditorTab = useCallback(
-    (path: string, mode: "view" | "diff", originalContent?: string, modifiedContent?: string) => {
+    (
+      path: string,
+      mode: "view" | "diff",
+      originalContent?: string,
+      modifiedContent?: string,
+      allowSave = true,
+      tabKey?: string,
+      label?: string,
+      preserveDrawer = false,
+    ) => {
       setEditorTabs((prev) => {
-        const existing = prev.find((t) => t.filePath === path);
+        const existing = prev.find((t) => t.filePath === path && t.tabKey === tabKey);
         if (existing) {
-          // 已打开的 tab：更新 mode 和 content（工具 diff 可能和普通查看模式不同）
+          const updated = {
+            ...existing,
+            mode,
+            originalContent: originalContent ?? "",
+            modifiedContent,
+            allowSave,
+            tabKey,
+            label,
+            preserveDrawer,
+            lastAccess: ++editorTabAccessSequenceRef.current,
+          };
           setActiveTabId(existing.id);
-          return prev.map((t) =>
-            t.id === existing.id
-              ? { ...t, mode, originalContent: originalContent ?? "", modifiedContent }
-              : t,
+          return trimEditorTabs(
+            prev.map((tab) => tab.id === existing.id ? updated : tab),
+            existing.id,
           );
         }
         const newTab: EditorTab = {
@@ -841,9 +873,13 @@ export function App() {
           mode,
           originalContent: originalContent ?? "",
           modifiedContent,
+          allowSave,
+          tabKey,
+          label,
+          preserveDrawer,
+          lastAccess: ++editorTabAccessSequenceRef.current,
         };
-        const next = [...prev, newTab];
-        if (next.length > 5) next.shift();
+        const next = trimEditorTabs([...prev, newTab], newTab.id);
         setActiveTabId(newTab.id);
         return next;
       });
@@ -870,6 +906,9 @@ export function App() {
   );
   /** 切换活跃 tab。 */
   const selectEditorTab = useCallback((tabId: string) => {
+    setEditorTabs((current) => current.map((tab) => tab.id === tabId
+      ? { ...tab, lastAccess: ++editorTabAccessSequenceRef.current }
+      : tab));
     setActiveTabId(tabId);
   }, []);
   /** 稳定版文件读写回调，避免内联函数导致 FileDiffViewer 的 useEffect 每轮渲染都重新触发。 */
@@ -928,23 +967,38 @@ export function App() {
   const [compacting, setCompacting] = useState(false);
   const [drawer, setDrawer] = useState<DrawerPanel | null>(null);
 
-  // ── 每个 Agent 的抽屉面板状态持久化（localStorage） ──
-  // 用户切换会话时自动恢复上次的文件面板状态和展开目录，避免每次进来都要重新点开。
-  const AGENT_DRAWER_KEY_PREFIX = "pid:agent-drawer:";
-  const AGENT_EXPANDED_DIRS_KEY_PREFIX = "pid:agent-expanded-dirs:";
+  // ── 按项目目录持久化抽屉面板状态和展开目录（localStorage） ──
+  // 文件侧边栏属于项目目录，所有在该项目下运行的 agent 共享同一套展开与面板状态。
+  const PROJECT_DRAWER_KEY_PREFIX = "pid:project-drawer:";
+  const PROJECT_EXPANDED_DIRS_KEY_PREFIX = "pid:project-expanded-dirs:";
 
-  const saveDrawerState = useCallback((agentId: string, panel: DrawerPanel | null, pinned: boolean) => {
+  const saveDrawerState = useCallback((projectId: string, panel: DrawerPanel | null, pinned: boolean) => {
     try {
-      localStorage.setItem(AGENT_DRAWER_KEY_PREFIX + agentId, JSON.stringify({ panel, pinned }));
+      localStorage.setItem(PROJECT_DRAWER_KEY_PREFIX + projectId, JSON.stringify({ panel, pinned }));
     } catch { /* localStorage 不可用时静默忽略 */ }
   }, []);
 
-  const loadDrawerState = useCallback((agentId: string): { panel: DrawerPanel | null; pinned: boolean } | null => {
+  const loadDrawerState = useCallback((projectId: string): { panel: DrawerPanel | null; pinned: boolean } | null => {
     try {
-      const raw = localStorage.getItem(AGENT_DRAWER_KEY_PREFIX + agentId);
+      const key = PROJECT_DRAWER_KEY_PREFIX + projectId;
+      let raw = localStorage.getItem(key);
+      if (!raw) {
+        // 兼容旧版按 agent 保存的数据：尝试从该项目的任意 agent 读取并迁移到项目级
+        const legacyAgents = agentsRef.current.filter((a) => a.projectId === projectId).map((a) => a.id);
+        for (const agentId of legacyAgents) {
+          const oldKey = `pid:agent-drawer:${agentId}`;
+          const value = localStorage.getItem(oldKey);
+          if (value) {
+            if (!localStorage.getItem(key)) localStorage.setItem(key, value);
+            localStorage.removeItem(oldKey);
+            raw = value;
+            break;
+          }
+        }
+      }
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object" && (parsed.panel === null || ["files", "sessions", "browser", "editor"].includes(parsed.panel))) {
+        if (parsed && typeof parsed === "object" && (parsed.panel === null || ["files", "sessions", "browser", "editor", "git"].includes(parsed.panel))) {
           return parsed;
         }
       }
@@ -952,15 +1006,29 @@ export function App() {
     return null;
   }, []);
 
-  const saveExpandedDirs = useCallback((agentId: string, dirs: Set<string>) => {
+  const saveExpandedDirs = useCallback((projectId: string, dirs: Set<string>) => {
     try {
-      localStorage.setItem(AGENT_EXPANDED_DIRS_KEY_PREFIX + agentId, JSON.stringify([...dirs]));
+      localStorage.setItem(PROJECT_EXPANDED_DIRS_KEY_PREFIX + projectId, JSON.stringify([...dirs]));
     } catch { /* ignore */ }
   }, []);
 
-  const loadExpandedDirs = useCallback((agentId: string): Set<string> => {
+  const loadExpandedDirs = useCallback((projectId: string): Set<string> => {
     try {
-      const raw = localStorage.getItem(AGENT_EXPANDED_DIRS_KEY_PREFIX + agentId);
+      const key = PROJECT_EXPANDED_DIRS_KEY_PREFIX + projectId;
+      let raw = localStorage.getItem(key);
+      if (!raw) {
+        const legacyAgents = agentsRef.current.filter((a) => a.projectId === projectId).map((a) => a.id);
+        for (const agentId of legacyAgents) {
+          const oldKey = `pid:agent-expanded-dirs:${agentId}`;
+          const value = localStorage.getItem(oldKey);
+          if (value) {
+            if (!localStorage.getItem(key)) localStorage.setItem(key, value);
+            localStorage.removeItem(oldKey);
+            raw = value;
+            break;
+          }
+        }
+      }
       if (raw) {
         const arr = JSON.parse(raw);
         if (Array.isArray(arr)) return new Set(arr);
@@ -1016,6 +1084,7 @@ export function App() {
     lightBackground: "white",
     language: "system",
     piEnvironmentChecked: false,
+    enableGitManagement: true,
     closeToTray: true,
     enableNotifications: true,
     // showThinking 由 pi agent 的 hideThinkingBlock 控制，启动后从主进程加载的真实值会覆盖此处
@@ -1060,6 +1129,7 @@ export function App() {
     fontFamilyBaseCustom: "",
     fontFamilyMono: "commit-mono",
     fontFamilyMonoCustom: "",
+    disableUpdateCheck: false,
   });
   /* settingsNotice 已改用 showToast (app-notice) 实现 */
   const [piProxyNotice, setPiProxyNotice] = useState("");
@@ -1072,9 +1142,11 @@ export function App() {
   const [appInfo, setAppInfo] = useState<AppInfo>({
     version: "-",
     releasesUrl: "https://github.com/ayuayue/pi-desktop/releases",
+    platform: "win32",
   });
   const [piChecking, setPiChecking] = useState(false);
-  const resolvedLocale = resolveLocale(settings.language);
+  const [systemLanguage, setSystemLanguage] = useState<string | null>(null);
+  const resolvedLocale = resolveLocale(settings.language, systemLanguage ?? undefined);
   setI18nLocale(resolvedLocale);
   // 手动输入 pi 路径相关状态
   const [customPiPath, setCustomPiPath] = useState("");
@@ -1103,6 +1175,8 @@ export function App() {
   const [drawerWidth, setDrawerWidth] = useState(270);
   const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT);
   const [composerOffsetHeight, setComposerOffsetHeight] = useState(0);
+  /** ResizeObserver 驱动布局预算重新计算；ref 尺寸本身变化不会触发 React render。 */
+  const [chatLayoutHeight, setChatLayoutHeight] = useState(() => window.innerHeight);
   const [composerAutoHeight, setComposerAutoHeight] =
     useState(COMPOSER_MIN_HEIGHT);
   const [terminalDockStateByAgent, setTerminalDockStateByAgent] =
@@ -1118,7 +1192,7 @@ export function App() {
   const [listHoverRevealSuppressed, setListHoverRevealSuppressed] =
     useState(false);
   const [drawerCollapsed, setDrawerCollapsed] = useState(false);
-  const [drawerPinnedByAgent, setDrawerPinnedByAgent] = useState<
+  const [drawerPinnedByProject, setDrawerPinnedByProject] = useState<
     Record<string, DrawerPanel>
   >({});
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
@@ -1126,6 +1200,7 @@ export function App() {
   const sessionComboRef = useRef<HTMLDivElement | null>(null);
   const chatHeaderRef = useRef<HTMLElement | null>(null);
   const composerRef = useRef<HTMLElement | null>(null);
+  const queuedTrackRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLElement | null>(null);
   const composerBoxRef = useRef<HTMLDivElement | null>(null);
   const composerTextareaRef = useRef<HTMLDivElement | null>(null);
@@ -1139,27 +1214,67 @@ export function App() {
   const feishu = useFeishuBridge();
   const scratchPad = useScratchPad();
 
-  // 当活跃 Agent 切换时，从 localStorage 恢复该 Agent 的抽屉面板状态和展开目录
-  // 使得用户切换会话后文件面板和展开目录保持之前的状态。
+  // 当活跃项目切换时，从 localStorage 恢复该项目的抽屉面板状态和展开目录。
+  // 文件侧边栏属于项目目录，因此按 projectId 持久化，同一项目下的不同 agent 共享状态。
   useEffect(() => {
-    if (!activeAgentId) return;
-    const savedState = loadDrawerState(activeAgentId);
+    if (!activeProjectId) {
+      setDrawer(null);
+      setDrawerPinnedByProject((current) => current);
+      setExpandedDirs(new Set());
+      return;
+    }
+    const projectId = activeProjectId;
+    const savedState = loadDrawerState(projectId);
     if (savedState) {
       const panel: DrawerPanel | null = savedState.panel;
-      if (savedState.pinned && panel) {
-        setDrawerPinnedByAgent((current) => {
-          if (current[activeAgentId] === panel) return current;
-          return { ...current, [activeAgentId]: panel };
+      const canRestorePanel = panel !== "git" || settings.enableGitManagement;
+      if (savedState.pinned && panel && canRestorePanel) {
+        setDrawerPinnedByProject((current) => {
+          if (current[projectId] === panel) return current;
+          return { ...current, [projectId]: panel };
+        });
+      } else {
+        setDrawerPinnedByProject((current) => {
+          const next = { ...current };
+          delete next[projectId];
+          return next;
         });
       }
-      if (panel) {
+      if (panel && canRestorePanel) {
         setDrawer(panel);
         setDrawerCollapsed(false);
+      } else {
+        setDrawer(null);
       }
+    } else {
+      // 该项目没有持久化记录时，明确关闭抽屉并清除钉选，避免上一项目的状态泄漏。
+      setDrawer(null);
+      setDrawerPinnedByProject((current) => {
+        const next = { ...current };
+        delete next[projectId];
+        return next;
+      });
     }
-    const dirs = loadExpandedDirs(activeAgentId);
+    const dirs = loadExpandedDirs(projectId);
     setExpandedDirs(dirs);
-  }, [activeAgentId, loadDrawerState, loadExpandedDirs]);
+  }, [activeProjectId, loadDrawerState, loadExpandedDirs, settings.enableGitManagement]);
+
+  useEffect(() => {
+    if (settings.enableGitManagement) return;
+
+    // 关闭功能时同步移除当前项目的 Git 抽屉及钉选状态，避免隐藏入口后留下无法操作的面板。
+    setDrawer((current) => current === "git" ? null : current);
+    setDrawerPinnedByProject((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([, panel]) => panel !== "git"),
+      );
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+    if (activeProjectId) {
+      const saved = loadDrawerState(activeProjectId);
+      if (saved?.panel === "git") saveDrawerState(activeProjectId, null, false);
+    }
+  }, [activeProjectId, loadDrawerState, saveDrawerState, settings.enableGitManagement]);
 
   // 当活跃 Agent 切换或绑定列表变更时，加载该 Agent 指定的飞书 Bot
   // 绑定变更后同步刷新，确保配置页断开关联后已连接状态正确反映。
@@ -1209,12 +1324,16 @@ export function App() {
     ? (attachedImagesByAgent[activeAgentId] ?? [])
     : [];
 
-  function setPrompt(value: string | ((current: string) => string)) {
-    const targetAgentId = activeAgentIdRef.current;
-    if (!targetAgentId) return;
+  function setPromptForAgent(
+    agentId: string,
+    value: string | ((current: string) => string),
+  ) {
+    const targetAgentId = agentId;
+    const previous = livePromptByAgentRef.current[targetAgentId] ?? "";
+    const nextValue = typeof value === "function" ? value(previous) : value;
+    if (nextValue) livePromptByAgentRef.current[targetAgentId] = nextValue;
+    else delete livePromptByAgentRef.current[targetAgentId];
     setPromptByAgent((current) => {
-      const previous = current[targetAgentId] ?? "";
-      const nextValue = typeof value === "function" ? value(previous) : value;
       if (!nextValue) {
         const next = { ...current };
         delete next[targetAgentId];
@@ -1227,23 +1346,50 @@ export function App() {
     });
   }
 
-  function setAttachedImages(
+  function setPromptFromNativeInput(agentId: string, value: string) {
+    if (value) livePromptByAgentRef.current[agentId] = value;
+    else delete livePromptByAgentRef.current[agentId];
+    startPromptTransition(() => {
+      setPromptByAgent((current) => {
+        if (!value) {
+          const next = { ...current };
+          delete next[agentId];
+          return next;
+        }
+        return { ...current, [agentId]: value };
+      });
+    });
+  }
+
+  function setPrompt(value: string | ((current: string) => string)) {
+    const targetAgentId = activeAgentIdRef.current;
+    if (targetAgentId) setPromptForAgent(targetAgentId, value);
+  }
+
+  function setAttachedImagesForAgent(
+    agentId: string,
     value: ImageContent[] | ((current: ImageContent[]) => ImageContent[]),
   ) {
-    if (!activeAgentId) return;
     setAttachedImagesByAgent((current) => {
-      const previous = current[activeAgentId] ?? [];
+      const previous = current[agentId] ?? [];
       const nextValue = typeof value === "function" ? value(previous) : value;
       if (nextValue.length === 0) {
         const next = { ...current };
-        delete next[activeAgentId];
+        delete next[agentId];
         return next;
       }
       return {
         ...current,
-        [activeAgentId]: nextValue,
+        [agentId]: nextValue,
       };
     });
+  }
+
+  function setAttachedImages(
+    value: ImageContent[] | ((current: ImageContent[]) => ImageContent[]),
+  ) {
+    const targetAgentId = activeAgentIdRef.current;
+    if (targetAgentId) setAttachedImagesForAgent(targetAgentId, value);
   }
   const terminalDockState = activeAgentId
     ? terminalDockStateByAgent[activeAgentId]
@@ -1289,8 +1435,8 @@ export function App() {
     };
   }, [activeAgentId, terminalDockAgentId, terminalDockMounted, terminalOpen]);
 
-  const drawerPinnedPanel = activeAgentId
-    ? drawerPinnedByAgent[activeAgentId]
+  const drawerPinnedPanel = activeProjectId
+    ? drawerPinnedByProject[activeProjectId]
     : undefined;
   const drawerPinned = Boolean(drawerPinnedPanel);
   const activeMessages = activeAgentId
@@ -1442,14 +1588,36 @@ export function App() {
   const activeTerminalHeight = activeAgentId
     ? (terminalHeightByAgent[activeAgentId] ?? COMPOSER_DEFAULT_TERMINAL_HEIGHT)
     : COMPOSER_DEFAULT_TERMINAL_HEIGHT;
-  // 终端 Grid 只做 120ms 短过渡，面板表面仍由 transform 完成主要运动。
-  const terminalRowHeight =
+  const requestedTerminalRowHeight =
     !terminalDockVisible || terminalDockClosing
       ? 0
       : terminalCollapsed
         ? 34
         : activeTerminalHeight;
-  const resolvedComposerHeight = Math.max(composerHeight, composerAutoHeight);
+  const chatPaneHeight = chatLayoutHeight;
+  const chatHeaderHeight = chatHeaderRef.current?.offsetHeight ?? 78;
+  const fixedChatHeight =
+    chatHeaderHeight +
+    COMPOSER_MIN_TIMELINE_HEIGHT +
+    COMPOSER_MIN_HEIGHT +
+    28;
+  // Queue chrome includes the track gap, panel padding/header/border, and complete rows.
+  // Keep this in sync with .queued-list so the third row is never clipped by the composer.
+  const queuedChromeBudget =
+    activeQueuedPrompts.length > 0
+      ? 38 + Math.min(activeQueuedPrompts.length, QUEUED_PROMPT_VISIBLE) * 34
+      : 0;
+  const terminalRowHeight = terminalCollapsed
+    ? requestedTerminalRowHeight
+    : Math.min(
+        requestedTerminalRowHeight,
+        Math.max(0, chatPaneHeight - fixedChatHeight - queuedChromeBudget),
+      );
+  const visibleQueuedPrompts = activeQueuedPrompts;
+  const resolvedComposerHeight = Math.min(
+    getComposerMaxHeight(),
+    Math.max(composerHeight, composerAutoHeight),
+  );
   const composerMode = prompt.startsWith("!!")
     ? "silent-shell"
     : prompt.startsWith("!")
@@ -1583,8 +1751,8 @@ export function App() {
       const previous = byPath.get(filePath);
       // 同一路径再次被修改时移动到 Map 末尾，右侧修改清单才能按"最新修改"展示。
       if (previous) byPath.delete(filePath);
-      // 从消息 meta 中提取工具执行前的文件原始内容，用于差异编辑器的对比基准。
-      const originalContent = msg.meta?.originalContent as string | undefined;
+      // originalContent 不再存储到消息 meta 中（full file 会使会话体积过大）。
+      // diff 展示时使用工具参数（oldText/newText）显示变动区域。
       byPath.set(filePath, {
         path: filePath,
         toolName,
@@ -1592,9 +1760,8 @@ export function App() {
         changedLines:
           (previous?.changedLines ?? 0) +
           getToolChangedLineCount(toolName, args),
-        // 同一路径多次修改时保留首次记录的 originalContent，历史会话恢复时优先使用
-        originalContent: previous?.originalContent ?? originalContent ?? "",
-        content: getToolNewContent(toolName, args, originalContent) ?? previous?.content,
+        originalContent: "",
+        content: getToolNewContent(toolName, args) ?? previous?.content,
       });
     }
     return Array.from(byPath.values());
@@ -1718,6 +1885,10 @@ export function App() {
     window.setTimeout(() => void api.agents.list().then(setAgents), 0);
     void api.editors.list().then(setExternalEditors).catch(() => undefined);
     void api.app
+      .preferredSystemLanguages()
+      .then((languages) => setSystemLanguage(languages.find((language) => typeof language === "string" && language.trim()) ?? null))
+      .catch(() => setSystemLanguage(null));
+    void api.app
       .info()
       .then(setAppInfo)
       .catch(() => undefined);
@@ -1738,7 +1909,9 @@ export function App() {
         // 首次检测延后一帧启动,先让主界面完成绘制,避免 packaged app 打开时出现几秒白屏。
         window.setTimeout(() => void checkPiInstall("startup"), 300);
       }
-      window.setTimeout(() => void checkPiCliUpdateOnStartup(), 1200);
+      if (!next.disableUpdateCheck) {
+        window.setTimeout(() => void checkPiCliUpdateOnStartup(), 1200);
+      }
     });
 
     // 加载历史命令
@@ -1792,7 +1965,8 @@ export function App() {
         if (replacement) return replacement.id;
         return pendingAgent ? current : undefined;
       });
-      const activeIds = new Set(nextAgents.map((agent) => agent.id));
+    const activeIds = new Set(nextAgents.map((agent) => agent.id));
+      const activeProjectIds = new Set(nextAgents.map((agent) => agent.projectId));
       const draftIds = new Set([
         ...nextAgents.map((agent) => agent.id),
         ...remainingPendingAgents.map((agent) => agent.id),
@@ -1805,17 +1979,34 @@ export function App() {
           Object.entries(current).filter(([agentId]) => activeIds.has(agentId)),
         ),
       );
-      setDrawerPinnedByAgent((current) =>
+      setDrawerPinnedByProject((current) =>
         Object.fromEntries(
-          Object.entries(current).filter(([agentId]) => activeIds.has(agentId)),
+          Object.entries(current).filter(([projectId]) => activeProjectIds.has(projectId)),
         ),
       );
-      setPromptByAgent((current) =>
-        migrateAgentRecord(current, pendingReplacementById, draftIds),
-      );
+      setPromptByAgent((current) => {
+        const next = migrateAgentRecord(current, pendingReplacementById, draftIds);
+        livePromptByAgentRef.current = migrateAgentRecord(
+          livePromptByAgentRef.current,
+          pendingReplacementById,
+          draftIds,
+        );
+        return next;
+      });
       setAttachedImagesByAgent((current) =>
         migrateAgentRecord(current, pendingReplacementById, draftIds),
       );
+      // 发送中的条目必须保持 sending，直到对应 IPC promise 明确完成。
+      // 普通 state 推送（包括 sendPrompt 先发出的 running）不能把它重新开放为可撤回。
+      updateQueuedPrompts((current) =>
+        migrateQueuedPrompts(current, pendingReplacementById, draftIds),
+      );
+      for (const [oldAgentId] of pendingReplacementById) {
+        queueFlushByAgentRef.current.delete(oldAgentId);
+      }
+      for (const agentId of queueFlushByAgentRef.current) {
+        if (!draftIds.has(agentId)) queueFlushByAgentRef.current.delete(agentId);
+      }
       // 裁剪已关闭 agent 的消息缓存，释放 renderer 内存；重启占位需要参与 liveIds，避免旧进程移除时聊天记录闪空。
       setMessagesByAgent((current) =>
         migrateAgentRecord(current, pendingReplacementById, draftIds),
@@ -1862,14 +2053,29 @@ export function App() {
         setUpdateError(progress.error ?? t("update.downloadFailed"));
       }
     });
-    // 监听后端主动推送的 runtimeState 更新(如 agent_end 时重置 isStreaming),
-    // 确保前端 isAgentBusy 判断基于最新状态,排队 flush 能正常触发。
-    const offRuntimeState = api.agents.onRuntimeState((payload) =>
-      setRuntimeStateByAgent((current) => ({
-        ...current,
-        [payload.agentId]: payload.state,
-      })),
-    );
+    // 直接在原始 runtimeState 事件上识别 tool true→false，避免 React 把很快的
+    // tool_start/tool_end 批量成一次 render 后漏掉 steer 的投递窗口。
+    const offOpenInBrowser = api.app.onOpenInBrowser?.((url: string) => {
+      setDrawer("browser");
+      setDrawerCollapsed(false);
+      navigateTo(url);
+    });
+    const offRuntimeState = api.agents.onRuntimeState((payload) => {
+      const previous = runtimeStateByAgentRef.current[payload.agentId];
+      const nextState = applyAgentRuntimeState(payload.agentId, payload.state);
+      // tool start/end 会由主进程以轻量 patch 立即推送；与最近一次完整状态合并，
+      // 避免为了保证工具边沿顺序而短暂丢失模型、token 等运行信息。
+      if (
+        previous?.isExecutingTool &&
+        !nextState.isExecutingTool &&
+        (payload.state.toolStateSequence == null ||
+          previous.toolStateSequence == null ||
+          payload.state.toolStateSequence >= previous.toolStateSequence) &&
+        isAgentCurrentlyBusy(payload.agentId)
+      ) {
+        void flushQueuedSteerPrompts(payload.agentId);
+      }
+    });
     // 监听流式思考内容更新,用于在 agent 响应前展示推理过程
     const offThinking = api.agents.onThinking((payload: ThinkingUpdate) =>
       setStreamingThinking((current) => ({
@@ -1890,12 +2096,7 @@ export function App() {
       if (request.method === "set_editor_text") {
         const editorRequest = request as UiRequest;
         const text = editorRequest.text ?? "";
-        setPromptByAgent((current) => {
-          const next = { ...current };
-          if (text) next[request.agentId] = text;
-          else delete next[request.agentId];
-          return next;
-        });
+        setPromptForAgent(request.agentId, text);
         if (request.agentId === activeAgentIdRef.current) {
           setComposerCursor(text.length);
           pendingComposerCaretRef.current = text.length;
@@ -1961,6 +2162,7 @@ export function App() {
       offLog();
       offSettings();
       offUpdateProgress();
+      offOpenInBrowser?.();
       offRuntimeState();
       offThinking();
       offUiRequest();
@@ -2032,13 +2234,15 @@ export function App() {
   }, [projectIdsKey]);
 
   useEffect(() => {
+    // 当禁用版本检测时，不启动定时和启动后的自动检测
+    if (settings.disableUpdateCheck) return;
     const timer = window.setInterval(
       () => void checkAppUpdate("auto"),
       1000 * 60 * 60 * 6,
     );
     window.setTimeout(() => void checkAppUpdate("auto"), 5000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [settings.disableUpdateCheck]);
 
   useEffect(() => {
     if (activeAgentId && !isPendingAgentId(activeAgentId))
@@ -2058,7 +2262,7 @@ export function App() {
     const composer = composerRef.current;
     const box = composerBoxRef.current;
     if (!chatPane || !header || !composer || !box) {
-      const reservedTerminalHeight = terminalOpen ? activeTerminalHeight : 0;
+      const reservedTerminalHeight = terminalRowHeight;
       return Math.max(
         180,
         window.innerHeight -
@@ -2069,7 +2273,7 @@ export function App() {
       );
     }
 
-    const reservedTerminalHeight = terminalOpen ? activeTerminalHeight : 0;
+    const reservedTerminalHeight = terminalRowHeight;
     const composerChrome = Math.max(
       0,
       composer.offsetHeight - box.offsetHeight,
@@ -2121,6 +2325,14 @@ export function App() {
     );
     ensureComposerTailVisible();
   }
+
+  // 待发送轨道高度变化会改变 composer 的 chrome 高度；队列增删后重新 clamp，
+  // 保证大量卡片出现时输入框仍留在可视区域，撤回后也不会保留过高尺寸。
+  useLayoutEffect(() => {
+    const maxHeight = getComposerMaxHeight();
+    setComposerHeight((current) => Math.min(current, maxHeight));
+    setComposerAutoHeight((current) => Math.min(current, maxHeight));
+  }, [activeAgentId, activeQueuedPrompts.length]);
 
   function scrollToBottom() {
     const timeline = timelineRef.current;
@@ -2177,13 +2389,18 @@ export function App() {
       frame = requestAnimationFrame(() => {
         setComposerHeight((current) => clampComposerHeight(current));
         setComposerOffsetHeight(composerRef.current?.offsetHeight ?? 0);
+        setChatLayoutHeight((current) => {
+          const next = chatPaneRef.current?.clientHeight ?? window.innerHeight;
+          return current === next ? current : next;
+        });
       });
     };
 
     const box = composerBoxRef.current;
     const footer = composerRef.current;
+    const chatPane = chatPaneRef.current;
     const observer =
-      (box || footer) &&
+      (box || footer || chatPane) &&
       new ResizeObserver((entries) => {
         const entry = entries[0];
         if (!entry) return;
@@ -2191,6 +2408,7 @@ export function App() {
       });
     if (box) observer?.observe(box);
     if (footer) observer?.observe(footer);
+    if (chatPane) observer?.observe(chatPane);
 
     window.addEventListener("resize", scheduleSync);
     scheduleSync();
@@ -2269,6 +2487,21 @@ export function App() {
       }
     }
   }, [commandHistory]);
+
+  // 切换 Agent 时重置滚动状态，确保回到该 Agent 时自动滚到底部
+  useEffect(() => {
+    setAutoScroll(true);
+    autoScrollRef.current = true;
+    setShowScrollToBottom(false);
+    // 延迟一帧滚动：等 React 完成渲染、DOM 更新后再滚到底部
+    const frame = requestAnimationFrame(() => {
+      const timeline = timelineRef.current;
+      if (timeline) {
+        timeline.scrollTo({ top: timeline.scrollHeight, behavior: "instant" });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeAgentId]);
 
   // 监听用户滚动,判断是否需要显示"移动到最新"按钮
   useEffect(() => {
@@ -2388,22 +2621,7 @@ export function App() {
     }
   }, [displayAgents, activeAgentId, modifiedFiles, messagesByAgent]);
 
-  // 检测 goal_complete tool call → 标记 goal 完成
-  useEffect(() => {
-    if (goalStatusRef.current !== "active") return;
-    const goalAgentMessages = activeAgentId ? messagesByAgent[activeAgentId] : undefined;
-    if (!goalAgentMessages) return;
-    for (let i = goalAgentMessages.length - 1; i >= 0; i--) {
-      const message = goalAgentMessages[i];
-      if (message.role === "tool" && message.meta?.toolName === "goal_complete") {
-        goalStatusRef.current = "complete";
-        goalContinuationPendingRef.current = false;
-        setGoalStatus("complete");
-        setGoalCompletedAt(Date.now());
-        break;
-      }
-    }
-  }, [messagesByAgent, activeAgentId]);
+  // 已删除内置 goal 完成检测。
 
   // 监听用户发送消息的编辑事件,将消息填入输入框
   useEffect(() => {
@@ -2484,13 +2702,9 @@ export function App() {
             ? current
             : next,
         );
-        // 同时刷新 Git 工作区变更文件列表（对比 HEAD）
-        const changed = await api.git.changedFiles(activeProjectId);
-        if (!stopped) setGitChangedFiles(changed);
       } catch {
         if (!stopped) {
           setGitInfo({ current: null, branches: [] });
-          setGitChangedFiles([]);
         }
       }
     };
@@ -2674,6 +2888,7 @@ export function App() {
   }
 
   async function checkPiCliUpdateOnStartup() {
+    if (settings.disableUpdateCheck) return;
     try {
       const result = await api.pi.checkUpdate();
       setPiUpdateCheck(result);
@@ -2688,6 +2903,7 @@ export function App() {
   }
 
   async function checkPiCliUpdate() {
+    if (settings.disableUpdateCheck) return;
     setPiUpdateChecking(true);
     try {
       const result = await api.pi.checkUpdate();
@@ -2717,6 +2933,7 @@ export function App() {
 
   async function checkAppUpdate(source: "auto" | "manual" = "manual") {
     if (updateChecking) return;
+    if (source === "auto" && settings.disableUpdateCheck) return;
     setUpdateChecking(true);
     try {
       const next = await api.app.checkUpdate();
@@ -2821,17 +3038,6 @@ export function App() {
     if (!silent) showToast(t("app.filesRefreshed"), 1800);
   }
 
-  async function refreshGitChangedFiles(projectId = activeProjectId) {
-    if (!projectId) return;
-    try {
-      const next = await api.git.changedFiles(projectId);
-      setGitChangedFiles(next);
-    } catch {
-      // 非 Git 项目或 git 未安装，静默置空
-      setGitChangedFiles([]);
-    }
-  }
-
   function openFilePath(path: string) {
     // 绝对路径直接打开;相对路径按当前 agent cwd / 项目目录解析后交给系统默认应用。
     const resolvedPath = resolveFileLinkPath(path, activeAgent?.cwd ?? activeProject?.path);
@@ -2851,8 +3057,8 @@ export function App() {
   }
 
   function diffFilePath(path: string, originalContent?: string, content?: string) {
-    // 会话卡片传入的是工具执行前缓存的原始内容，提交后 Git 工作区可能已清空，
-    // 因此优先使用会话级快照；文件边栏不传该值时仍回退到当前会话累计修改记录。
+    // 工具 diff 展示：write = 空白→全量内容，edit = oldText→newText（变动区域）
+    // originalContent 不再存储 full file，使用工具参数中的变动文本作为对比基准。
     const modified = modifiedFiles.find((f) => f.path === path);
     const resolvedOriginal = originalContent ?? modified?.originalContent ?? "";
     const resolvedModified = content ?? modified?.content ?? undefined;
@@ -2860,6 +3066,75 @@ export function App() {
     setEditorMode("modal");
     setDrawer(null);
     openEditorTab(path, "diff", resolvedOriginal, resolvedModified);
+  }
+
+  async function openWorkspaceFileDiff(group: GitResourceGroupType, path: string) {
+    if (!activeProjectId) return;
+    const projectId = activeProjectId;
+    try {
+      const diff = await api.git.workspaceFileDiff(projectId, group, path);
+      if (activeProjectIdRef.current !== projectId) return;
+      if (!diff) {
+        showToast(t("git.workspaceDiffUnavailable"));
+        return;
+      }
+      const groupLabel = group === "index"
+        ? t("git.stagedChanges")
+        : group === "merge"
+          ? t("git.mergeChanges")
+          : t("git.changes");
+      // Git SCM 的工作区/暂存区快照均按只读 Diff 展示；内容仅在点击时读取，关闭弹窗即释放 tab 引用。
+      setEditorMode("modal");
+      openEditorTab(
+        diff.path,
+        "diff",
+        diff.originalContent,
+        diff.modifiedContent,
+        false,
+        `workspace:${projectId}:${group}:${diff.path}`,
+        `${diff.path.split(/[/\\]/).pop() ?? diff.path} (${groupLabel})`,
+        true,
+      );
+    } catch (error) {
+      if (activeProjectIdRef.current === projectId) {
+        showToast(error instanceof Error ? error.message : String(error));
+      }
+    }
+  }
+
+  async function openCommitFileDiff(commit: CommitEntry, file: GitChangedFile) {
+    if (!activeProjectId) return;
+    const projectId = activeProjectId;
+    try {
+      const diff = await api.git.commitFileDiff(
+        projectId,
+        commit.hash,
+        file.path,
+        file.originalPath,
+      );
+      // 用户等待 Git 读取期间可能已切换项目；旧项目结果不能覆盖当前编辑器上下文。
+      if (activeProjectIdRef.current !== projectId) return;
+      if (!diff) {
+        showToast(t("git.fileDiffUnavailable"));
+        return;
+      }
+      // 历史快照复用只读 Monaco Diff Viewer；保留 Git drawer 挂载以维持 pane、展开与滚动状态。
+      setEditorMode("modal");
+      openEditorTab(
+        diff.path,
+        "diff",
+        diff.originalContent,
+        diff.modifiedContent,
+        false,
+        `${commit.hash}:${diff.path}`,
+        `${diff.path.split(/[/\\]/).pop() ?? diff.path} (${commit.shortHash})`,
+        true,
+      );
+    } catch (error) {
+      if (activeProjectIdRef.current === projectId) {
+        showToast(error instanceof Error ? error.message : String(error));
+      }
+    }
   }
 
   async function refreshSessionHistory(projectId = sessionsProjectId) {
@@ -3440,7 +3715,6 @@ export function App() {
     if (existing) {
       setActiveProjectId(existing.projectId);
       setActiveAgentId(existing.id);
-      setDrawer(null);
       setAutoScroll(true);
       autoScrollRef.current = true;
       return existing;
@@ -3469,8 +3743,7 @@ export function App() {
       title,
       pendingAgentId: pendingTab.id,
     });
-    // 立即关闭抽屉,避免等待 agent 加载期间列表仍然显示
-    setDrawer(null);
+    // 创建 agent 时不改变抽屉状态，避免打断用户已有的文件浏览。
     try {
       const tab = await withTimeout<AgentTab>(
         api.agents.create({ projectId, sessionPath, title }),
@@ -3493,10 +3766,12 @@ export function App() {
           : current,
       );
       setPromptByAgent((current) => {
-        const draft = current[pendingTab.id];
+        const draft = livePromptByAgentRef.current[pendingTab.id] ?? current[pendingTab.id];
         if (draft == null) return current;
         const next = { ...current, [tab.id]: draft };
         delete next[pendingTab.id];
+        livePromptByAgentRef.current[tab.id] = draft;
+        delete livePromptByAgentRef.current[pendingTab.id];
         return next;
       });
       setAttachedImagesByAgent((current) => {
@@ -3509,6 +3784,9 @@ export function App() {
       // 全新创建的会话需要刷新历史列表以显示新文件；从已有历史会话打开的 agent 跳过刷新，避免文件 mtime 被不必要地读/写导致排序提前
       if (!sessionPath) {
         void refreshProjectSessions(projectId).catch(() => undefined);
+        showToast(t("app.agentCreated"), 2000);
+      } else {
+        showToast(t("app.sessionOpened"), 2000);
       }
       void refreshRuntimeState(tab.id);
       void api.app.rendererLog("info", "renderer", "Agent create completed", {
@@ -3544,11 +3822,23 @@ export function App() {
     }
   }
 
+  function applyAgentRuntimeState(agentId: string, incoming: AgentRuntimeState) {
+    const nextState = mergeAgentRuntimeState(
+      runtimeStateByAgentRef.current[agentId],
+      incoming,
+    );
+    runtimeStateByAgentRef.current = {
+      ...runtimeStateByAgentRef.current,
+      [agentId]: nextState,
+    };
+    setRuntimeStateByAgent(runtimeStateByAgentRef.current);
+    return nextState;
+  }
+
   async function refreshRuntimeState(agentId = activeAgentId) {
     if (!agentId || isPendingAgentId(agentId)) return;
     const state = await api.agents.runtimeState(agentId).catch(() => undefined);
-    if (state)
-      setRuntimeStateByAgent((current) => ({ ...current, [agentId]: state }));
+    if (state) applyAgentRuntimeState(agentId, state);
   }
 
   function getProjectFilter(projectId: string) {
@@ -3579,10 +3869,8 @@ export function App() {
   async function cycleModel() {
     if (!activeAgentId || isPendingAgentId(activeAgentId)) return;
     const state = await api.agents.cycleModel(activeAgentId);
-    setRuntimeStateByAgent((current) => ({
-      ...current,
-      [activeAgentId]: state,
-    }));
+    applyAgentRuntimeState(activeAgentId, state);
+    showToast(t("app.modelCycled", { name: state.modelName ?? state.modelId }), 2000);
   }
 
   /** 调整菜单位置避免溢出视口 */
@@ -3656,30 +3944,30 @@ export function App() {
       model.provider,
       model.id,
     );
-    setRuntimeStateByAgent((current) => ({
-      ...current,
-      [activeAgentId]: state,
-    }));
+    applyAgentRuntimeState(activeAgentId, state);
     setModelPickerOpen(false);
+    showToast(t("app.modelSwitched", { name: model.name ?? model.id }), 2000);
   }
 
   /** 切换模型的收藏状态，收藏的模型在选模型列表中置顶显示 */
   function toggleFavoriteModel(provider: string, modelId: string) {
     const key = `${provider}/${modelId}`;
     const current = settings.favoriteModels ?? [];
-    const next = current.includes(key)
-      ? current.filter((id) => id !== key)
-      : [...current, key];
+    const isNowFavorite = !current.includes(key);
+    const next = isNowFavorite
+      ? [...current, key]
+      : current.filter((id) => id !== key);
     void updateSettings({ favoriteModels: next });
+    showToast(
+      isNowFavorite ? t("app.modelFavorited", { name: modelId }) : t("app.modelUnfavorited", { name: modelId }),
+      1500,
+    );
   }
 
   async function cycleThinking() {
     if (!activeAgentId || isPendingAgentId(activeAgentId)) return;
     const state = await api.agents.cycleThinking(activeAgentId);
-    setRuntimeStateByAgent((current) => ({
-      ...current,
-      [activeAgentId]: state,
-    }));
+    applyAgentRuntimeState(activeAgentId, state);
   }
 
   async function selectThinking(level: string) {
@@ -3687,10 +3975,7 @@ export function App() {
     try {
       // 使用 setThinking 明确落到用户选择的档位,避免 cycle 模式需要反复点击才能到目标级别。
       const state = await api.agents.setThinking(activeAgentId, level);
-      setRuntimeStateByAgent((current) => ({
-        ...current,
-        [activeAgentId]: state,
-      }));
+      applyAgentRuntimeState(activeAgentId, state);
       setThinkingPickerOpen(false);
       // pi runtime 会按模型能力 clamp thinking level;对比实际状态,避免用户误以为已运行在不支持的档位。
       if (state.thinkingLevel && state.thinkingLevel !== level) {
@@ -3715,10 +4000,7 @@ export function App() {
     setCompacting(true);
     try {
       const state = await api.agents.compact(activeAgentId, compactPrompt);
-      setRuntimeStateByAgent((current) => ({
-        ...current,
-        [activeAgentId]: state,
-      }));
+      applyAgentRuntimeState(activeAgentId, state);
       showToast(t("app.compactDone"));
     } catch (e) {
       showToast(t("app.compactFailed"));
@@ -3735,14 +4017,225 @@ export function App() {
   async function abortAgent(agentId = activeAgentId) {
     if (!agentId || isPendingAgentId(agentId)) return;
     // 立即清除流式状态，让思考气泡和 loading 立刻消失，不等后端 RPC 返回
-    setRuntimeStateByAgent((current) => {
-      const prev = current[agentId];
-      if (!prev) return current;
-      return { ...current, [agentId]: { ...prev, isStreaming: false } };
-    });
+    const previous = runtimeStateByAgentRef.current[agentId];
+    if (previous) {
+      applyAgentRuntimeState(agentId, { ...previous, isStreaming: false });
+    }
     await api.agents.abort(agentId);
     // 不调用 refreshRuntimeState：AgentManager.abort() 会通过 emitState 推送正确状态，
     // 避免后端 get_state 返回过时的 isStreaming: true 覆盖前端立刻设的 false。
+  }
+
+  /**
+   * 队列 ref 是 drain 的同步数据源：React 批量 state 更新期间也能原子 claim，
+   * 避免 tool-end 与 idle 两条状态边沿把同一条消息提交两次。
+   */
+  function updateQueuedPrompts(
+    updater: (current: Record<string, QueuedPrompt[]>) => Record<string, QueuedPrompt[]>,
+  ) {
+    const next = updater(queuedPromptsRef.current);
+    queuedPromptsRef.current = next;
+    setQueuedPrompts(next);
+  }
+
+  function setAgentQueuedPrompts(
+    agentId: string,
+    updater: (current: QueuedPrompt[]) => QueuedPrompt[],
+  ) {
+    updateQueuedPrompts((current) => replaceAgentQueue(current, agentId, updater));
+  }
+
+  /** 入队；满员时返回 false，调用方应保留输入框内容并 toast。 */
+  function enqueueQueuedPrompt(agentId: string, queuedPrompt: QueuedPrompt): boolean {
+    const before = queuedPromptsRef.current[agentId]?.length ?? 0;
+    if (before >= QUEUED_PROMPT_LIMIT) return false;
+    updateQueuedPrompts((current) => enqueuePrompt(current, agentId, queuedPrompt));
+    return (queuedPromptsRef.current[agentId]?.length ?? 0) > before;
+  }
+
+  function appendUnknownQueuedPrompt(
+    agentId: string,
+    queuedPrompt: QueuedPrompt,
+    error?: string,
+  ) {
+    setAgentQueuedPrompts(agentId, (current) => {
+      if (current.length >= QUEUED_PROMPT_LIMIT) return current;
+      return [
+        ...current,
+        { ...queuedPrompt, status: "unknown", error },
+      ];
+    });
+  }
+
+  function retractQueuedPrompt(agentId: string, promptId: string) {
+    updateQueuedPrompts((current) => retractPrompt(current, agentId, promptId));
+  }
+
+  /** 丢弃：pending/failed 走 retract；unknown 仅移除提示（不重发）。sending 不可丢弃。 */
+  function discardQueuedPrompt(agentId: string, promptId: string) {
+    const live = queuedPromptsRef.current[agentId]?.find((item) => item.id === promptId);
+    if (!live || live.status === "sending") return;
+    if (live.status === "unknown") {
+      updateQueuedPrompts((current) =>
+        acknowledgeUnknownPrompt(current, agentId, promptId),
+      );
+      return;
+    }
+    retractQueuedPrompt(agentId, promptId);
+  }
+
+  function retractQueuedPromptForEdit(agentId: string, queuedPrompt: QueuedPrompt) {
+    const livePrompt = queuedPromptsRef.current[agentId]?.find(
+      (promptItem) => promptItem.id === queuedPrompt.id,
+    );
+    if (
+      !livePrompt ||
+      livePrompt.status === "sending" ||
+      livePrompt.status === "unknown"
+    ) return;
+    retractQueuedPrompt(agentId, livePrompt.id);
+    const currentDraft =
+      livePromptByAgentRef.current[agentId] ?? promptByAgent[agentId] ?? "";
+    const restoredPrompt = [livePrompt.displayText, currentDraft]
+      .filter((text) => text.trim())
+      .join("\n\n");
+    setPromptForAgent(agentId, restoredPrompt);
+    if (livePrompt.images?.length) {
+      setAttachedImagesForAgent(agentId, (current) => [
+        ...livePrompt.images!,
+        ...current,
+      ]);
+    }
+    setComposerAgentModeForAgent(agentId, livePrompt.agentMode);
+    if (activeAgentIdRef.current === agentId) {
+      setComposerCursor(restoredPrompt.length);
+      pendingComposerCaretRef.current = restoredPrompt.length;
+      requestAnimationFrame(() => {
+        const editor = composerTextareaRef.current;
+        editor?.focus();
+        if (editor) editor.scrollTop = editor.scrollHeight;
+      });
+    }
+  }
+
+  function isAgentCurrentlyBusy(agentId: string) {
+    const agent = displayAgentsRef.current.find((item) => item.id === agentId);
+    const runtimeState = runtimeStateByAgentRef.current[agentId];
+    return Boolean(
+      agent?.status === "starting" ||
+      agent?.status === "running" ||
+      runtimeState?.isStreaming ||
+      runtimeState?.isExecutingTool,
+    );
+  }
+
+  function canFlushQueuedPrompt(agentId: string) {
+    const agent = displayAgentsRef.current.find((item) => item.id === agentId);
+    return agent?.status === "idle" && !isAgentCurrentlyBusy(agentId);
+  }
+
+  async function flushQueuedSteerPrompts(agentId: string) {
+    if (queueFlushByAgentRef.current.has(agentId) || !isAgentCurrentlyBusy(agentId)) return;
+    queueFlushByAgentRef.current.add(agentId);
+    try {
+      // Keep one lock for the whole ordered batch. Releasing it between items would let a second
+      // tool-end/idle event claim the next snapshot while this loop is still advancing.
+      while (isAgentCurrentlyBusy(agentId)) {
+        const claimed = claimNextSteerPrompt(queuedPromptsRef.current, agentId);
+        if (!claimed.prompt) break;
+        const queuedPrompt = claimed.prompt;
+        queuedPromptsRef.current = claimed.queues;
+        setQueuedPrompts(claimed.queues);
+
+        try {
+          await dispatchPromptSnapshot(
+            agentId,
+            queuedPrompt.message,
+            queuedPrompt.images,
+            "steer",
+            queuedPrompt.agentMode,
+            queuedPrompt.templateDescription,
+          );
+          updateQueuedPrompts((current) =>
+            resolveClaimedPrompt(current, agentId, queuedPrompt.id, {
+              type: "accepted",
+            }),
+          );
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const deliveryUnknown = error instanceof PromptDeliveryUnknownError;
+          updateQueuedPrompts((current) =>
+            resolveClaimedPrompt(current, agentId, queuedPrompt.id, {
+              type: deliveryUnknown ? "unknown" : "failed",
+              error: errorMessage,
+            }),
+          );
+          showToast(
+            deliveryUnknown ? t("app.queuedUnknown") : errorMessage,
+            deliveryUnknown ? 6000 : 4000,
+          );
+          // Explicit failure and unknown delivery are ordering barriers. Later steer snapshots
+          // stay local until the user resolves this entry.
+          break;
+        }
+      }
+    } finally {
+      queueFlushByAgentRef.current.delete(agentId);
+      // agent_settled may arrive while the RPC is in flight. Once the ordered batch unlocks,
+      // continue through the normal serial idle drain rather than leaving the queue stranded.
+      if (canFlushQueuedPrompt(agentId)) {
+        void flushNextQueuedPrompt(agentId);
+      }
+    }
+  }
+
+  /** Paseo 同款串行策略：agent 每次空闲只发送队首，其余消息继续可撤回。 */
+  async function flushNextQueuedPrompt(agentId: string) {
+    if (queueFlushByAgentRef.current.has(agentId) || !canFlushQueuedPrompt(agentId)) return;
+    const claimed = claimIdleHead(queuedPromptsRef.current, agentId);
+    if (!claimed.prompt) return;
+    const queuedPrompt = claimed.prompt;
+
+    queuedPromptsRef.current = claimed.queues;
+    setQueuedPrompts(claimed.queues);
+    queueFlushByAgentRef.current.add(agentId);
+    try {
+      await dispatchPromptSnapshot(
+        agentId,
+        queuedPrompt.message,
+        queuedPrompt.images,
+        queuedPrompt.behavior === "direct" ? undefined : queuedPrompt.behavior,
+        queuedPrompt.agentMode,
+        queuedPrompt.templateDescription,
+      );
+      updateQueuedPrompts((current) =>
+        resolveClaimedPrompt(current, agentId, queuedPrompt.id, {
+          type: "accepted",
+        }),
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const deliveryUnknown = error instanceof PromptDeliveryUnknownError;
+      updateQueuedPrompts((current) =>
+        resolveClaimedPrompt(current, agentId, queuedPrompt.id, {
+          type: deliveryUnknown ? "unknown" : "failed",
+          error: errorMessage,
+        }),
+      );
+      showToast(
+        deliveryUnknown ? t("app.queuedUnknown") : errorMessage,
+        deliveryUnknown ? 6000 : 4000,
+      );
+    } finally {
+      queueFlushByAgentRef.current.delete(agentId);
+      // 扩展命令可能预检成功后仍保持 idle；等待主进程 running/idle 推送落地后再判断，
+      // 避免 IPC 事件尚未渲染时把多条普通 prompt 一次性并发发送。
+      window.setTimeout(() => {
+        if (canFlushQueuedPrompt(agentId)) {
+          void flushNextQueuedPrompt(agentId);
+        }
+      }, 150);
+    }
   }
 
   async function exportAgentHtml(agentId: string) {
@@ -3797,7 +4290,10 @@ export function App() {
           // 以光标为锚替换触发符..光标这一段,并在下一帧恢复光标到插入项之后。
           const el = event.currentTarget;
           const cursor = getCaretOffsetOf(el);
-          const result = applySuggestion(prompt, cursor, selected.value);
+          const liveComposerPrompt = activeAgentIdRef.current
+            ? (livePromptByAgentRef.current[activeAgentIdRef.current] ?? prompt)
+            : prompt;
+          const result = applySuggestion(liveComposerPrompt, cursor, selected.value);
           // RichInput 的受控同步会基于 value 重渲染并恢复光标,这里同步状态即可。
           setPrompt(result.text);
           setComposerCursor(result.cursor);
@@ -3813,7 +4309,10 @@ export function App() {
         event.preventDefault();
         const el = event.currentTarget;
         const cursor = getCaretOffsetOf(el);
-        const result = clearSuggestionTrigger(prompt, cursor);
+        const liveComposerPrompt = activeAgentIdRef.current
+          ? (livePromptByAgentRef.current[activeAgentIdRef.current] ?? prompt)
+          : prompt;
+        const result = clearSuggestionTrigger(liveComposerPrompt, cursor);
         setPrompt(result.text);
         setComposerCursor(result.cursor);
         pendingComposerCaretRef.current = result.cursor;
@@ -3875,7 +4374,10 @@ export function App() {
     if (event.key === "Escape") {
       const el = event.currentTarget;
       const cursor = getCaretOffsetOf(el);
-      const result = clearSuggestionTrigger(prompt, cursor);
+      const liveComposerPrompt = activeAgentIdRef.current
+        ? (livePromptByAgentRef.current[activeAgentIdRef.current] ?? prompt)
+        : prompt;
+      const result = clearSuggestionTrigger(liveComposerPrompt, cursor);
       setPrompt(result.text);
       setComposerCursor(result.cursor);
       setSuggestionsOpen(false);
@@ -3904,85 +4406,31 @@ export function App() {
     activeAgent &&
     (activeAgent.status === "running" || activeRuntimeState?.isStreaming),
   );
+  const hasComposerContent = Boolean(prompt.trim() || attachedImages.length > 0);
+  const keepBusyDraftControls = Boolean(
+    activeAgentId && hasComposerContent && busyDraftByAgent[activeAgentId],
+  );
+  const showBusySendControls = isAgentBusy || keepBusyDraftControls;
 
-  // 切换 agent 时不能沿用上一会话的 busy 边沿,否则旧 agent 结束可能误触发新 agent 的 goal 续接。
+  // 图片附件等非文本输入同样应锁定忙碌草稿控件；内容清空后再释放锁定。
   useEffect(() => {
-    prevIsAgentBusyRef.current = false;
-    goalContinuationPendingRef.current = false;
-    goalLastResponseSignatureRef.current = "";
-  }, [activeAgentId]);
+    if (!activeAgentId) return;
+    setBusyDraftByAgent((current) => {
+      if (!hasComposerContent) {
+        if (!current[activeAgentId]) return current;
+        const next = { ...current };
+        delete next[activeAgentId];
+        return next;
+      }
+      if (!isAgentBusy || current[activeAgentId]) return current;
+      return { ...current, [activeAgentId]: true };
+    });
+  }, [activeAgentId, hasComposerContent, isAgentBusy]);
 
-  // 自动续接：busy → idle 时，如果 goal 仍 active 则自动发送续接
+  // 已删除内置 goal 自动续接。
   useEffect(() => {
-    const busy = isAgentBusy;
-    const wasBusy = prevIsAgentBusyRef.current;
-    prevIsAgentBusyRef.current = busy;
-    if (wasBusy && !busy && goalStatusRef.current === "active" && activeAgentId) {
-      const text = goalTextRef.current;
-      // 直接扫描消息确认是否有 goal_complete（防范 effect 时序问题）
-      const goalMsgs = activeAgentId ? messagesByAgent[activeAgentId] : undefined;
-      if (goalMsgs?.some((m) => m.role === "tool" && m.meta?.toolName === "goal_complete")) {
-        goalStatusRef.current = "complete";
-        setGoalStatus("complete");
-        setGoalCompletedAt(Date.now());
-        return;
-      }
-
-      const latestResponseSignature =
-        goalMsgs
-          ?.filter((message) => message.role === "assistant" || message.role === "tool")
-          .slice(-1)
-          .map((message) => `${message.role}:${message.id}:${message.timestamp}`)[0] ?? "";
-
-      // 如果上一次自动续接后没有产生新的 assistant/tool 消息,说明只是状态抖动或发送失败重入,
-      // 继续 followUp 只会堆叠同一目标,因此暂停交给用户检查而不是无限循环。
-      if (
-        goalIterationRef.current > 0 &&
-        goalLastResponseSignatureRef.current === latestResponseSignature
-      ) {
-        goalStatusRef.current = "paused";
-        goalContinuationPendingRef.current = false;
-        setGoalStatus("paused");
-        showToast("🎯 Goal paused: no new agent response after auto continuation.", 4000);
-        return;
-      }
-
-      const iteration = goalIterationRef.current + 1;
-
-      // 达到最大续接次数时暂停,保留未完成状态,避免模型未调用 goal_complete 时无限自动续接。
-      if (iteration > GOAL_MAX_CONTINUATIONS) {
-        goalStatusRef.current = "paused";
-        goalContinuationPendingRef.current = false;
-        setGoalStatus("paused");
-        showToast(`🎯 Goal paused after ${GOAL_MAX_CONTINUATIONS} auto continuations.`, 4000);
-        return;
-      }
-
-      if (!goalContinuationPendingRef.current && text) {
-        goalIterationRef.current = iteration;
-        goalContinuationPendingRef.current = true;
-        goalLastResponseSignatureRef.current = latestResponseSignature;
-        const continuationMsg = `[goal 自动续接 #${iteration}]
-当前目标仍未完成，请继续工作:
-<goal_objective>
-${text}
-</goal_objective>
-
-继续完成该目标。不要停止在分析、计划、TODO 或部分修改上。彻底完成后调用 goal_complete。`;
-        api.agents.prompt({
-          agentId: activeAgentId,
-          message: continuationMsg,
-          description: "[goal 自动续接]",
-          streamingBehavior: "followUp",
-        }).catch(() => {
-          goalContinuationPendingRef.current = false;
-        });
-      }
-    }
-    if (busy) {
-      goalContinuationPendingRef.current = false;
-    }
-  }, [isAgentBusy, activeAgentId, api.agents, messagesByAgent]);
+    prevIsAgentBusyRef.current = isAgentBusy;
+  }, [isAgentBusy]);
 
   /** 解析消息中的 & 会话引用，将 chip 替换为引用上下文 */
   async function resolveSessionRefs(message: string): Promise<string> {
@@ -4012,6 +4460,7 @@ ${text}
           // 加载失败时 chip 会在下面 else 分支被移除
         }
       }
+
       if (msgs && msgs.length > 0) {
         const ctx = msgs.map((m) => `[${m.role === "user" ? "User" : "Assistant"}]: ${m.content}`).join("\n");
         const refBlock = `<referenced_session name="${sessionName}">\n${ctx}\n</referenced_session>`;
@@ -4023,24 +4472,63 @@ ${text}
     return resolved;
   }
 
+  // 处理所有 agent 的 idle 队列：隐藏会话也不会因切换选中项而卡住。
+  // tool-end 的 steer 投递直接在 onRuntimeState 原始事件上处理，避免批量 render 漏边沿。
+  useEffect(() => {
+    for (const agentId of Object.keys(queuedPrompts)) {
+      if (canFlushQueuedPrompt(agentId)) {
+        void flushNextQueuedPrompt(agentId);
+      }
+    }
+  }, [agents, runtimeStateByAgent, queuedPrompts]);
+
+  useEffect(() => {
+    return () => {
+      if (sendBehaviorMenuCloseTimerRef.current) {
+        clearTimeout(sendBehaviorMenuCloseTimerRef.current);
+        sendBehaviorMenuCloseTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  function keepSendBehaviorMenuOpen() {
+    if (sendBehaviorMenuCloseTimerRef.current) {
+      clearTimeout(sendBehaviorMenuCloseTimerRef.current);
+      sendBehaviorMenuCloseTimerRef.current = null;
+    }
+    setSendBehaviorMenuOpen(true);
+  }
+
+  function scheduleSendBehaviorMenuClose() {
+    if (sendBehaviorMenuCloseTimerRef.current) {
+      clearTimeout(sendBehaviorMenuCloseTimerRef.current);
+    }
+    sendBehaviorMenuCloseTimerRef.current = setTimeout(() => {
+      setSendBehaviorMenuOpen(false);
+      sendBehaviorMenuCloseTimerRef.current = null;
+    }, 160);
+  }
+
+  /** 解析消息中的 & 会话引用，将 chip 替换为引用上下文 */
   async function sendPrompt() {
+    const targetAgentId = activeAgentId;
+    const livePrompt = targetAgentId
+      ? (livePromptByAgentRef.current[targetAgentId] ?? prompt)
+      : prompt;
     if (
       isAgentStarting ||
-      !activeAgentId ||
-      (!prompt.trim() && attachedImages.length === 0)
+      !targetAgentId ||
+      (!livePrompt.trim() && attachedImages.length === 0)
     )
       return;
-    const message = prompt;
+    const message = livePrompt;
+    // 在任何 await 之前清掉实时草稿，防止双击/Enter 连发读取同一份消息。
+    delete livePromptByAgentRef.current[targetAgentId];
     const images = attachedImages.length > 0 ? attachedImages : undefined;
 
     const trimmedMessage = message.trim();
 
-    // ── /goal 命令处理 ──
-    if (trimmedMessage.startsWith("/goal")) {
-      handleGoalCommand(trimmedMessage);
-      setPrompt("");
-      return;
-    }
+    // 已删除内置 /goal 拦截，命令直接发给 agent。
 
     // ── /compact 命令处理 ──
     if (/^\/compact(?:\s|$)/.test(trimmedMessage)) {
@@ -4073,10 +4561,14 @@ ${text}
     // 不论之前是否滚动回看，发新消息都强制自动滚到底，确保能看到 agent 的回答。
     setAutoScroll(true);
     autoScrollRef.current = true;
-    const scrollTimeline = timelineRef.current;
-    if (scrollTimeline) scrollTimeline.scrollTo({ top: scrollTimeline.scrollHeight, behavior: "instant" });
     setPrompt("");
     setAttachedImages([]);
+    setBusyDraftByAgent((current) => {
+      if (!current[targetAgentId]) return current;
+      const next = { ...current };
+      delete next[targetAgentId];
+      return next;
+    });
     setSuggestionsOpen(false);
     setSendBehaviorMenuOpen(false);
     // 发送后强制重置自动高度：避免粘贴多行内容后 scrollHeight 残留导致 composer 无法恢复默认高度。
@@ -4085,34 +4577,85 @@ ${text}
     // 让输入框保持固定大小，超出部分滚动显示
     setComposerAutoHeight(COMPOSER_MIN_HEIGHT);
 
-    const resolvedMessage = await resolveSessionRefs(message);
-    const { message: expandedMessage, description: templateDescription } = expandPromptTemplates(resolvedMessage, promptTemplateList);
-    await submitPromptSnapshot(activeAgentId, expandedMessage, images, undefined, currentComposerAgentMode, templateDescription);
-    // 用 MutationObserver 监听消息列表 DOM 变化，新消息出现时滚动到底部
-    const scrollOnNewMessage = () => {
-      const timeline = timelineRef.current;
-      if (!timeline) return;
-      const list = timeline.querySelector(".message-list");
-      if (!list) return;
-      const observer = new MutationObserver(() => {
-        if (!autoScrollRef.current) return;
-        timeline.scrollTo({ top: timeline.scrollHeight, behavior: "instant" });
-      });
-      observer.observe(list, { childList: true, subtree: false });
-      // 8 秒后自动断开，避免累积
-      setTimeout(() => observer.disconnect(), 8000);
+
+    // 在发送前本地展开 prompt template 命令（/name → 完整内容），
+    // 避免依赖 pi 的展开导致用户附加文本丢失以及特殊符号干扰
+    // 同时提取模板的 description 作为元数据发给 pi agent，让其了解本次 prompt 意图
+    const { message: expandedMessage, description: templateDescription } = expandPromptTemplates(message, promptTemplateList);
+
+    const queuedPromptSnapshot: QueuedPrompt = {
+      id: crypto.randomUUID(),
+      message: expandedMessage,
+      displayText: message,
+      images,
+      behavior: "steer",
+      agentMode: currentComposerAgentMode,
+      templateDescription,
+      timestamp: Date.now(),
+
     };
-    requestAnimationFrame(scrollOnNewMessage);
+    if (isAgentBusy) {
+      if (!enqueueQueuedPrompt(targetAgentId, queuedPromptSnapshot)) {
+        setPromptForAgent(targetAgentId, (current) =>
+          [message, current].filter((text) => text.trim()).join("\n\n"),
+        );
+        if (images) {
+          setAttachedImagesForAgent(targetAgentId, (current) => [...images, ...current]);
+        }
+        showToast(t("app.queuedFull", { count: QUEUED_PROMPT_LIMIT }), 3000);
+      }
+      return;
+    }
+
+    const accepted = await submitPromptSnapshot(
+      targetAgentId,
+      expandedMessage,
+      images,
+      undefined,
+      currentComposerAgentMode,
+      templateDescription,
+    );
+    if (accepted === "unknown") {
+      appendUnknownQueuedPrompt(targetAgentId, {
+        ...queuedPromptSnapshot,
+        behavior: "direct",
+      });
+      return;
+    }
+    if (!accepted) {
+      livePromptByAgentRef.current[targetAgentId] = message;
+      setPromptForAgent(targetAgentId, (current) =>
+        [message, current].filter((text) => text.trim()).join("\n\n"),
+      );
+      if (images) {
+        setAttachedImagesForAgent(targetAgentId, (current) => [...images, ...current]);
+      }
+      return;
+    }
+    // 此时用户消息已经渲染到 DOM（状态在 await 前已提交），直接滚到底部确保用户看不到消息开头。
+    // 后续流式渲染靠 ResizeObserver（已有 useEffect）自动追踪容器高度变化持续滚动。
+    requestAnimationFrame(() => {
+      const el = timelineRef.current;
+      if (el && autoScrollRef.current) {
+        el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
+      }
+    });
   }
 
   async function sendPromptAsFollowUp() {
+    const targetAgentId = activeAgentId;
+    const livePrompt = targetAgentId
+      ? (livePromptByAgentRef.current[targetAgentId] ?? prompt)
+      : prompt;
     if (
       isAgentStarting ||
-      !activeAgentId ||
-      (!prompt.trim() && attachedImages.length === 0)
+      !targetAgentId ||
+      (!livePrompt.trim() && attachedImages.length === 0)
     )
       return;
-    const message = prompt;
+    const message = livePrompt;
+    // 在任何 await 之前清掉实时草稿，防止双击/Enter 连发读取同一份消息。
+    delete livePromptByAgentRef.current[targetAgentId];
     const images = attachedImages.length > 0 ? attachedImages : undefined;
     setAutoScroll(true);
     autoScrollRef.current = true;
@@ -4120,12 +4663,62 @@ ${text}
     if (scrollTimeline) scrollTimeline.scrollTo({ top: scrollTimeline.scrollHeight, behavior: "instant" });
     setPrompt("");
     setAttachedImages([]);
+    setBusyDraftByAgent((current) => {
+      if (!current[targetAgentId]) return current;
+      const next = { ...current };
+      delete next[targetAgentId];
+      return next;
+    });
     setSuggestionsOpen(false);
     setSendBehaviorMenuOpen(false);
     setComposerAutoHeight(COMPOSER_MIN_HEIGHT);
-    const resolvedMessage = await resolveSessionRefs(message);
-    await submitPromptSnapshot(activeAgentId, resolvedMessage, images, "followUp", currentComposerAgentMode);
-    // 用 MutationObserver 监听消息列表 DOM 变化，新消息出现时滚动到底部
+
+
+    const queuedPromptSnapshot: QueuedPrompt = {
+      id: crypto.randomUUID(),
+      message,
+      displayText: message,
+      images,
+      behavior: "followUp",
+      agentMode: currentComposerAgentMode,
+      timestamp: Date.now(),
+    };
+    if (isAgentBusy) {
+      if (!enqueueQueuedPrompt(targetAgentId, queuedPromptSnapshot)) {
+        setPromptForAgent(targetAgentId, (current) =>
+          [message, current].filter((text) => text.trim()).join("\n\n"),
+        );
+        if (images) {
+          setAttachedImagesForAgent(targetAgentId, (current) => [...images, ...current]);
+        }
+        showToast(t("app.queuedFull", { count: QUEUED_PROMPT_LIMIT }), 3000);
+      }
+      return;
+    }
+
+    const accepted = await submitPromptSnapshot(
+      targetAgentId,
+      message,
+      images,
+      "followUp",
+      currentComposerAgentMode,
+    );
+    if (accepted === "unknown") {
+      appendUnknownQueuedPrompt(targetAgentId, queuedPromptSnapshot);
+      return;
+    }
+    if (!accepted) {
+      livePromptByAgentRef.current[targetAgentId] = message;
+      setPromptForAgent(targetAgentId, (current) =>
+        [message, current].filter((text) => text.trim()).join("\n\n"),
+      );
+      if (images) {
+        setAttachedImagesForAgent(targetAgentId, (current) => [...images, ...current]);
+      }
+      return;
+    }
+    // 用 MutationObserver 监听消息列表 DOM 变化
+
     const scrollOnNewMessage = () => {
       const timeline = timelineRef.current;
       if (!timeline) return;
@@ -4141,104 +4734,40 @@ ${text}
     requestAnimationFrame(scrollOnNewMessage);
   }
 
-  /** 处理 /goal 命令 */
-  function handleGoalCommand(input: string) {
-    const trimmed = input.replace(/^\/goal/, "").trim();
-    const first = trimmed.split(/\s+/)[0];
+  // 已删除内置 /goal 与 startNewGoal 实现。
 
-    if (!trimmed || first === "status") {
-      if (goalStatusRef.current === "none") {
-        showToast(!activeAgentId ? t("goal.noGoal") : `Usage: /goal <objective>\nNo goal set.`, 3000);
-      } else {
-        const elapsed = goalStartedAtRef.current ? Math.floor((Date.now() - goalStartedAtRef.current) / 1000) : 0;
-        const elapsedStr = elapsed >= 60 ? `${Math.floor(elapsed / 60)}m${elapsed % 60}s` : `${elapsed}s`;
-        const tokenHint = goalIterationRef.current > 0 ? ` (续接 ${goalIterationRef.current} 次)` : "";
-        showToast(`🎯 ${goalStatusRef.current === "complete" ? "已完成" : "进行中"}: ${goalTextRef.current}\n耗时: ${elapsedStr} | 状态: ${goalStatusRef.current}${tokenHint}`, 4000);
-      }
-      return;
-    }
-
-    if (first === "clear" || first === "stop") {
-      goalStatusRef.current = "none";
-      goalTextRef.current = "";
-      goalStartedAtRef.current = 0;
-      goalIterationRef.current = 0;
-      goalContinuationPendingRef.current = false;
-      goalLastResponseSignatureRef.current = "";
-      setGoalStatus("none");
-      setGoalText("");
-      setGoalStartedAt(0);
-      setGoalCompletedAt(0);
-      showToast("🎯 Goal cleared", 2000);
-      return;
-    }
-
-    if (first === "pause") {
-      if (goalStatusRef.current !== "active") {
-        showToast("No active goal to pause.", 2000);
-        return;
-      }
-      goalStatusRef.current = "paused";
-      setGoalStatus("paused");
-      goalContinuationPendingRef.current = false;
-      showToast(`🎯 Goal paused: ${goalTextRef.current}`, 3000);
-      return;
-    }
-
-    if (first === "resume") {
-      if (goalStatusRef.current !== "paused") {
-        showToast("No paused goal to resume.", 2000);
-        return;
-      }
-      goalStatusRef.current = "active";
-      setGoalStatus("active");
-      goalContinuationPendingRef.current = false;
-      goalLastResponseSignatureRef.current = "";
-      void submitPromptSnapshot(activeAgentId!, `[goal 续接] 之前暂停的目标已恢复，请继续完成:
-<goal_objective>
-${goalTextRef.current}
-</goal_objective>`, undefined, "followUp");
-      showToast(`🎯 Goal resumed: ${goalTextRef.current}`, 3000);
-      return;
-    }
-
-    // /goal <objective> — 启动新目标
-    const objective = trimmed;
-    const existing = goalStatusRef.current;
-    if (existing === "active") {
-      // 使用自定义 ConfirmDialog 弹框确认替换当前目标
-      setConfirmDialog({
-        title: t("goal.replaceTitle"),
-        message: t("goal.replaceConfirm", { goal: goalTextRef.current ?? "" }),
-        danger: false,
-        confirmLabel: t("common.confirm"),
-        onConfirm: () => {
-          setConfirmDialog(null);
-          startNewGoal(objective);
-        },
+  async function dispatchPromptSnapshot(
+    agentId: string,
+    message: string,
+    images?: ImageContent[],
+    streamingBehavior?: "steer" | "followUp",
+    agentMode: ComposerAgentMode = "normal",
+    templateDescription?: string,
+  ) {
+    const submission = buildComposerPromptSubmission(message, agentMode);
+    let result: Awaited<ReturnType<typeof api.agents.prompt>>;
+    try {
+      result = await api.agents.prompt({
+        agentId,
+        message: submission.message,
+        images,
+        ...(submission.agentMessage ? { agentMessage: submission.agentMessage } : {}),
+        ...(templateDescription ? { description: templateDescription } : {}),
+        ...(streamingBehavior ? { streamingBehavior } : {}),
       });
-      return;
+    } catch (error) {
+      // IPC/fetch 在请求发出后断开时无法判断主进程是否已经提交给 pi；按未知处理，
+      // 绝不能把它降级为可重试失败，否则网络/IPC 抖动会造成重复发送。
+      throw new PromptDeliveryUnknownError(
+        error instanceof Error ? error.message : String(error),
+      );
     }
-    startNewGoal(objective);
-  }
-
-  /** 在确认后实际启动新目标（从 /goal 和 replace 确认回调共享） */
-  function startNewGoal(objective: string) {
-
-    goalTextRef.current = objective;
-    goalStatusRef.current = "active";
-    goalStartedAtRef.current = Date.now();
-    goalIterationRef.current = 0;
-    goalContinuationPendingRef.current = false;
-    goalLastResponseSignatureRef.current = "";
-    setGoalText(objective);
-    setGoalStatus("active");
-    setGoalStartedAt(Date.now());
-    setGoalCompletedAt(0);
-
-    // 将目标文本作为普通消息发送（不使用 followUp，避免显示错误的消息标签）
-    void submitPromptSnapshot(activeAgentId!, objective);
-    // 目标文本作为用户消息显示在对话中，goal 状态可通过 /goal status 查看
+    if (!result.accepted) {
+      if (result.delivery === "unknown") {
+        throw new PromptDeliveryUnknownError(result.error);
+      }
+      throw new Error(result.error);
+    }
   }
 
   async function submitPromptSnapshot(
@@ -4250,19 +4779,29 @@ ${goalTextRef.current}
     /** prompt 模板匹配到的 description，作为元数据发给 pi agent 标识意图 */
     templateDescription?: string,
   ) {
-    // 这里接收快照参数,让 composer 发送和历史消息"重新发送"共享同一条路径。
-    // Agent 忙碌时显式使用官方 streamingBehavior=steer:消息会进入 pi 的运行中队列,
-    // 而不是留在 desktop 本地等整个 agent idle 后再发送。
-    const behavior = streamingBehavior ?? (isAgentBusy ? "steer" : undefined);
-    const submission = buildComposerPromptSubmission(message, agentMode);
-    await api.agents.prompt({
-      agentId,
-      message: submission.message,
-      images,
-      ...(submission.agentMessage ? { agentMessage: submission.agentMessage } : {}),
-      ...(templateDescription ? { description: templateDescription } : {}),
-      ...(behavior ? { streamingBehavior: behavior } : {}),
-    });
+    // 非队列入口继续保持原有行为：当前选中 agent 忙碌时默认 steer。
+    // 客户端队列 drain 直接调用 dispatchPromptSnapshot，并显式指定其投递语义。
+    const behavior =
+      streamingBehavior ??
+      (agentId === activeAgentId && isAgentBusy ? "steer" : undefined);
+    try {
+      await dispatchPromptSnapshot(
+        agentId,
+        message,
+        images,
+        behavior,
+        agentMode,
+        templateDescription,
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof PromptDeliveryUnknownError) {
+        showToast(t("app.queuedUnknown"), 6000);
+        return "unknown" as const;
+      }
+      showToast(error instanceof Error ? error.message : String(error), 4000);
+      return false;
+    }
   }
 
   /** 重发防重复：通过 messageId 锁避免同一消息多次重发。
@@ -4679,6 +5218,7 @@ ${goalTextRef.current}
   }
 
   function openDrawer(panel: DrawerPanel) {
+    if (panel === "git" && !settings.enableGitManagement) return;
     if (drawerPinned && panel !== drawerPinnedPanel) return;
     if (panel === "sessions" && activeProjectId) {
       setSessionsProjectId(activeProjectId);
@@ -4687,18 +5227,18 @@ ${goalTextRef.current}
     // 打开文件面板时触发一次静默刷新，确保目录结构是最新的，避免上次打开时文件已有变更但未刷新。
     if (panel === "files" && activeProjectId) {
       void refreshFiles(activeProjectId, true);
-      void refreshGitChangedFiles(activeProjectId);
     }
     setDrawer((current) => {
       if (current === panel) return drawerPinned ? current : null;
-      // 持久化当前 Agent 的抽屉面板状态
-      if (activeAgentId) saveDrawerState(activeAgentId, panel, drawerPinned);
+      // 持久化当前项目的抽屉面板状态
+      if (activeProjectId) saveDrawerState(activeProjectId, panel, drawerPinned);
       return panel;
     });
   }
 
   function closeDrawer() {
     if (drawerPinned) return;
+    if (activeProjectId) saveDrawerState(activeProjectId, null, false);
     setDrawer(null);
   }
 
@@ -4708,16 +5248,16 @@ ${goalTextRef.current}
   }
 
   function toggleDrawerPinned() {
-    if (!activeAgentId || !drawer) return;
+    if (!activeProjectId || !drawer) return;
     const willPin = !drawerPinned;
-    setDrawerPinnedByAgent((current) => {
+    setDrawerPinnedByProject((current) => {
       const next = { ...current };
-      if (next[activeAgentId]) delete next[activeAgentId];
-      else next[activeAgentId] = drawer;
+      if (next[activeProjectId]) delete next[activeProjectId];
+      else next[activeProjectId] = drawer;
       return next;
     });
     // 持久化钉选状态
-    saveDrawerState(activeAgentId, drawer, willPin);
+    saveDrawerState(activeProjectId, drawer, willPin);
   }
 
   function toggleDirectory(path: string) {
@@ -4726,10 +5266,17 @@ ${goalTextRef.current}
       const next = new Set(current);
       if (next.has(path)) next.delete(path);
       else next.add(path);
-      // 持久化展开状态到 localStorage，切换回此会话时恢复
-      if (activeAgentId) saveExpandedDirs(activeAgentId, next);
+      // 持久化展开状态到 localStorage，切换回此项目时恢复
+      if (activeProjectId) saveExpandedDirs(activeProjectId, next);
       return next;
     });
+  }
+
+  function collapseAllDirectories() {
+    const collapsedDirs = new Set<string>();
+    setExpandedDirs(collapsedDirs);
+    // 全部收起同样持久化，避免用户切换项目后又恢复此前展开的目录。
+    if (activeProjectId) saveExpandedDirs(activeProjectId, collapsedDirs);
   }
 
   function startResize(target: "list" | "drawer", event: PointerEvent) {
@@ -5014,7 +5561,8 @@ ${goalTextRef.current}
                   onContextMenu={(event) => {
                     event.preventDefault();
                     setProjectMenu({
-                      ...adjustMenuPos(event.clientX, event.clientY, 200, 320),
+                      x: event.clientX,
+                      y: event.clientY,
                       project,
                     });
                   }}
@@ -5085,16 +5633,25 @@ ${goalTextRef.current}
                     )}
                   </div>
                   <span className="project-row-actions">
-                    <span
-                      className="project-action"
-                      title={t("app.projectRefresh")}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void refreshProjectTree(project);
-                      }}
-                    >
-                      <RefreshCw size={14} />
-                    </span>
+                    {projectIsChat && (
+                      <span
+                        className="project-action"
+                        title={t("app.chatProjectSettings")}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          // 打开系统目录选择器（默认定位当前聊天目录），选中后保存并重新加载该目录下的会话。
+                          void (async () => {
+                            const picked = await api.projects.chooseChatPath();
+                            if (!picked || picked === project.path) return;
+                            await api.projects.setChatPath(picked);
+                            await refreshProjectSessions(project.id);
+                            showToast(t("app.chatProjectPathUpdated"), 1800);
+                          })().catch((err) => console.error("Failed to change chat directory", err));
+                        }}
+                      >
+                        <FolderCog size={14} />
+                      </span>
+                    )}
                     <span
                       className="project-action"
                       title={t("app.projectNewAgent")}
@@ -5105,43 +5662,6 @@ ${goalTextRef.current}
                     >
                       <Plus size={14} />
                     </span>
-                    <span
-                      className="project-info"
-                      title={
-                        projectIsChat
-                          ? t("app.projectChatInfo")
-                          : t("app.projectInfo")
-                      }
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <Info size={14} />
-                    </span>
-                    {!projectIsChat && (
-                      <span
-                        className="project-action project-delete"
-                        title={t("app.projectRemoveTitle")}
-                        onClick={async (event) => {
-                          event.stopPropagation();
-                          try {
-                            const next = await api.projects.remove(project.id);
-                            setProjects(next);
-                            updateAfterProjectRemoved(project.id, next);
-                          } catch (e) {
-                            // 项目仍有运行中的 Agent 时禁止删除，主进程抛 PROJECT_HAS_RUNNING_AGENT
-                            if (String((e as Error)?.message ?? e).includes("PROJECT_HAS_RUNNING_AGENT")) {
-                              setConfirmDialog({
-                                title: t("app.projectRemoveBlockedTitle"),
-                                message: t("app.projectRemoveBlockedByAgent"),
-                                confirmLabel: t("app.projectRemoveBlockedAck"),
-                                onConfirm: () => setConfirmDialog(null),
-                              });
-                            }
-                          }
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </span>
-                    )}
                   </span>
                 </button>
                 {!isCollapsed && project.worktreeEnabled && (
@@ -5212,7 +5732,8 @@ ${goalTextRef.current}
                                 onContextMenu={(event) => {
                                   event.preventDefault();
                                   setSessionMenu({
-                                    ...adjustMenuPos(event.clientX, event.clientY, 200, 280),
+                                    x: event.clientX,
+                                    y: event.clientY,
                                     projectId: project.id,
                                     session: subagent,
                                   });
@@ -5255,7 +5776,8 @@ ${goalTextRef.current}
                               return next;
                             });
                             setAgentMenu({
-                              ...adjustMenuPos(event.clientX, event.clientY, 200, 260),
+                              x: event.clientX,
+                              y: event.clientY,
                               agent,
                             });
                           }}
@@ -5295,7 +5817,8 @@ ${goalTextRef.current}
                         onContextMenu={(event) => {
                           event.preventDefault();
                           setSessionMenu({
-                            ...adjustMenuPos(event.clientX, event.clientY, 200, 280),
+                            x: event.clientX,
+                            y: event.clientY,
                             projectId: project.id,
                             session,
                           });
@@ -5418,7 +5941,8 @@ ${goalTextRef.current}
                               e.preventDefault();
                               if (childProject) {
                                 setProjectMenu({
-                                  ...adjustMenuPos(e.clientX, e.clientY, 200, 320),
+                                  x: e.clientX,
+                                  y: e.clientY,
                                   project: childProject,
                                 });
                               }
@@ -5471,7 +5995,8 @@ ${goalTextRef.current}
                                   return next;
                                 });
                                 setAgentMenu({
-                                  ...adjustMenuPos(event.clientX, event.clientY, 200, 260),
+                                  x: event.clientX,
+                                  y: event.clientY,
                                   agent,
                                 });
                               }}
@@ -5606,12 +6131,25 @@ ${goalTextRef.current}
                     : activeProject?.name) ??
                   "PiDeck"}
               </strong>
+              {activeAgent?.compactionCount ? (
+                <span
+                  className="compaction-count-badge"
+                  title={t("app.compactionTooltip", { count: activeAgent.compactionCount })}
+                >
+                  {activeAgent.compactionCount}
+                </span>
+              ) : null}
             </div>
           </div>
           <div
             className={`chat-header-actions${activeAgent?.status === "starting" ? " loading" : ""}`}
           >
             <>
+              {/* {activeAgent?.id && (
+                <span className="chat-agent-id" title={activeAgent.id}>
+                  {activeAgent.id.slice(0, 8)}
+                </span>
+              )} */}
               <SessionStatus
                 state={activeRuntimeState}
                 duration={
@@ -5682,7 +6220,16 @@ ${goalTextRef.current}
                         <button
                           disabled={
                             activeAgent?.status === "starting" ||
-                            restartingAgentId === activeAgentId
+                            restartingAgentId === activeAgentId ||
+                            Boolean(
+                              activeAgentId &&
+                              (queueFlushByAgentRef.current.has(activeAgentId) ||
+                                (queuedPrompts[activeAgentId] ?? []).some(
+                                  (queuedPrompt) =>
+                                    queuedPrompt.status === "sending" ||
+                                    queuedPrompt.status === "unknown",
+                                )),
+                            )
                           }
                           onClick={async () => {
                             if (!activeAgentId || !activeAgent) return;
@@ -5718,6 +6265,7 @@ ${goalTextRef.current}
                                   : current,
                               );
                               void refreshRuntimeState(tab.id);
+                              showToast(t("app.agentRestarted"), 2000);
                             } catch (error) {
                               // 重启失败时保留原 Agent 卡片并标记错误，避免用户当前上下文被兜底切走。
                               pendingAgentsRef.current = pendingAgentsRef.current.map(
@@ -5898,7 +6446,7 @@ ${goalTextRef.current}
               {isAwaitingAssistant && (
                 <>
                   {settings.showThinking && activeThinking && (
-                    <section className="thinking-card streaming">
+                    <section className="thinking-card">
                       <div className="thinking-card-content">{activeThinking}</div>
                     </section>
                   )}
@@ -5922,10 +6470,10 @@ ${goalTextRef.current}
                   )}
                 </>
               )}
-              {/* 状态指示器：agent 运行或流式期间始终与回复并行展示 */}
+              {/* 响应指示器：agent 运行或流式期间显示三点动画 */}
               {activeAgent && !cancellingUi &&
                 (activeAgent.status === "running" || activeRuntimeState?.isStreaming) && (
-                <ThinkingIndicator
+                <RespondingIndicator
                   thinking={activeThinking}
                   showThinking={settings.showThinking}
                   isExecutingTool={activeRuntimeState?.isExecutingTool}
@@ -6037,6 +6585,103 @@ ${goalTextRef.current}
               </div>
             );
           })()}
+          {activeQueuedPrompts.length > 0 && activeAgentId && (
+            <div
+              ref={queuedTrackRef}
+              className="queued-track"
+              aria-label={t("app.queuedMessagesLabel")}
+            >
+              <div className="queued-panel">
+                <div className="queued-panel-header">
+                  <span>{t("app.queuedMessagesLabel")}</span>
+                  <span className="queued-panel-count">
+                    {activeQueuedPrompts.length}
+                  </span>
+                </div>
+                <div className="queued-list">
+                  {visibleQueuedPrompts.map((queuedPrompt, index) => {
+                    const status = queuedPrompt.status ?? "pending";
+                    const canRetractToInput = canRetractQueuedPromptToInput(status);
+                    const canDiscard = canDiscardQueuedPrompt(status);
+                    const previewText =
+                      queuedPrompt.displayText.trim() ||
+                      t("app.queuedImageMessage");
+                    const rowTitle = [
+                      previewText,
+                      queuedPrompt.error,
+                      status === "unknown" ? t("app.queuedUnknown") : "",
+                    ]
+                      .filter(Boolean)
+                      .join("\n");
+                    return (
+                      <div
+                        key={queuedPrompt.id}
+                        className={`queued-row ${status} queued-behavior-${queuedPrompt.behavior}`}
+                        title={rowTitle}
+                      >
+                        <span className="queued-index" aria-hidden="true">
+                          {index + 1}
+                        </span>
+                        <span className="queued-text">{previewText}</span>
+                        {queuedPrompt.images?.length ? (
+                          <span className="queued-meta">
+                            {t("app.queuedImageCount", {
+                              count: String(queuedPrompt.images.length),
+                            })}
+                          </span>
+                        ) : null}
+                        {status === "sending" ? (
+                          <span className="queued-meta">
+                            {t("app.queuedSending")}
+                          </span>
+                        ) : status === "failed" ? (
+                          <span className="queued-meta failed">
+                            {t("app.queuedFailed")}
+                          </span>
+                        ) : status === "unknown" ? (
+                          <span className="queued-meta unknown">
+                            {t("app.queuedUnknownShort")}
+                          </span>
+                        ) : null}
+                        <div className="queued-actions">
+                          <button
+                            type="button"
+                            className="queued-icon-btn"
+                            disabled={!canRetractToInput}
+                            title={t("app.retractToInput")}
+                            aria-label={t("app.retractToInput")}
+                            onClick={() =>
+                              retractQueuedPromptForEdit(
+                                activeAgentId,
+                                queuedPrompt,
+                              )
+                            }
+                          >
+                            <Pencil size={13} strokeWidth={2} />
+                          </button>
+                          <button
+                            type="button"
+                            className="queued-icon-btn danger"
+                            disabled={!canDiscard}
+                            title={t("app.retractDiscard")}
+                            aria-label={t("app.retractDiscard")}
+                            onClick={() =>
+                              discardQueuedPrompt(
+                                activeAgentId,
+                                queuedPrompt.id,
+                              )
+                            }
+                          >
+                            <X size={13} strokeWidth={2} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
           <div
             ref={composerBoxRef}
             className={`composer-box ${
@@ -6122,9 +6767,25 @@ ${goalTextRef.current}
                 setSuggestionsOpen(detectTrigger(prompt, composerCursor) !== null);
               }}
               onChange={(newValue, cursor) => {
-                setPrompt(newValue);
-                setComposerCursor(cursor);
-                setSuggestionsOpen(detectTrigger(newValue, cursor) !== null);
+                const targetAgentId = activeAgentIdRef.current;
+                if (targetAgentId) setPromptFromNativeInput(targetAgentId, newValue);
+                if (targetAgentId) {
+                  setBusyDraftByAgent((current) => {
+                    if (!newValue.trim()) {
+                      if (!current[targetAgentId]) return current;
+                      const next = { ...current };
+                      delete next[targetAgentId];
+                      return next;
+                    }
+                    if (!isAgentBusy || current[targetAgentId]) return current;
+                    return { ...current, [targetAgentId]: true };
+                  });
+                }
+                if (suggestionsOpen) setComposerCursor(cursor);
+                const nextSuggestionsOpen = detectTrigger(newValue, cursor) !== null;
+                if (nextSuggestionsOpen !== suggestionsOpen) {
+                  setSuggestionsOpen(nextSuggestionsOpen);
+                }
                 // 如果正在历史导航,检测到用户手动编辑内容则退出历史模式
                 if (historyNavigating) {
                   const currentHistoryCommand = commandHistory[historyIndex];
@@ -6136,7 +6797,7 @@ ${goalTextRef.current}
                 }
               }}
               onCursorChange={(cursor) => {
-                setComposerCursor(cursor);
+                if (suggestionsOpen) setComposerCursor(cursor);
               }}
               onKeyDown={handleComposerKeyDown}
               onPaste={handlePaste}
@@ -6163,7 +6824,10 @@ ${goalTextRef.current}
                 onClose={() => {
                   const el = composerTextareaRef.current;
                   const cursor = el ? getCaretOffsetOf(el) : composerCursor;
-                  const result = clearSuggestionTrigger(prompt, cursor);
+                  const liveComposerPrompt = activeAgentIdRef.current
+                    ? (livePromptByAgentRef.current[activeAgentIdRef.current] ?? prompt)
+                    : prompt;
+                  const result = clearSuggestionTrigger(liveComposerPrompt, cursor);
                   setPrompt(result.text);
                   setComposerCursor(result.cursor);
                   pendingComposerCaretRef.current = result.cursor;
@@ -6175,7 +6839,10 @@ ${goalTextRef.current}
                 onPick={(value) => {
                   const el = composerTextareaRef.current;
                   const cursor = el ? getCaretOffsetOf(el) : composerCursor;
-                  const result = applySuggestion(prompt, cursor, value);
+                  const liveComposerPrompt = activeAgentIdRef.current
+                    ? (livePromptByAgentRef.current[activeAgentIdRef.current] ?? prompt)
+                    : prompt;
+                  const result = applySuggestion(liveComposerPrompt, cursor, value);
                   setPrompt(result.text);
                   setComposerCursor(result.cursor);
                   pendingComposerCaretRef.current = result.cursor;
@@ -6191,13 +6858,49 @@ ${goalTextRef.current}
                 <span className="composer-mode-status">{composerStatusText}</span>
               )}
               <div className="footer-actions">
-                <div className="send-behavior-menu-wrap">
+                <div
+                  className="send-behavior-menu-wrap"
+                  onMouseLeave={scheduleSendBehaviorMenuClose}
+                >
+                  {showBusySendControls && hasComposerContent && (
+                      <div className="send-behavior-toggle">
+                        <button
+                          type="button"
+                          className="send-behavior-primary"
+                          title={t("app.sendSteerTitle")}
+                          aria-label={t("app.sendSteerTitle")}
+                          onClick={sendPrompt}
+                        >
+                          <ArrowUp size={15} strokeWidth={2.4} />
+                        </button>
+                        <button
+                          type="button"
+                          className="send-behavior-chevron"
+                          title={t("app.sendBehaviorTitle")}
+                          aria-label={t("app.sendBehaviorTitle")}
+                          aria-haspopup="menu"
+                          aria-expanded={sendBehaviorMenuOpen}
+                          onMouseEnter={keepSendBehaviorMenuOpen}
+                          onFocus={keepSendBehaviorMenuOpen}
+                          onClick={() => setSendBehaviorMenuOpen((open) => !open)}
+                        >
+                          <ChevronDown size={12} strokeWidth={2.2} />
+                        </button>
+                      </div>
+                    )}
                   {isAgentBusy ? (
-                    <button className="btn-circle stop" onClick={() => abortAgent()} title={t("app.stop")}>
+                    <button
+                      type="button"
+                      className="btn-circle stop"
+                      onClick={() => abortAgent()}
+                      title={t("app.stop")}
+                      aria-label={t("app.stop")}
+                    >
                       <Square size={18} strokeWidth={0} fill="currentColor" />
                     </button>
-                  ) : (
+                  ) : !keepBusyDraftControls ? (
                     <button
+                      type="button"
                       disabled={
                         isAgentStarting ||
                         !activeAgentId ||
@@ -6206,29 +6909,25 @@ ${goalTextRef.current}
                       className="btn-circle send"
                       onClick={sendPrompt}
                       title={t("app.send")}
+                      aria-label={t("app.send")}
                     >
                       <ArrowUp size={18} strokeWidth={2.5} />
                     </button>
-                  )}
-                  {isAgentBusy &&
-                    (prompt.trim() || attachedImages.length > 0) && (
-                      <button
-                        className="send-behavior-toggle"
-                        title={t("app.sendBehaviorTitle")}
-                        onClick={() => setSendBehaviorMenuOpen((open) => !open)}
-                      >
-                        <ChevronDown size={14} />
+                  ) : null}
+                  {sendBehaviorMenuOpen && showBusySendControls && hasComposerContent && (
+                    <div
+                      className="send-behavior-menu"
+                      role="menu"
+                      onMouseEnter={keepSendBehaviorMenuOpen}
+                      onMouseLeave={scheduleSendBehaviorMenuClose}
+                    >
+                      <button className="send-behavior-option steer" type="button" role="menuitem" onClick={sendPrompt}>
+                        <span className="send-behavior-option-dot" aria-hidden="true" />
+                        <span>{t("app.sendSteerTitle")}</span>
                       </button>
-                    )}
-                  {sendBehaviorMenuOpen && (
-                    <div className="send-behavior-menu">
-                      <button onClick={sendPrompt}>
-                        <strong>{t("app.sendSteerTitle")}</strong>
-                        <span>{t("app.sendSteerDesc")}</span>
-                      </button>
-                      <button onClick={sendPromptAsFollowUp}>
-                        <strong>{t("app.sendFollowUpTitle")}</strong>
-                        <span>{t("app.sendFollowUpDesc")}</span>
+                      <button className="send-behavior-option follow-up" type="button" role="menuitem" onClick={sendPromptAsFollowUp}>
+                        <span className="send-behavior-option-dot" aria-hidden="true" />
+                        <span>{t("app.sendFollowUpTitle")}</span>
                       </button>
                     </div>
                   )}
@@ -6246,17 +6945,26 @@ ${goalTextRef.current}
             open={terminalDockVisible}
             closing={terminalDockClosing}
             collapsed={terminalCollapsed}
-            height={terminalHeightByAgent[activeAgentId] ?? 220}
+            height={terminalRowHeight}
             terminal={api.terminal}
             onCollapsedChange={(collapsed) =>
               setTerminalCollapsedForAgent(activeAgentId, collapsed)
             }
-            onHeightChange={(height) =>
+            onHeightChange={(height) => {
+              const maxHeight = Math.max(
+                120,
+                chatLayoutHeight -
+                  (chatHeaderRef.current?.offsetHeight ?? 78) -
+                  COMPOSER_MIN_TIMELINE_HEIGHT -
+                  COMPOSER_MIN_HEIGHT -
+                  28 -
+                  queuedChromeBudget,
+              );
               setTerminalHeightByAgent((current) => ({
                 ...current,
-                [activeAgentId]: height,
-              }))
-            }
+                [activeAgentId]: Math.min(height, maxHeight),
+              }));
+            }}
             onClose={() => setTerminalOpenForAgent(activeAgentId, false)}
           />
         )}
@@ -6286,6 +6994,7 @@ ${goalTextRef.current}
               label: t("app.files"),
               onClick: () => {
                 if (drawer === "files" && !drawerCollapsed) {
+                  if (activeProjectId) saveDrawerState(activeProjectId, null, false);
                   setDrawer(null);
                 } else {
                   openDrawer("files");
@@ -6294,6 +7003,20 @@ ${goalTextRef.current}
               },
               icon: <FolderOpen size={17} />,
             }}
+            gitAction={settings.enableGitManagement && activeProjectId && !isChatProject(activeProject) ? {
+              active: drawer === "git",
+              label: t("drawer.sourceControl"),
+              onClick: () => {
+                if (drawer === "git" && !drawerCollapsed) {
+                  if (activeProjectId) saveDrawerState(activeProjectId, null, false);
+                  setDrawer(null);
+                } else {
+                  openDrawer("git");
+                  setDrawerCollapsed(false);
+                }
+              },
+              icon: <GitGraph size={17} />,
+            } : undefined}
             editorsAction={{
               active: editorsOpen,
               label: t("app.openWithEditor"),
@@ -6318,6 +7041,7 @@ ${goalTextRef.current}
               label: t("app.browser"),
               onClick: () => {
                 if (drawer === "browser" && !drawerCollapsed) {
+                  if (activeProjectId) saveDrawerState(activeProjectId, null, false);
                   setDrawer(null);
                 } else {
                   setDrawer("browser");
@@ -6351,7 +7075,7 @@ ${goalTextRef.current}
               displayMode="drawer"
               filePath={activeTab.filePath}
               mode={activeTab.mode}
-              onToggleMode={toggleEditorMode}
+              onToggleMode={activeTab.preserveDrawer ? undefined : toggleEditorMode}
               originalContent={activeTab.mode === "diff" ? activeTab.originalContent : undefined}
               modifiedContent={activeTab.modifiedContent}
               tabs={editorTabs}
@@ -6361,7 +7085,7 @@ ${goalTextRef.current}
               onClose={() => { setActiveTabId(null); setEditorTabs([]); setDrawer(null); }}
               readContent={readEditorFileContent}
               readOriginalContent={readEditorOriginalContent}
-              saveContent={saveEditorFileContent}
+              saveContent={activeTab.allowSave ? saveEditorFileContent : undefined}
               theme={document.documentElement.dataset.theme === "dark" ? "dark" : "light"}
               maxFileSizeMB={settings.maxEditorFileSizeMB}
             />
@@ -6373,7 +7097,35 @@ ${goalTextRef.current}
               onToggleFullscreen={() => setBrowserFullscreen(true)}
             />
           </div>
-        ) : drawerContentPanel && drawerContentPanel !== "browser" && drawerContentPanel !== "editor" ? (
+        ) : settings.enableGitManagement && drawerContentPanel === "git" && !drawerCollapsed && activeProjectId ? (
+          <div className="drawer-content-frame">
+            <div className="drawer-header">
+              <strong>{t("drawer.sourceControl")}</strong>
+              <div className="drawer-header-actions">
+                <button onClick={collapseDrawer} title={t("drawer.collapsePanel")}>
+                  <Minimize2 size={15} />
+                </button>
+                <button onClick={closeDrawer} title={t("common.close")}>
+                  <X size={15} />
+                </button>
+              </div>
+            </div>
+            <GitPanel
+              projectId={activeProjectId}
+              commitLog={api.git.commitLog}
+              commitDetail={api.git.commitDetail}
+              onOpenCommitFileDiff={openCommitFileDiff}
+              onOpenWorkspaceFileDiff={openWorkspaceFileDiff}
+              branchCompare={api.git.branchCompare}
+              getStatus={api.git.status}
+              stageFiles={api.git.stage}
+              unstageFiles={api.git.unstage}
+              commit={api.git.commit}
+              branches={gitInfo.branches}
+              currentBranch={gitInfo.current}
+            />
+          </div>
+        ) : drawerContentPanel && drawerContentPanel !== "browser" && drawerContentPanel !== "editor" && drawerContentPanel !== "git" ? (
           <LazyWrapper
             className="drawer-content-frame"
             enabled={true}
@@ -6400,9 +7152,9 @@ ${goalTextRef.current}
                 (s) => !s.parentSessionPath && (sessionSourceFilter[sessionsProjectId]!)!.has(s.source ?? "pi"),
               ).concat(sessions.filter(s => s.parentSessionPath)) : sessions}
               sessionsLoading={sessionHistoryLoading}
-              gitChangedFiles={gitChangedFiles}
               expandedDirs={expandedDirs}
               onToggleDirectory={toggleDirectory}
+              onCollapseAllDirectories={collapseAllDirectories}
               pinned={drawerPinned}
               onTogglePin={toggleDrawerPinned}
               onCollapse={collapseDrawer}
@@ -6410,7 +7162,6 @@ ${goalTextRef.current}
               onFileContextMenu={(node, x, y) => setFileMenu({ node, x, y })}
               onRefreshFiles={() => {
                 refreshFiles(activeProjectId);
-                refreshGitChangedFiles(activeProjectId);
               }}
               onOpenFolder={() => {
                 const p = projects.find((p) => p.id === activeProjectId);
@@ -6438,7 +7189,6 @@ ${goalTextRef.current}
               }
               onExportSession={exportHistorySession}
               onDeleteSession={deleteHistorySession}
-              onDiffFile={diffFilePath}
               onViewFile={viewFilePath}
               onOpenFile={openFilePath}
             />
@@ -6476,6 +7226,7 @@ ${goalTextRef.current}
           onCopyPath={() => {
             void navigator.clipboard.writeText(fileMenu.node.path);
             setFileMenu(null);
+            showToast(t("app.pathCopied"), 1200);
           }}
           onRename={() => {
             const node = fileMenu.node;
@@ -6498,6 +7249,7 @@ ${goalTextRef.current}
                 try {
                   await api.files.delete(node.path, true);
                   void refreshFiles();
+                  showToast(t("app.fileDeleted"), 2000);
                 } catch (e) {
                   console.error("[File] 删除失败:", e);
                 }
@@ -6580,6 +7332,11 @@ ${goalTextRef.current}
               void refreshProjectSessions(pid);
             }
           }}
+          onCopyProjectPath={() => {
+            void navigator.clipboard.writeText(projectMenu.project.path);
+            showToast(t("common.copied"));
+            setProjectMenu(null);
+          }}
           onFilterSessions={() => {
             setSessionFilterOpen({
               ...adjustMenuPos(projectMenu.x, projectMenu.y + 20, 180, 250),
@@ -6609,6 +7366,10 @@ ${goalTextRef.current}
                 console.error('Toggle worktree failed', e);
               }
             }
+          }}
+          onRefreshProject={() => {
+            void refreshProjectTree(projectMenu.project);
+            setProjectMenu(null);
           }}
           onRemoveProject={async () => {
             const project = projectMenu.project;
@@ -6661,6 +7422,14 @@ ${goalTextRef.current}
             void window.piDesktop.rpcLogs.openFile(agentMenu.agent.id);
             setAgentMenu(null);
           }}
+          onCopySessionFilePath={() => {
+            const path = agentMenu.agent.sessionPath;
+            if (path) {
+              void navigator.clipboard.writeText(path);
+              showToast(t("common.copied"));
+            }
+            setAgentMenu(null);
+          }}
           onOpenSessionFile={() => {
             const path = agentMenu.agent.sessionPath;
             if (path) void api.files.open(path);
@@ -6690,6 +7459,11 @@ ${goalTextRef.current}
           }}
           onCopySession={() => {
             void copySidebarSession(sessionMenu.projectId, sessionMenu.session);
+          }}
+          onCopySessionFilePath={() => {
+            void navigator.clipboard.writeText(sessionMenu.session.filePath);
+            showToast(t("common.copied"));
+            setSessionMenu(null);
           }}
           // 历史会话的 RPC 日志在 agent 启动后再通过右键菜单开启记录
           onOpenSessionFile={() => {
@@ -7034,7 +7808,7 @@ ${goalTextRef.current}
           displayMode="modal"
           filePath={activeTab.filePath}
           mode={activeTab.mode}
-          onToggleMode={toggleEditorMode}
+          onToggleMode={activeTab.preserveDrawer ? undefined : toggleEditorMode}
           originalContent={activeTab.mode === "diff" ? activeTab.originalContent : undefined}
           modifiedContent={activeTab.modifiedContent}
           tabs={editorTabs}
@@ -7044,7 +7818,7 @@ ${goalTextRef.current}
           onClose={() => { setActiveTabId(null); setEditorTabs([]); }}
           readContent={readEditorFileContent}
           readOriginalContent={readEditorOriginalContent}
-          saveContent={saveEditorFileContent}
+          saveContent={activeTab.allowSave ? saveEditorFileContent : undefined}
           theme={document.documentElement.dataset.theme === "dark" ? "dark" : "light"}
           maxFileSizeMB={settings.maxEditorFileSizeMB}
         />
@@ -7167,6 +7941,7 @@ ${goalTextRef.current}
                       void api.files.rename(path, newName).then(() => {
                         void refreshFiles();
                         setRenamingFile(null);
+                        showToast(t("app.fileRenamed"), 2000);
                       }).catch((err) => console.error("[File] 重命名失败:", err));
                     } else {
                       setRenamingFile(null);
@@ -7189,6 +7964,7 @@ ${goalTextRef.current}
                     void api.files.rename(path, newName).then(() => {
                       void refreshFiles();
                       setRenamingFile(null);
+                      showToast(t("app.fileRenamed"), 2000);
                     }).catch((err) => console.error("[File] 重命名失败:", err));
                   } else {
                     setRenamingFile(null);

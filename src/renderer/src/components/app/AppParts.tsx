@@ -5,6 +5,7 @@ import {
 	useCallback,
 	useEffect,
 	useId,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -38,6 +39,10 @@ import {
 	matches,
 	displayPath,
 	flattenFiles,
+	parseToolArgs,
+	getToolFilePath,
+	countTextLines,
+	getToolEditDiff,
 } from "./AppUtils";
 
 // Mermaid 库体积数 MB，仅在真正出现 mermaid 代码块时才动态加载，
@@ -65,7 +70,6 @@ import {
 	Globe2,
 	MessageCircle,
 	Network,
-	Pencil,
 	PawPrint,
 	Pin,
 	Plus,
@@ -78,6 +82,12 @@ import {
 	X,
 	Star,
 	FolderOpen,
+	Copy,
+	Trash,
+	Share,
+	SquarePen,
+	Send,
+	UserPen,
 } from "lucide-react";
 import { getFileIconSeti, getFileIconColor, getFileTypeLabel } from "../../fileIcons";
 import { t, type TranslationKey } from "../../i18n";
@@ -117,7 +127,7 @@ import { parseRichInputChips, type RichInputChip } from "./RichInput";
 /** 复用 petdex 标准网格规格，在主设置面板里为宠物选择器渲染单格动画预览 */
 import { GRID_COLS, CELL_W, CELL_H, MODE_ROW, MODE_FRAMES } from "../../pet/PetSpriteSheet";
 
-export type DrawerPanel = "files" | "sessions" | "browser" | "editor";
+export type DrawerPanel = "files" | "sessions" | "browser" | "editor" | "git";
 
 export type SessionModifiedFile = {
 	path: string;
@@ -1437,16 +1447,32 @@ export function EmptyState(props: { hasProject: boolean; onCreate: () => void })
 async function copyElementAsPng(element: HTMLElement) {
 	// 截图复制依赖浏览器 ClipboardItem PNG 支持；失败时由调用方提示/回退，不影响文本复制。
 	// 使用 toBlob 而非 toPng+fetch 避免 CSP 拒绝连接 data: URL。
-	const blob = await toBlob(element, {
-		cacheBust: true,
-		pixelRatio: Math.min(2, window.devicePixelRatio || 1),
-		backgroundColor: getComputedStyle(document.documentElement).getPropertyValue("--color-bg-panel") || undefined,
-		filter: (node) =>
-			!(node instanceof HTMLElement) ||
-			(!node.classList.contains("turn-row-actions") &&
-				!node.classList.contains("user-turn-actions") &&
-				!node.classList.contains("copy-menu-popover")),
-	});
+	// 克隆节点 + 内边距 + 临时注入 body 的方式与分享为图片（handleMultiSelectCopy）保持一致，
+	// 避免直接截图导致图片紧贴内容边缘、缺少留白。
+	const clone = element.cloneNode(true) as HTMLElement;
+	clone.style.padding = "24px";
+	clone.style.background =
+		getComputedStyle(document.documentElement).getPropertyValue("--color-bg-panel") || "#fff";
+	// 将 clone 插入到原元素旁边，确保 CSS 样式正确继承（父层选择器、rem 等）
+	if (element.parentElement) {
+		element.parentElement.insertBefore(clone, element.nextSibling);
+	}
+	let blob: Blob | null = null;
+	try {
+		blob = await toBlob(clone, {
+			cacheBust: true,
+			pixelRatio: Math.min(2, window.devicePixelRatio || 1),
+			backgroundColor:
+				getComputedStyle(document.documentElement).getPropertyValue("--color-bg-panel") || undefined,
+			filter: (node) =>
+				!(node instanceof HTMLElement) ||
+				(!node.classList.contains("turn-row-actions") &&
+					!node.classList.contains("user-turn-actions") &&
+					!node.classList.contains("copy-menu-popover")),
+		});
+	} finally {
+		clone.remove();
+	}
 	if (!blob) return;
 	await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
 }
@@ -1484,9 +1510,11 @@ function CopyMenu(props: {
 			if (kind === "image" && props.targetRef.current) await copyElementAsPng(props.targetRef.current);
 			setCopied(kind);
 			setOpen(false);
+			showNotice(t("copy.success"), 1200);
 			window.setTimeout(() => setCopied(null), 1800);
 		} catch {
 			setCopied(null);
+			showNotice(t("copy.failed"), 2000);
 		}
 	};
 	const toggleOpen = () => {
@@ -1513,8 +1541,9 @@ function CopyMenu(props: {
 				type="button"
 				onClick={toggleOpen}
 				aria-expanded={open}
+				title={t("common.copy")}
 			>
-				{copied ? `${t("common.copy")} ✓` : t("common.copy")}
+				{copied ? <Check size={14} /> : <Copy size={14} />}
 			</button>
 			{open && (
 				<div className="copy-menu-popover" style={menuStyle}>
@@ -1541,7 +1570,7 @@ function toolIcon(toolName: string): ReactNode {
 	const key = toolName.toLowerCase();
 	if (key.includes("read") || key.includes("view")) return <FileText size={14} />;
 	if (key.includes("write") || key.includes("edit") || key.includes("apply_patch") || key.includes("patch"))
-		return <Pencil size={14} />;
+		return <SquarePen size={14} />;
 	if (key.includes("bash") || key.includes("shell") || key.includes("terminal")) return <Terminal size={14} />;
 	if (key.includes("grep") || key.includes("search")) return <Search size={14} />;
 	if (key.includes("glob") || key.includes("list") || key.includes("ls")) return <Folder size={14} />;
@@ -1551,28 +1580,7 @@ function toolIcon(toolName: string): ReactNode {
 	return <Wrench size={14} />;
 }
 
-function parseToolArgs(value: unknown): Record<string, unknown> | undefined {
-	if (value && typeof value === "object" && !Array.isArray(value)) {
-		return value as Record<string, unknown>;
-	}
-	if (typeof value !== "string" || !value.trim()) return undefined;
-	try {
-		let parsed = JSON.parse(value) as unknown;
-		// 兼容已二次 JSON.stringify 的异常数据（meta 中存储的 args 字符串被 safeJson 再包一层）
-		if (typeof parsed === "string" && parsed.trim()) {
-			try {
-				parsed = JSON.parse(parsed) as unknown;
-			} catch {
-				return undefined;
-			}
-		}
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-			? parsed as Record<string, unknown>
-			: undefined;
-	} catch {
-		return undefined;
-	}
-}
+
 
 /** 从工具消息 meta 中提取副标题（文件路径或命令），让 trigger 行能体现工具作用对象。
  *  pi 的工具参数可能是对象，也可能已被主进程截断/序列化为 JSON 字符串；两种格式都要兼容，否则 bash 命令摘要会丢失。 */
@@ -1617,48 +1625,7 @@ function getToolSubtitle(message: ChatMessage): string {
 }
 
 function getToolArgFilePath(args: Record<string, unknown> | undefined): string | undefined {
-	if (!args) return undefined;
-	for (const key of ["filePath", "file_path", "path", "targetPath", "target_path", "outputPath", "output_path", "file", "fileName", "filename"]) {
-		const value = args[key];
-		if (typeof value === "string" && value) return value;
-	}
-	return undefined;
-}
-
-function countTextLines(value: string) {
-	return value ? value.split(/\r\n|\r|\n/).length : 0;
-}
-
-function applyTextReplacement(content: string, oldText: unknown, newText: unknown): string | undefined {
-	if (typeof oldText !== "string" || typeof newText !== "string") return undefined;
-	const index = content.indexOf(oldText);
-	if (index < 0) return undefined;
-	return content.slice(0, index) + newText + content.slice(index + oldText.length);
-}
-
-function buildEditedContentFromArgs(args: Record<string, unknown>, originalContent: string): string | undefined {
-	let next = originalContent;
-	const edits = Array.isArray(args.edits) ? args.edits : undefined;
-	if (edits) {
-		// edit 工具的多段替换应以工具调用时的原始内容为基准顺序重放，
-		// 这样 diff 来自本次工具参数，而不是依赖当前工作区或 Git 状态。
-		for (const edit of edits) {
-			if (!edit || typeof edit !== "object") return undefined;
-			const replacement = applyTextReplacement(
-				next,
-				(edit as Record<string, unknown>).oldText ?? (edit as Record<string, unknown>).old_text,
-				(edit as Record<string, unknown>).newText ?? (edit as Record<string, unknown>).new_text,
-			);
-			if (replacement === undefined) return undefined;
-			next = replacement;
-		}
-		return next;
-	}
-	return applyTextReplacement(
-		next,
-		args.oldText ?? args.old_text,
-		args.newText ?? args.new_text,
-	);
+	return getToolFilePath(args);
 }
 
 function getToolDiffTarget(message: ChatMessage): { path: string; originalContent: string; content: string; changedLines: number } | undefined {
@@ -1667,7 +1634,6 @@ function getToolDiffTarget(message: ChatMessage): { path: string; originalConten
 	const args = parseToolArgs(message.meta?.args);
 	const path = getToolArgFilePath(args);
 	if (!args || !path) return undefined;
-	const originalContent = typeof message.meta?.originalContent === "string" ? message.meta.originalContent : "";
 	if (/write|create/i.test(toolName)) {
 		const content = typeof args.content === "string"
 			? args.content
@@ -1675,15 +1641,16 @@ function getToolDiffTarget(message: ChatMessage): { path: string; originalConten
 				? args.text
 				: undefined;
 		if (content === undefined) return undefined;
-		return { path, originalContent, content, changedLines: countTextLines(content) };
+		return { path, originalContent: "", content, changedLines: countTextLines(content) };
 	}
-	const content = buildEditedContentFromArgs(args, originalContent);
-	if (content === undefined) return undefined;
+	// edit/patch：不存储 full file originalContent，只展示变动区域
+	const diff = getToolEditDiff(args);
+	if (!diff) return undefined;
 	return {
 		path,
-		originalContent,
-		content,
-		changedLines: Math.max(countTextLines(originalContent), countTextLines(content)),
+		originalContent: diff.oldText,
+		content: diff.newText,
+		changedLines: Math.max(countTextLines(diff.oldText), countTextLines(diff.newText)),
 	};
 }
 
@@ -1799,6 +1766,7 @@ const statusLabel =
 	const handleCopy = () => {
 		navigator.clipboard.writeText(detailText);
 		setCopied(true);
+		showNotice(t("app.codeCopied"), 1200);
 		setTimeout(() => setCopied(false), 2000);
 	};
 	return (
@@ -1950,31 +1918,95 @@ function getDiagnosticTone(message: ChatMessage): "error" | "warning" | "success
 	return "info";
 }
 
-/** 压缩事件卡片：在时间线上标记会话被压缩过，展示摘要和节约的 token 数。 */
+/** 压缩事件卡片：在时间线上标记会话被压缩过，展示摘要和节约的 token 数。
+ * 支持展开查看压缩前的归档消息。 */
 export const CompactionCard = memo(function CompactionCard(props: {
 	message: ChatMessage;
 }) {
+	const [expanded, setExpanded] = useState(false);
 	const summary = props.message.text;
 	const tokensBefore = (props.message.meta as any)?.tokensBefore;
+	const compactionCount = (props.message.meta as any)?.compactionCount;
+	const archivedMessages = (props.message.meta as any)?.archivedMessages as ChatMessage[] | undefined;
 	const time = formatTime(props.message.timestamp);
+	const hasArchived = Array.isArray(archivedMessages) && archivedMessages.length > 0;
+
 	return (
 		<article
-			className="compaction-card"
+			className={`compaction-card${expanded ? " compaction-card--expanded" : ""}`}
 			data-message-id={props.message.id}
 		>
-			<span className="compaction-card-icon" aria-hidden="true">🔁</span>
-			<div className="compaction-card-body">
-				<span className="compaction-card-summary">{stripAnsi(summary)}</span>
-				{typeof tokensBefore === "number" && (
-					<span className="compaction-card-tokens">
-						~{Math.round(tokensBefore / 1000)}k tokens before
-					</span>
-				)}
-				<time className="compaction-card-time">{time}</time>
-			</div>
+			<button
+				type="button"
+				className="compaction-card-header"
+				onClick={() => hasArchived && setExpanded(!expanded)}
+				disabled={!hasArchived}
+				aria-expanded={expanded}
+			>
+				<span className="compaction-card-icon" aria-hidden="true">
+					{hasArchived ? (expanded ? "📂" : "📁") : "🔁"}
+				</span>
+				<div className="compaction-card-body">
+					<span className="compaction-card-summary">{stripAnsi(summary)}</span>
+					<div className="compaction-card-meta">
+						{typeof compactionCount === "number" && compactionCount > 0 && (
+							<span className="compaction-card-count">
+								{t("app.compactionCount", { count: compactionCount })}
+							</span>
+						)}
+						{typeof tokensBefore === "number" && (
+							<span className="compaction-card-tokens">
+								~{Math.round(tokensBefore / 1000)}k tokens before
+							</span>
+						)}
+						{hasArchived && (
+							<span className="compaction-card-hint">
+								{expanded ? t("app.compactionCollapse") : t("app.compactionExpand")}
+							</span>
+						)}
+					</div>
+					<time className="compaction-card-time">{time}</time>
+				</div>
+			</button>
+			{expanded && hasArchived && (
+				<div className="compaction-card-archive">
+					<div className="compaction-card-archive-divider" />
+					<ArchivedMessageList messages={archivedMessages} />
+				</div>
+			)}
 		</article>
 	);
 });
+
+/** 归档消息列表：压缩卡片展开时，以简略格式渲染压缩前的消息历史。 */
+function ArchivedMessageList({ messages }: { messages: ChatMessage[] }) {
+	return (
+		<div className="archived-message-list">
+			{messages.map((msg) => (
+				<ArchivedMessage key={msg.id} message={msg} />
+			))}
+		</div>
+	);
+}
+
+/** 单条归档消息：根据角色显示对应的图标和内容预览。
+ * 只展示纯文本内容，不渲染 Markdown / 代码高亮 / 工具详情，保持归档区视觉干净。 */
+function ArchivedMessage({ message }: { message: ChatMessage }) {
+	const text = stripAnsi(message.text).trim();
+	// 截断过长的消息以减少展开区体积
+	const preview = text.length > 300 ? text.slice(0, 300) + "…" : text;
+	const roleIcon =
+		message.role === "user" ? "👤" :
+		message.role === "assistant" ? "🤖" :
+		message.role === "tool" ? "🔧" : "💬";
+
+	return (
+		<div className={`archived-message archived-message--${message.role}`}>
+			<span className="archived-message-role">{roleIcon}</span>
+			<span className="archived-message-text">{preview || "(empty)"}</span>
+		</div>
+	);
+}
 
 /** 错误/RPC/系统诊断消息使用独立卡片，避免和普通 AI 正文混在一起难以扫读。 */
 export const DiagnosticMessageCard = memo(function DiagnosticMessageCard(props: {
@@ -2223,15 +2255,16 @@ export const ThinkingBlock = memo(function ThinkingBlock(props: {
 
 
 /**
- * 流式状态指示器（三点脉动动画 + 状态文案），在 agent 运行时始终显示。
+ * 流式响应指示器（三点脉动动画 + 状态文案），在 agent 运行/流式期间显示。
  *
- * 状态优先级（与 AI 回复流并行展示）：
+ * 状态优先级：
  *  1. 工具执行中 → "正在工具调用"（琥珀色）
- *  2. 思考中（有可见思考文本）→ "正在思考"（默认强调色）
- *  3. 流式回答中 → "正在回应"（更低透明度）
- *  4. 过渡等待 → 只显示三点动画，无标签
+ *  2. 有思考文本 / 流式回答中 → "正在回应"
+ *  3. 过渡等待 → 只显示三点动画，无标签
+ *
+ * 注意：原来的 "正在思考" 状态已合并到 "正在回应"，不再单独展示。
  */
-export function ThinkingIndicator(props: {
+export function RespondingIndicator(props: {
 	thinking?: string;
 	showThinking?: boolean;
 	isExecutingTool?: boolean;
@@ -2239,19 +2272,14 @@ export function ThinkingIndicator(props: {
 }) {
 	const { isExecutingTool, isStreaming, thinking, showThinking } = props;
 
-	let kind: "executing" | "thinking" | "responding" | "waiting";
+	let kind: "executing" | "responding" | "waiting";
 	let label: string;
 
 	if (isExecutingTool) {
-		// 工具执行中：琥珀色变体，不区分具体工具名
 		kind = "executing";
 		label = t("thinking.executing");
-	} else if (showThinking && thinking && thinking.length > 0) {
-		// 思考中：有可见思考文本
-		kind = "thinking";
-		label = t("thinking.streaming");
-	} else if (isStreaming) {
-		// 流式回答中：与 AI 回复文本并行展示
+	} else if ((showThinking && thinking && thinking.length > 0) || isStreaming) {
+		// 有思考文本或流式回答中统一显示“正在回应”
 		kind = "responding";
 		label = t("thinking.responding");
 	} else {
@@ -2261,14 +2289,14 @@ export function ThinkingIndicator(props: {
 	}
 
 	return (
-		<div className="thinking-indicator" data-kind={kind}>
-			<span className="thinking-indicator-dots" aria-hidden="true">
+		<div className="responding-indicator" data-kind={kind}>
+			<span className="responding-indicator-dots" aria-hidden="true">
 				<span />
 				<span />
 				<span />
 			</span>
 			{kind !== "waiting" && (
-				<span className="thinking-indicator-label">{label}</span>
+				<span className="responding-indicator-label">{label}</span>
 			)}
 		</div>
 	);
@@ -2367,7 +2395,7 @@ function StreamingCodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
 	const text = extractText(codeProps?.children ?? props.children);
 	return (
 		<div className="code-block-wrap">
-			<button className="code-copy" onClick={() => navigator.clipboard.writeText(text)}>
+			<button className="code-copy" onClick={() => { navigator.clipboard.writeText(text); showNotice(t("app.codeCopied"), 1200); }}>
 				{t("code.copy")}
 			</button>
 			<pre {...props}>{props.children}</pre>
@@ -2584,18 +2612,40 @@ export const TurnRow = memo(function TurnRow(props: {
 		: null;
 	const hasFinalThinking = Boolean(finalThinking && props.showThinking);
 
-	// 统计：把最终回答的思考也计入执行过程
-	const totalThinkingCount = thinkingCount + (hasFinalThinking ? 1 : 0);
+	// 将最终消息的思考插入执行过程（放在工具之前），确保时序正确：思考→工具→文本
+	const executionItemsWithFinalThinking = useMemo(() => {
+		const items = [...executionItems];
+		if (hasFinalThinking && finalThinking && props.showThinking) {
+			const thinkingItem: ThinkingGroupItem = {
+				kind: "thinking-group",
+				id: `final-thinking-${finalMessageItem?.message.id ?? run.id}`,
+				messages: finalMessageItem?.message ? [finalMessageItem.message] : [],
+				text: finalThinking,
+				startedAt: run.startedAt,
+				endedAt: finalMessageItem?.message.timestamp ?? run.endedAt,
+			};
+			// 插到 executionItems 的 lastAssistantIndex 位置，保持与原 run.items 一致的时序
+			const insertIndex = Math.min(lastAssistantIndex, items.length);
+			items.splice(insertIndex, 0, thinkingItem);
+		}
+		return items;
+	}, [executionItems, hasFinalThinking, finalThinking, props.showThinking, finalMessageItem, run.id, run.startedAt, run.endedAt]);
+
+	// 统计
+	const totalThinkingCount = executionItemsWithFinalThinking.filter((i) => i.kind === "thinking-group").length;
+	const totalToolCount = executionItemsWithFinalThinking.filter((i) => i.kind === "tool-group").length;
+	const totalInterReplyCount = executionItemsWithFinalThinking.filter(
+		(i) => i.kind === "message" && i.message.role === "assistant",
+	).length;
 	/** 将统计拼成概要文本。 */
 	const summaryParts: string[] = [];
-	if (toolCount > 0) summaryParts.push(`${toolCount}个工具`);
+	if (totalToolCount > 0) summaryParts.push(`${totalToolCount}个工具`);
 	if (totalThinkingCount > 0) summaryParts.push(`${totalThinkingCount}次思考`);
-	if (interReplyCount > 0) summaryParts.push(`${interReplyCount}次回答`);
+	if (totalInterReplyCount > 0) summaryParts.push(`${totalInterReplyCount}次回答`);
 	const summaryText = summaryParts.length > 0 ? `执行过程: ${summaryParts.join(" ")}` : "";
 
-	// 是否有任何需要折叠的内容（非最终回答条目 + 最终回答的思考）
-	// 当没有 assistant 消息时，只要有工具/思考也需要折叠（如 ask_question 场景）
-	const hasFoldableContent = lastAssistantIndex > 0 || hasFinalThinking || run.items.some((i) => i.kind !== "message");
+	// 是否有任何需要折叠的内容
+	const hasFoldableContent = executionItemsWithFinalThinking.length > 0 || run.items.some((i) => i.kind !== "message");
 
 	// 没有助手指令消息的情况：整轮只含工具/思考，用执行过程折叠渲染
 	if (lastAssistantIndex === -1) {
@@ -2628,7 +2678,7 @@ export const TurnRow = memo(function TurnRow(props: {
 							</button>
 							{executionExpanded && (
 								<div className="execution-summary-details">
-									{executionItems.map(renderExecutionItem)}
+									{executionItemsWithFinalThinking.map(renderExecutionItem)}
 								</div>
 							)}
 						</div>
@@ -2667,21 +2717,12 @@ export const TurnRow = memo(function TurnRow(props: {
 						</button>
 						{executionExpanded && (
 							<div className="execution-summary-details">
-								{executionItems.map(renderExecutionItem)}
-								{/* 最终回答的思考也纳入折叠区 */}
-								{hasFinalThinking && (
-									<ThinkingBlock
-										text={finalThinking!}
-										startedAt={run.startedAt}
-										endedAt={finalMessageItem!.message.timestamp > run.startedAt ? finalMessageItem!.message.timestamp : run.endedAt}
-										showThinking={props.showThinking}
-									/>
-								)}
+								{executionItemsWithFinalThinking.map(renderExecutionItem)}
 							</div>
 						)}
 					</div>
 				)}
-				{/* 最终回答（始终可见）；其中的思考已归入执行过程折叠区 */}
+				{/* 最终回答（始终可见）；最终思考已融入执行过程折叠区 */}
 				{finalMessageItem && (
 					<Fragment key={finalMessageItem.message.id}>
 						{editing ? (
@@ -2734,9 +2775,9 @@ export const TurnRow = memo(function TurnRow(props: {
 						<button
 							className="turn-row-action-btn"
 							onClick={props.onEnterMultiSelect}
-							title={t("app.multiSelectEnter")}
+						title={t("app.multiSelectEnter")}
 						>
-							{t("app.multiSelectEnter")}
+							<Share size={14} />
 						</button>
 						{!props.isStreaming && !props.agentRunning && assistantMessages.at(-1)?.message.id && (
 							<>
@@ -2746,9 +2787,9 @@ export const TurnRow = memo(function TurnRow(props: {
 										setEditText(mergedText);
 										setEditing(true);
 									}}
-									title={t("common.edit")}
+								title={t("common.edit")}
 								>
-									{t("common.edit")}
+									<SquarePen size={14} />
 								</button>
 								<button
 									className="turn-row-action-btn"
@@ -2760,7 +2801,7 @@ export const TurnRow = memo(function TurnRow(props: {
 									}}
 									title={t("common.delete")}
 								>
-									{t("common.delete")}
+									<Trash size={14} />
 								</button>
 							</>
 						)}
@@ -2926,30 +2967,30 @@ export const UserBubble = memo(function UserBubble(props: {
 					className="user-turn-action-btn"
 					onClick={props.onEnterMultiSelect}
 					title={t("app.multiSelectEnter")}
-				>
-					{t("app.multiSelectEnter")}
-				</button>
+						>
+							<Share size={14} />
+						</button>
 				{!editing && !props.agentRunning && (
 					<>
 						<button className="user-turn-action-btn" onClick={() => {
 							setEditText(cleanText);
 							setEditing(true);
-						}}>
-							{t("common.edit")}
+						}} title={t("common.edit")}>
+							<SquarePen size={14} />
 						</button>
 						<button
 							className="user-turn-action-btn"
 							onClick={handleEditAndResend}
 							title={t("app.editAndResendTitle")}
 						>
-							{t("app.editAndResend")}
+							<UserPen size={14} />
 						</button>
 						<button
 							className="user-turn-action-btn"
 							onClick={() => props.onDeleteMessage?.(message.id)}
 							title={t("common.delete")}
 						>
-							{t("common.delete")}
+							<Trash size={14} />
 						</button>
 						{props.isLastUserMessage && (
 							<button
@@ -2957,7 +2998,7 @@ export const UserBubble = memo(function UserBubble(props: {
 								onClick={() => props.onResendUserMessage?.(message)}
 								title={t("app.resendTitle")}
 							>
-								{t("app.resend")}
+								<Send size={14} />
 							</button>
 						)}
 					</>
@@ -3146,6 +3187,7 @@ function MathSpan(props: React.HTMLAttributes<HTMLSpanElement>) {
 		const annotation = ref.current?.querySelector('annotation[encoding="application/x-tex"]');
 		const source = annotation?.textContent || extractText(children);
 		void navigator.clipboard.writeText(`$$\n${source}\n$$`);
+		showNotice(t("app.latexCopied"), 1200);
 	};
 	return (
 		<span className="math-copy-wrap">
@@ -3169,7 +3211,7 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
 		<div className="code-block-wrap">
 			<button
 				className="code-copy"
-				onClick={() => navigator.clipboard.writeText(text)}
+				onClick={() => { navigator.clipboard.writeText(text); showNotice(t("app.codeCopied"), 1200); }}
 			>
 				{t("code.copy")}
 			</button>
@@ -3232,7 +3274,7 @@ function MermaidDiagram(props: { chart: string }) {
 			) : (
 				<>
 					<div className="mermaid-toolbar" aria-label="Mermaid diagram controls">
-						<button type="button" onClick={() => navigator.clipboard.writeText(`\`\`\`mermaid\n${props.chart}\n\`\`\``)}>{t("common.copy")}</button>
+						<button type="button" onClick={() => { navigator.clipboard.writeText(`\`\`\`mermaid\n${props.chart}\n\`\`\``); showNotice(t("app.mermaidCopied"), 1200); }}>{t("common.copy")}</button>
 						<button type="button" onClick={() => setZoom((value) => Math.max(0.5, value - 0.1))}>−</button>
 						<span>{Math.round(zoom * 100)}%</span>
 						<button type="button" onClick={() => setZoom((value) => Math.min(2.5, value + 0.1))}>＋</button>
@@ -3257,7 +3299,7 @@ function MermaidMarkdownFallback(props: { chart: string; error: string }) {
 		<div className="code-block-wrap mermaid-fallback">
 			<button
 				className="code-copy"
-				onClick={() => navigator.clipboard.writeText(markdown)}
+				onClick={() => { navigator.clipboard.writeText(markdown); showNotice(t("app.codeCopied"), 1200); }}
 			>
 				{t("code.copy")}
 			</button>
@@ -3816,6 +3858,7 @@ export function ConversationOutline(props: {
 	extraAction?: EntryAction;
 	terminalAction?: EntryAction;
 	filesAction?: EntryAction;
+	gitAction?: EntryAction;
 	editorsAction?: EntryAction & { anchorRef?: React.RefObject<HTMLButtonElement | null> };
 	browserAction?: EntryAction;
 }) {
@@ -3949,6 +3992,17 @@ export function ConversationOutline(props: {
 					{props.filesAction.icon}
 				</button>
 			)}
+			{props.gitAction && (
+				<button
+					type="button"
+					className={`git-entry${props.gitAction.active ? " active" : ""}`}
+					title={props.gitAction.label}
+					aria-label={props.gitAction.label}
+					onClick={props.gitAction.onClick}
+				>
+					{props.gitAction.icon}
+				</button>
+			)}
 			{props.editorsAction && (
 				<button
 					type="button"
@@ -3994,10 +4048,9 @@ export function DrawerContent(props: {
 	files: FileTreeNode[];
 	sessions: SessionSummary[];
 	sessionsLoading?: boolean;
-	/** Git 工作区中对比 HEAD 有变更的文件列表 */
-	gitChangedFiles: { path: string; status: string }[];
 	expandedDirs: Set<string>;
 	onToggleDirectory: (path: string) => void;
+	onCollapseAllDirectories: () => void;
 	pinned: boolean;
 	onTogglePin: () => void;
 	onCollapse: () => void;
@@ -4011,7 +4064,6 @@ export function DrawerContent(props: {
 	onCopySession: (session: SessionSummary) => void | Promise<void>;
 	onExportSession: (session: SessionSummary) => void | Promise<void>;
 	onDeleteSession: (session: SessionSummary) => void | Promise<void>;
-	onDiffFile?: DiffFileHandler;
 	onOpenFile?: (path: string) => void;
 	onViewFile?: (path: string) => void;
 }) {
@@ -4047,18 +4099,12 @@ export function DrawerContent(props: {
 			{props.panel === "files" && (
 				<FilesPanel
 					files={props.files}
-					// 将 Git 变更文件列表转换为 SessionModifiedFile 格式传入 FilesPanel 展示
-					modifiedFiles={props.gitChangedFiles.map((f) => ({
-						path: f.path,
-						toolName: "git",
-						status: f.status,
-					}))}
 					expandedDirs={props.expandedDirs}
 					onToggleDirectory={props.onToggleDirectory}
+					onCollapseAll={props.onCollapseAllDirectories}
 					onFileContextMenu={props.onFileContextMenu}
 					onRefreshFiles={props.onRefreshFiles}
 					onOpenFolder={props.onOpenFolder}
-					onDiffFile={props.onDiffFile}
 					onOpenFile={props.onOpenFile}
 					onViewFile={props.onViewFile}
 				/>
@@ -4078,51 +4124,18 @@ export function DrawerContent(props: {
 	);
 }
 
-const MODIFIED_FILES_PREVIEW_LIMIT = 5;
-const MODIFIED_FILES_EXPANDED_STORAGE_KEY = "pid:modified-files-expanded";
-
 function FilesPanel(props: {
 	files: FileTreeNode[];
-	/** Git 工作区中对比 HEAD 有变更的文件；会话卡片的修改摘要不使用该数据源。 */
-	modifiedFiles: SessionModifiedFile[];
 	expandedDirs: Set<string>;
 	onToggleDirectory: (path: string) => void;
 	onFileContextMenu: (node: FileTreeNode, x: number, y: number) => void;
 	onRefreshFiles: () => void;
+	/** 收起文件树中所有已展开的目录，清空 expandedDirs。 */
+	onCollapseAll?: () => void;
 	onOpenFolder?: () => void;
-	onDiffFile?: DiffFileHandler;
 	onOpenFile?: (path: string) => void;
 	onViewFile?: (path: string) => void;
 }) {
-	const [modifiedFilesExpanded, setModifiedFilesExpanded] = useState(() => {
-		if (typeof window === "undefined") return false;
-		return localStorage.getItem(MODIFIED_FILES_EXPANDED_STORAGE_KEY) === "true";
-	});
-	const handleToggleModifiedFiles = useCallback(() => {
-		setModifiedFilesExpanded((current) => {
-			const next = !current;
-			localStorage.setItem(MODIFIED_FILES_EXPANDED_STORAGE_KEY, String(next));
-			return next;
-		});
-	}, []);
-	// 后端按修改时间升序传入；抽屉顶部优先展示最新文件，避免文件多时用户看不到刚改的内容。
-	const latestModifiedFiles = [...props.modifiedFiles].reverse();
-	const visibleModifiedFiles = modifiedFilesExpanded
-		? latestModifiedFiles
-		: latestModifiedFiles.slice(0, MODIFIED_FILES_PREVIEW_LIMIT);
-	const hiddenModifiedFileCount = Math.max(
-		0,
-		latestModifiedFiles.length - visibleModifiedFiles.length,
-	);
-
-	const gitStatusMap = useMemo(() => {
-		const map = new Map<string, string>();
-		for (const f of props.modifiedFiles) {
-			if (f.toolName === "git" && f.status) map.set(f.path, f.status);
-		}
-		return map;
-	}, [props.modifiedFiles]);
-
 	return (
 		<div className="files-panel">
 			<div className="panel-action-row">
@@ -4134,73 +4147,28 @@ function FilesPanel(props: {
 							{t("drawer.openFolder")}
 						</button>
 					)}
-					<button onClick={props.onRefreshFiles}>{t("common.refresh")}</button>
-				</div>
-			</div>
-			{props.modifiedFiles.length > 0 && (
-				<div className="modified-files-section">
-					<div className="modified-files-header">
-						<span>{t("drawer.gitChangedFiles")}</span>
-						<small>{t("drawer.gitChangedFilesDesc")}</small>
-					</div>
-					{visibleModifiedFiles.map((file) => {
-						const fileName = file.path.split(/[/\\]/).pop() ?? file.path;
-						const isRunning = file.status === "running";
-						// 构造最小的 FileTreeNode 以复用右键菜单,保持修改清单和文件树相同的打开/定位入口。
-						const fakeNode: FileTreeNode = {
-							name: fileName,
-							path: file.path,
-							relativePath: file.path,
-							type: "file",
-						};
-						return (
-							<div
-								key={file.path}
-								className={`modified-file-row${isRunning ? " running" : ""}`}
-								title={file.path}
-								onContextMenu={(e) => {
-									e.preventDefault();
-									props.onFileContextMenu(fakeNode, e.clientX, e.clientY);
-								}}
-								onClick={() => props.onDiffFile?.(file.path, file.originalContent, file.content)}
-							>
-								<span
-									className={`modified-file-icon${isRunning ? "" : " done"}`}
-								>
-									{file.toolName === "git"
-										? gitStatusIcon(file.status)
-										: isRunning
-											? "◌"
-											: "✓"}
-								</span>
-								<span className="modified-file-name">{fileName}</span>
-								{file.toolName === "git" && file.status !== "deleted" && (
-									<span className="modified-file-lines">{file.status === "added" ? "新" : "改"}</span>
-								)}
-								{file.toolName !== "git" && Boolean(file.changedLines) && (
-									<span className="modified-file-lines">
-										{t("drawer.changedLines", {
-											count: file.changedLines ?? 0,
-										})}
-									</span>
-								)}
-								<span className="modified-file-tool">{file.toolName}</span>
-							</div>
-						);
-					})}
-					{latestModifiedFiles.length > MODIFIED_FILES_PREVIEW_LIMIT && (
+					{/* 刷新与全部收起使用纯图标按钮，保持工具栏紧凑、与列表项字号对齐 */}
+					<button
+						className="icon-only"
+						onClick={props.onRefreshFiles}
+						title={t("common.refresh")}
+						aria-label={t("common.refresh")}
+					>
+						<RefreshCw size={14} />
+					</button>
+					{props.onCollapseAll && (
 						<button
-							className="modified-files-toggle"
-							type="button"
-							onClick={handleToggleModifiedFiles}
+							className="icon-only"
+							onClick={props.onCollapseAll}
+							title={t("drawer.collapseAllDirs")}
+							aria-label={t("drawer.collapseAllDirs")}
+							disabled={props.expandedDirs.size === 0}
 						>
-							{modifiedFilesExpanded
-								? t("common.collapse")
-								: t("drawer.moreFiles", { count: hiddenModifiedFileCount })}
+							<ChevronsDownUp size={14} />
 						</button>
 					)}
 				</div>
-			)}
+			</div>
 			{props.files.map((node) => (
 				<FileNode
 					key={node.path}
@@ -4210,8 +4178,6 @@ function FilesPanel(props: {
 					onFileContextMenu={props.onFileContextMenu}
 					onOpenFile={props.onOpenFile}
 					onViewFile={props.onViewFile}
-					onDiffFile={props.onDiffFile}
-					gitStatuses={gitStatusMap}
 				/>
 			))}
 		</div>
@@ -4377,14 +4343,11 @@ function FileNode(props: {
 	onFileContextMenu: (node: FileTreeNode, x: number, y: number) => void;
 	onOpenFile?: (path: string) => void;
 	onViewFile?: (path: string) => void;
-	onDiffFile?: (path: string) => void;
-	gitStatuses?: Map<string, string>;
 	depth?: number;
 }) {
-	const { node, expandedDirs, onToggleDirectory, depth = 0, gitStatuses } = props;
+	const { node, expandedDirs, onToggleDirectory, depth = 0 } = props;
 	const expanded = expandedDirs.has(node.path);
 	const typeLabel = node.type === "file" ? getFileTypeLabel(node.name) : "";
-	const gitStatus = gitStatuses?.get(node.path);
 	const rowStyle = { "--file-depth-offset": `${depth * 16}px` } as CSSProperties;
 	const menu = (event: React.MouseEvent) => {
 		event.preventDefault();
@@ -4399,9 +4362,6 @@ function FileNode(props: {
 					onContextMenu={menu}>
 					<span className="file-node-icon">
 						{fileIconElement(node.name, false, false)}
-						{gitStatus && (
-							<span aria-hidden="true" className={`file-node-git-badge git-${gitStatus}`} />
-						)}
 					</span>
 					<span className="file-node-name">{node.name}</span>
 					<span className="file-node-type-label">{typeLabel}</span>
@@ -4428,27 +4388,12 @@ function FileNode(props: {
 							onFileContextMenu={props.onFileContextMenu}
 							onOpenFile={props.onOpenFile}
 							onViewFile={props.onViewFile}
-							onDiffFile={props.onDiffFile}
-							gitStatuses={gitStatuses}
 							depth={depth + 1} />
 					))}
 				</div>
 			)}
 		</div>
 	);
-}
-
-function gitStatusIcon(status: string): string {
-	switch (status) {
-		case "added":
-			return "+";
-		case "deleted":
-			return "×";
-		case "renamed":
-			return "→";
-		default:
-			return "~";
-	}
 }
 
 function SessionsPanel(props: {
@@ -5208,6 +5153,36 @@ export function SessionManagerModal(props: {
 	);
 }
 
+/**
+ * 右键菜单定位：渲染后按真实尺寸修正位置。
+ * 当菜单超出视口底部/右侧时向上/向左翻转，仍放不下则夹紧到视口内，
+ * 保证整块菜单始终可见、不被屏幕裁切（不使用滚动）。
+ */
+function useMenuPosition(initial: { x: number; y: number }) {
+	const [pos, setPos] = useState(initial);
+	const ref = useRef<HTMLDivElement>(null);
+	useLayoutEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const rect = el.getBoundingClientRect();
+		const vw = window.innerWidth;
+		const vh = window.innerHeight;
+		let { x, y } = initial;
+		// 下方空间不足时翻转到光标上方，仍放不下则夹紧到视口内
+		if (y + rect.height > vh) {
+			const flipped = y - rect.height;
+			y = flipped >= 8 ? flipped : Math.max(8, vh - rect.height - 8);
+		}
+		// 右侧空间不足时翻转到光标左侧，仍放不下则夹紧到视口内
+		if (x + rect.width > vw) {
+			const flipped = x - rect.width;
+			x = flipped >= 8 ? flipped : Math.max(8, vw - rect.width - 8);
+		}
+		if (x !== pos.x || y !== pos.y) setPos({ x, y });
+	}, [initial.x, initial.y]);
+	return { pos, ref };
+}
+
 export function ProjectContextMenu(props: {
 	menu: { x: number; y: number; project: Project };
 	onClose: () => void;
@@ -5220,14 +5195,18 @@ export function ProjectContextMenu(props: {
 	onManageSessions: () => void;
 	onFilterSessions: () => void;
 	onToggleWorktree: () => void;
+	onRefreshProject: () => void;
+	onCopyProjectPath: () => void;
 	onRemoveProject: () => void;
 }) {
 	const isWorktreeEnabled = props.menu.project.worktreeEnabled ?? false;
+	const { pos, ref } = useMenuPosition(props.menu);
 	return (
 		<div className="context-backdrop" onClick={props.onClose}>
 			<div
 				className="context-menu"
-				style={{ left: props.menu.x, top: props.menu.y }}
+				style={{ left: pos.x, top: pos.y }}
+				ref={ref}
 				onClick={(event) => event.stopPropagation()}
 			>
 				<button onClick={props.onRevealProject}>{t("menu.revealProject")}</button>
@@ -5251,6 +5230,10 @@ export function ProjectContextMenu(props: {
 					{isWorktreeEnabled ? t("menu.disableWorktree") : t("menu.enableWorktree")}
 				</button>
 				<hr className="context-separator" />
+				<button onClick={props.onCopyProjectPath}>{t("menu.copyProjectPath")}</button>
+				<hr className="context-separator" />
+				<button onClick={props.onRefreshProject}>{t("app.projectRefresh")}</button>
+				<hr className="context-separator" />
 				<button onClick={props.onRemoveProject}>{t("menu.removeProject")}</button>
 			</div>
 		</div>
@@ -5264,17 +5247,20 @@ export function AgentContextMenu(props: {
 	onRename: () => void;
 	onExport: () => void;
 	onCopySession: () => void;
+	onCopySessionFilePath: () => void;
 	onToggleRpcLogging?: () => void;
 	isRpcLogging?: boolean;
 	onOpenLogFile?: () => void;
 	onOpenSessionFile?: () => void;
 	onCloseAgent: () => void;
 }) {
+	const { pos, ref } = useMenuPosition(props.menu);
 	return (
 		<div className="context-backdrop" onClick={props.onClose}>
 			<div
 				className="context-menu"
-				style={{ left: props.menu.x, top: props.menu.y }}
+				style={{ left: pos.x, top: pos.y }}
+				ref={ref}
 				onClick={(event) => event.stopPropagation()}
 			>
 				<button disabled={Boolean(props.actionLoading)} onClick={props.onRename}>{t("common.rename")}</button>
@@ -5287,9 +5273,14 @@ export function AgentContextMenu(props: {
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
 				</button>
 				{props.menu.agent.sessionPath && (
-					<button disabled={Boolean(props.actionLoading)} onClick={props.onOpenSessionFile}>
-						{t("menu.openAgentSessionFile")}
-					</button>
+					<>
+						<button disabled={Boolean(props.actionLoading)} onClick={props.onCopySessionFilePath}>
+							{t("menu.copySessionFilePath")}
+						</button>
+						<button disabled={Boolean(props.actionLoading)} onClick={props.onOpenSessionFile}>
+							{t("menu.openAgentSessionFile")}
+						</button>
+					</>
 				)}
 				<button disabled={Boolean(props.actionLoading)} onClick={props.onToggleRpcLogging}>
 					{props.isRpcLogging ? `✓ ${t("menu.rpcLoggingOn")}` : t("menu.rpcLogging")}
@@ -5312,15 +5303,18 @@ export function SessionContextMenu(props: {
 	onRename: () => void;
 	onExport: () => void;
 	onCopySession: () => void;
+	onCopySessionFilePath: () => void;
 	onOpenSessionFile?: () => void;
 	onShowLogs?: () => void;
 	onDeleteSession: () => void;
 }) {
+	const { pos, ref } = useMenuPosition(props.menu);
 	return (
 		<div className="context-backdrop" onClick={props.onClose}>
 			<div
 				className="context-menu"
-				style={{ left: props.menu.x, top: props.menu.y }}
+				style={{ left: pos.x, top: pos.y }}
+				ref={ref}
 				onClick={(event) => event.stopPropagation()}
 			>
 				<button disabled={Boolean(props.actionLoading)} onClick={props.onRename}>{t("common.rename")}</button>
@@ -5331,6 +5325,9 @@ export function SessionContextMenu(props: {
 				<button disabled={Boolean(props.actionLoading)} onClick={props.onExport}>
 					{props.actionLoading === "export" && <span className="mini-loader" />}
 					{props.actionLoading === "export" ? t("menu.exporting") : t("menu.exportHtml")}
+				</button>
+				<button disabled={Boolean(props.actionLoading)} onClick={props.onCopySessionFilePath}>
+					{t("menu.copySessionFilePath")}
 				</button>
 				<button disabled={Boolean(props.actionLoading)} onClick={props.onOpenSessionFile}>
 					{t("menu.openSessionFile")}
@@ -5872,12 +5869,28 @@ export function SettingsModal(props: {
 											</small>
 										)}
 									</div>
-									<div className="setting-row">
+									<SettingSwitch
+									title={t("settings.disableUpdateCheck")}
+									description={t("settings.disableUpdateCheckDesc")}
+									checked={props.settings.disableUpdateCheck}
+									onChange={(checked) =>
+										props.onChange({ disableUpdateCheck: checked })
+									}
+								/>
+								<div className="setting-row">
 										<div>
 											<strong>{t("settings.currentVersion")}</strong>
 											<small>v{props.appInfo.version}</small>
 										</div>
-										<Button onClick={props.onCheckUpdate} loading={props.updateChecking}>{t("settings.checkUpdate")}</Button>
+										<Button
+											onClick={props.onCheckUpdate}
+											loading={props.updateChecking}
+											disabled={props.settings.disableUpdateCheck}
+										>
+											{props.settings.disableUpdateCheck
+												? t("settings.updateCheckDisabled")
+												: t("settings.checkUpdate")}
+										</Button>
 									</div>
 									<div className="setting-row">
 										<div>
@@ -5891,8 +5904,14 @@ export function SettingsModal(props: {
 											</small>
 										</div>
 										<div className="setting-inline-actions">
-											<Button onClick={props.onCheckPiUpdate} loading={props.piUpdateChecking}>{t("settings.checkPiUpdate")}</Button>
-											<Button onClick={props.onUpdatePi} loading={props.piUpdating} disabled={!props.piUpdateCheck?.hasUpdate}>{t("settings.updatePi")}</Button>
+											<Button onClick={props.onCheckPiUpdate} loading={props.piUpdateChecking} disabled={props.settings.disableUpdateCheck}>
+												{props.settings.disableUpdateCheck
+													? t("settings.updateCheckDisabled")
+													: t("settings.checkPiUpdate")}
+											</Button>
+											<Button onClick={props.onUpdatePi} loading={props.piUpdating} disabled={props.settings.disableUpdateCheck || !props.piUpdateCheck?.hasUpdate}>
+												{t("settings.updatePi")}
+											</Button>
 										</div>
 									</div>
 									{props.piUpdateResult && (

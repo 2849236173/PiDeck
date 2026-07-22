@@ -10,6 +10,8 @@ export type Project = {
 	worktreeEnabled?: boolean;
 	/** 如果是 worktree 子项目，指向父项目的 id */
 	worktreeParentId?: string;
+	/** 项目所属环境：windows 或 wsl。缺省视为 windows（兼容旧数据）。 */
+	environment?: "windows" | "wsl";
 };
 
 export const SUPPORTED_EXTERNAL_EDITORS = [
@@ -63,6 +65,8 @@ export type AgentTab = {
 	sessionId?: string;
 	sessionPath?: string;
 	createdAt: number;
+	/** 会话累计压缩次数，由主进程解析会话文件得到，用于前端展示“已压缩 N 次”。 */
+	compactionCount?: number;
 };
 
 export type TerminalShell = "pwsh" | "powershell" | "cmd" | "zsh" | "bash" | "fish" | "sh";
@@ -123,6 +127,8 @@ export type SessionSummary = {
 	messageCount: number;
 	/** 会话来源：pi 原生、Codex 导入、Claude 导入、OpenCode 导入 */
 	source?: "pi" | "codex" | "claude" | "opencode";
+	/** 标记此会话文件来自 WSL，rename/delete/copy 等操作需走 wsl.exe */
+	wsl?: boolean;
 	codexSessionId?: string;
 	codexThreadSource?: "user" | "subagent";
 	codexParentThreadId?: string;
@@ -253,6 +259,8 @@ export type AgentRuntimeState = {
 	isExecutingTool?: boolean;
 	/** 当前正在执行的工具名称，如 read、write、bash */
 	executingToolName?: string;
+	/** 工具状态事件的单调序号，用于忽略晚到的异步完整状态。 */
+	toolStateSequence?: number;
 	contextTokens?: number | null;
 	contextWindow?: number | null;
 	contextPercent?: number | null;
@@ -297,6 +305,8 @@ export type AppSettings = {
 	/** 界面语言，system 跟随系统语言；pseudo 用于长文案布局压力测试 */
 	language: AppLanguageMode;
 	piEnvironmentChecked: boolean;
+	/** 是否启用会话右侧的 Git 源代码管理入口与面板，默认开启以保持升级前行为。 */
+	enableGitManagement: boolean;
 	/** 关闭窗口时隐藏到系统托盘而不是退出 */
 	closeToTray: boolean;
 	/** 会话结束时发送系统通知 */
@@ -319,8 +329,7 @@ export type AppSettings = {
 	desktopProxyBypass: string;
 	/** 用户手动指定的 pi CLI 命令路径，自动检测不到时用于兜底 */
 	customPiPath: string;
-	/** WSL 中检测到的 pi 命令路径（只读缓存，由 PiLocator.check 回填） */
-	wslPiCommand?: string;
+
 	/** 是否发送匿名、低频、最小字段的使用统计 */
 	telemetryEnabled: boolean;
 	/** 是否开启局域网 Web 服务 */
@@ -390,6 +399,11 @@ export type AppSettings = {
 	fontFamilyMono: AppFontMonoMode;
 	/** fontFamilyMono=custom 时的自定义字体族栈，原样写入 CSS font-family */
 	fontFamilyMonoCustom: string;
+
+	// ── 更新检测 ──
+	/** 是否禁用版本更新检测（PiDeck + Pi CLI），默认 false 表示正常检测；
+	 *  开启后自动跳过启动和定时检测，设置页中检测按钮也禁用。 */
+	disableUpdateCheck: boolean;
 };
 
 // ── 桌面宠物类型 ──
@@ -610,6 +624,98 @@ export interface SkillStoreSearchResult {
 	items: PromptStoreItem[];
 }
 
+// ── SkillHub（api.skillhub.cn） ─────────────────────────────────────
+
+/** SkillHub 搜索结果中的单个 skill 条目 */
+export interface SkillHubItem {
+	slug: string;
+	name: string;
+	description: string;
+	description_zh?: string;
+	iconUrl?: string;
+	stars: number;
+	downloads: number;
+	installs: number;
+	category: string;
+	subCategories?: Array<{ key: string; name: string }>;
+	version: string;
+	ownerName: string;
+	namespace?: {
+		canonicalName: string;
+		displayName: string;
+		publicSlug: string;
+	};
+	labels?: Record<string, string>;
+	tags?: Record<string, string>;
+	source?: string;
+	verified?: boolean;
+	updatedAt?: number;
+}
+
+/** SkillHub skill 详情（含版本信息） */
+export interface SkillHubDetail {
+	skill: {
+		slug: string;
+		displayName: string;
+		summary: string;
+		summary_zh?: string;
+		iconUrl?: string;
+		stats: {
+			comments: number;
+			downloads: number;
+			installs: number;
+			stars: number;
+			versions: number;
+		};
+		category: string;
+		subCategories?: Array<{ key: string; name: string }>;
+		labels?: Record<string, string>;
+		createdAt: number;
+		updatedAt: number;
+		source?: string;
+		verified?: boolean;
+	};
+	latestVersion: {
+		version: string;
+		changelog?: string;
+		createdAt: number;
+	};
+	owner: {
+		displayName: string;
+		handle: string;
+		image?: string | null;
+	};
+	namespace: {
+		canonicalName: string;
+		displayName: string;
+		handle: string;
+		publicSlug: string;
+	};
+	securityReports?: {
+		[key: string]: {
+			status: string;
+			statusText: string;
+			reportUrl?: string;
+		};
+	};
+}
+
+/** SkillHub 搜索结果整体 */
+export interface SkillHubSearchResult {
+	query: string;
+	total: number;
+	items: SkillHubItem[];
+}
+
+/** SkillHub 安装结果 */
+export interface SkillHubInstallResult {
+	success: boolean;
+	slug: string;
+	installDir: string;
+	message?: string;
+	error?: string;
+}
+
 // ── Yao Open Prompts（中文提示词精选） ─────────────────────────────────
 
 export type YaoPromptCategory = {
@@ -714,6 +820,8 @@ export type PiProxyTestResult = {
 export type AppInfo = {
 	version: string;
 	releasesUrl: string;
+	/** 当前运行平台：win32 / darwin / linux，用于 UI 中按平台条件渲染（如 WSL 选项仅在 Windows 显示） */
+	platform: NodeJS.Platform;
 };
 
 export type FeedbackEnvironment = {
@@ -794,12 +902,128 @@ export type GitFileStatus = "modified" | "added" | "deleted" | "renamed";
 export type GitChangedFile = {
 	path: string;
 	status: GitFileStatus;
+	/** 重命名文件在父提交中的原始路径；其他状态不设置。 */
+	originalPath?: string;
 };
 
 /** git worktree --porcelain 输出解析出的单条工作树信息 */
 export type WorktreeEntry = {
 	path: string;
 	branch: string;
+};
+
+// ── VS Code 风格 Git Status 系统 ─────────────────────────────────────
+
+/** Git 文件状态枚举，对应 VS Code Status enum（非 const，用于运行时映射） */
+export enum GitStatus {
+	INDEX_MODIFIED,
+	INDEX_ADDED,
+	INDEX_DELETED,
+	INDEX_RENAMED,
+	INDEX_COPIED,
+	MODIFIED,
+	DELETED,
+	UNTRACKED,
+	IGNORED,
+	INTENT_TO_ADD,
+	INTENT_TO_RENAME,
+	TYPE_CHANGED,
+	ADDED_BY_US,
+	ADDED_BY_THEM,
+	DELETED_BY_US,
+	DELETED_BY_THEM,
+	BOTH_ADDED,
+	BOTH_DELETED,
+	BOTH_MODIFIED,
+	/** 追加在末尾以保持既有 GitStatus 数值稳定。 */
+	INDEX_TYPE_CHANGED,
+}
+
+/** Git 资源组类型，对应 VS Code ResourceGroupType */
+export type GitResourceGroupType = "merge" | "index" | "workingTree" | "untracked";
+
+/** 单个 Git 变更资源，对应 VS Code Resource 类 */
+export type GitResource = {
+	/** 文件绝对路径 */
+	path: string;
+	/** Git 状态 */
+	status: GitStatus;
+	/** 状态字母 (M/A/D/R/U/!/T) */
+	letter: string;
+	/** 重命名/拷贝的原始路径 */
+	oldPath?: string;
+};
+
+/** 按组分类的 Git 资源 */
+export type GitResourceGroups = {
+	merge: GitResource[];
+	index: GitResource[];
+	workingTree: GitResource[];
+	untracked: GitResource[];
+};
+
+/** Git Changes 各资源组打开 Diff 时的比较上下文。 */
+export type GitWorkspaceDiffGroup = GitResourceGroupType;
+
+/**
+ * Git 工作区单文件 Diff 的两侧快照。内容只在用户点击资源行时读取，
+ * 不随 status 轮询返回，避免在常驻 Git 抽屉中缓存所有变更文件内容。
+ */
+export type GitWorkspaceFileDiff = {
+	/** 当前工作区文件绝对路径，供只读 Diff Viewer 识别语言和标签。 */
+	path: string;
+	originalContent: string;
+	modifiedContent: string;
+};
+
+// ── Git 增强：提交历史 / 分支对比 / Graph ──────────────────────────────
+
+/** 单个 Git 提交记录，对应 git log 一行输出 */
+export type CommitEntry = {
+	hash: string;          // 完整 SHA
+	shortHash: string;     // 短 SHA（前 7 位）
+	message: string;       // 提交信息首行（subject）
+	authorName: string;
+	authorEmail: string;
+	authorDate: number;    // unix timestamp
+	parents: string[];     // 父提交 hash 列表
+	refNames: string[];    // 关联的 ref 名称（如 HEAD -> main, origin/main）
+	/** git log --graph 输出的 ASCII 图谱行（等宽字体渲染即得分支图） */
+	graph: string[];
+	/** 完整提交信息；历史列表仍使用 message 作为单行 subject。 */
+	fullMessage?: string;
+	/** 改动的文件统计（仅 getCommitDetail 填充，getCommitLog 不包含） */
+	shortStat?: { files: number; insertions: number; deletions: number };
+};
+
+/** 单个提交的按需详情，对应 VS Code SCM History 的 resolve + changes。 */
+export type CommitDetail = {
+	commit: CommitEntry;
+	files: GitChangedFile[];
+};
+
+/** 提交历史中单个文件相对第一父提交的两侧内容，供 Monaco Diff Viewer 展示。 */
+export type GitCommitFileDiff = {
+	path: string;
+	originalPath?: string;
+	originalContent: string;
+	modifiedContent: string;
+};
+
+/** Git 引用（分支 / 远程分支 / Tag） */
+export type GitRef = {
+	name: string;          // 短名称（如 main, v1.0）
+	fullName: string;      // 完整 ref（如 refs/heads/main）
+	hash: string;          // 对象 SHA
+	type: "head" | "remote" | "tag";
+};
+
+/** 两个分支之间的差异概要 */
+export type BranchDiffResult = {
+	/** 变更的文件列表（base...target 三点语法 symmetric difference） */
+	files: GitChangedFile[];
+	ahead: number;   // target 比 base 多几个 commit
+	behind: number;  // target 比 base 少几个 commit（等于 0 时 base 是 target 的子集）
 };
 
 export type CreateAgentInput = {
@@ -831,6 +1055,12 @@ export type SendPromptInput = {
 	 *  从模板 description、用户输入首行自动提取；飞书/WebService 等外部来源可不传。 */
 	description?: string;
 };
+
+/** 主进程完成 pi prompt 预检后的明确接收结果。 */
+export type SendPromptResult =
+	| { accepted: true }
+	| { accepted: false; error: string; delivery?: "rejected" }
+	| { accepted: false; error: string; delivery: "unknown" };
 
 /** 实时思考内容更新，用于流式展示模型推理过程 */
 export type ThinkingUpdate = {

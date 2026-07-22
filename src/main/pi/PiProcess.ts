@@ -22,18 +22,28 @@ type PiProcessLocator = Pick<
 
 type VersionCacheEntry =
   | { status: "pending"; promise: Promise<boolean> }
-  | { status: "done"; ok: boolean; majorVersion: number | null };
+  | { status: "done"; ok: boolean; minorVersion: number | null };
 
 export class PiProcess extends EventEmitter {
   private proc?: ChildProcessWithoutNullStreams;
   private rpc?: PiRpcClient;
-  /** 从 --version 解析出的主版本号，用于启动诊断信息。 */
-  private piMajorVersion: number | null = null;
+  /** 从 --version 解析出的次版本号（第二段），用于启动诊断和信任标志兼容性判断。 */
+  private piMinorVersion: number | null = null;
   /**
    * pi --version 只用于启动失败后的诊断，不应阻塞真正的 RPC 进程启动。
    * 按 command 路径缓存结果，避免连续打开多个 Agent 时重复启动 Node shim。
    */
   private static readonly versionCache = new Map<string, VersionCacheEntry>();
+
+  /**
+   * --approve/--no-approve 信任标志在 pi 0.79.0 引入。
+   * 检查次版本号是否 >= 79（当前 pi 版本为 0.x.y，次版本号对应第二段）。
+   * 未来 pi 升级到 1.x+ 后需要同步更新此检查。
+   */
+  private static versionSupportsTrustFlags(minorVersion: number | null): boolean {
+    if (minorVersion === null) return false;
+    return minorVersion >= 79;
+  }
 
   /** 启动失败 / 异常退出时的诊断信息 */
   private diagnostics: {
@@ -69,51 +79,87 @@ export class PiProcess extends EventEmitter {
     return this.diagnostics;
   }
 
-  start(sessionPath?: string, trustOverride?: "approve" | "no-approve") {
+  async start(sessionPath?: string, trustOverride?: "approve" | "no-approve") {
     if (this.proc) return this.rpc!;
 
     // 信任确认由桌面端 AgentManager.ensureProjectTrust 在启动 pi 前完成，不再静默 --approve。
     // pi 在 RPC 模式下 project_trust 事件 hasUI 恒为 false，故信任弹窗由桌面端自行处理。
     const args = ["--mode", "rpc"];
-    if (sessionPath) args.push("--session", sessionPath);
-    // 信任覆盖：用 --approve/--no-approve 覆盖 pi 的 trustStore 决策（本次生效，不落盘）。
-    // trust-session 用 --approve 让 pi 本次加载项目资源；deny 用 --no-approve 以不信任模式启动。
-    if (trustOverride === "approve") args.push("--approve");
-    else if (trustOverride === "no-approve") args.push("--no-approve");
+    // WSL 模式下仅跳过 Windows 格式的会话路径（跨环境残留数据），
+    // WSL 原生路径（/home/... 或 /mnt/...）正常传递以恢复已有会话。
+    const isWsl = this.settings?.wslEnabled && this.settings?.wslDistro && this.settings?.wslUser;
+    const isWinPath = sessionPath && /^[A-Za-z]:[/\\]/.test(sessionPath);
+    if (sessionPath && !(isWsl && isWinPath)) args.push("--session", sessionPath);
 
     // 用户手动指定的 pi 路径优先于自动检测，解决 npm global、nvm 等路径未在 PATH 中的问题
     const command = this.locator.resolveCommand(this.settings?.customPiPath, this.settings?.wslEnabled, this.settings?.wslDistro, this.settings?.wslUser);
+
+    // 信任覆盖：用 --approve/--no-approve 覆盖 pi 的 trustStore 决策（本次生效，不落盘）。
+    // trust-session 用 --approve 让 pi 本次加载项目资源；deny 用 --no-approve 以不信任模式启动。
+    // --approve/--no-approve 从 pi 0.79.0 开始支持。对老版本 pi 不传递这些参数，
+    // 避免 "unknown option" 错误导致 RPC 进程启动失败。
+    if (trustOverride) {
+      await this.ensureVersionCheck(command);
+      const cached = PiProcess.versionCache.get(command);
+      if (cached?.status === "done" && PiProcess.versionSupportsTrustFlags(cached.minorVersion)) {
+        if (trustOverride === "approve") args.push("--approve");
+        else if (trustOverride === "no-approve") args.push("--no-approve");
+      }
+      // 版本不支持信任标志时静默跳过：老版本 pi 无 trust 系统，自动加载所有资源。
+    }
+
     const invocation = this.locator.createInvocation(command, args);
 
-    // WSL 模式下需要把 Windows 路径转为 Linux 路径，否则 pi 在 WSL 中找不到项目目录和 session 文件。
-    const wslCwd = invocation.wsl ? PiLocator.windowsPathToWslPath(this.cwd) : this.cwd;
+    // WSL 模式：spawn 的 cwd 必须是 Windows 路径（wsl.exe 会将其转为 WSL 初始目录），
+    // 不能用 Linux 路径否则 spawn ENOENT。
+    // 项目路径可能是 WSL Linux 格式（/mnt/d/...），需要转回 Windows 盘符路径。
+    let spawnCwd = this.cwd;
+    let diagnosticCwd = this.cwd;
+    if (invocation.wsl) {
+      // /mnt/d/tmp → D:\tmp
+      const mntMatch = spawnCwd.match(/^\/mnt\/([a-z])\/(.*)/);
+      if (mntMatch) {
+        spawnCwd = `${mntMatch[1].toUpperCase()}:\\${mntMatch[2].replace(/\//g, '\\')}`;
+      } else if (spawnCwd.startsWith("/")) {
+        // WSL 内部路径（/home/piuser/...）：Windows 无法作为 CWD，回退到 Windows home
+        spawnCwd = process.env.USERPROFILE || "C:\\Users\\Default";
+      }
+      // 诊断用保持 Linux 路径
+      diagnosticCwd = spawnCwd !== this.cwd ? this.cwd : PiLocator.windowsPathToWslPath(this.cwd);
+    }
     // 如果 args 中携带了 --session，也需要把 Windows 路径转为 WSL 路径。
     const sessionIndex = invocation.args.indexOf("--session");
     const finalArgs = sessionIndex >= 0 && invocation.wsl
       ? invocation.args.map((a, i) => i === sessionIndex + 1 ? PiLocator.windowsPathToWslPath(a) : a)
       : invocation.args;
 
-    // 初始化诊断信息。versionCheck 只作为故障诊断字段，不能阻塞 RPC 启动；
-    // 若缓存里已有成功结果立即填入，否则先标记 false，后台检查完成后再更新。
+    // 初始化诊断信息。信任场景的版本检测已在上方同步完成。
+    // 非信任场景仍异步触发，不阻塞 RPC 启动。
     const cachedVersion = PiProcess.versionCache.get(command);
-    this.piMajorVersion = cachedVersion?.status === "done" ? cachedVersion.majorVersion : this.piMajorVersion;
+    this.piMinorVersion = cachedVersion?.status === "done" ? cachedVersion.minorVersion : this.piMinorVersion;
     this.diagnostics = {
       command: command,
       args: finalArgs,
-      cwd: wslCwd,
+      cwd: diagnosticCwd,
       stderr: [],
       exitCode: null,
       exitSignal: null,
       customPiPath: this.settings?.customPiPath,
       versionCheck: cachedVersion?.status === "done" ? cachedVersion.ok : false,
     };
-    void this.ensureVersionCheck(command);
+    if (!trustOverride) {
+      void this.ensureVersionCheck(command);
+    }
+
+    // 打印等效命令行，方便在终端重现排查
+    console.log('[PiProcess] spawn等效命令:', [invocation.command, ...finalArgs].map(a => a.includes(' ') ? `"${a}"` : a).join(' '));
+    console.log('[PiProcess] spawn参数:', JSON.stringify({ command: invocation.command, shell: invocation.shell, cwd: spawnCwd, wslCwd: diagnosticCwd, argsCount: finalArgs.length }));
 
     // 每个 agent 绑定独立 cwd，确保 pi 自己发现项目级 AGENTS.md、settings 和 session 分组。
     // 打包后的 Electron 不一定继承用户终端 PATH；这里补齐跨平台 Node 工具链常见 bin 目录，尽量让已安装 pi 的用户开箱即用。
     // Windows 下通过 PiLocator.createInvocation 显式包裹含空格的 npm shim 路径，避免 cmd 拆分路径导致 agent 启动失败。
     this.proc = spawn(invocation.command, finalArgs, {
-      cwd: wslCwd,
+      cwd: spawnCwd,
       stdio: ["pipe", "pipe", "pipe"],
       shell: invocation.shell,
       env: this.locator.createProcessEnv(this.settings, invocation.pathPrefix, invocation.wsl),
@@ -173,7 +219,7 @@ export class PiProcess extends EventEmitter {
   private ensureVersionCheck(command: string): Promise<boolean> {
     const cached = PiProcess.versionCache.get(command);
     if (cached?.status === "done") {
-      this.piMajorVersion = cached.majorVersion;
+      this.piMinorVersion = cached.minorVersion;
       if (this.diagnostics?.command === command) this.diagnostics.versionCheck = cached.ok;
       return Promise.resolve(cached.ok);
     }
@@ -189,11 +235,11 @@ export class PiProcess extends EventEmitter {
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       }, (error, stdout) => {
         const ok = !error;
-        const majorVersion = ok ? this.parseMajorVersion(stdout.trim()) : 0;
-        PiProcess.versionCache.set(command, { status: "done", ok, majorVersion });
-        this.piMajorVersion = majorVersion;
+        const minorVersion = ok ? this.parseMinorVersion(stdout.trim()) : 0;
+        PiProcess.versionCache.set(command, { status: "done", ok, minorVersion });
+        this.piMinorVersion = minorVersion;
         if (this.diagnostics?.command === command) this.diagnostics.versionCheck = ok;
-        this.emit("version-check", { ok, majorVersion });
+        this.emit("version-check", { ok, minorVersion });
         resolve(ok);
       });
     });
@@ -202,13 +248,13 @@ export class PiProcess extends EventEmitter {
   }
 
   /**
-   * 从 pi 的版本号字符串提取主版本号。
-   * 格式通常为 "0.79.4"，支持语义化版本或裸数字。
+   * 从 pi 的版本号字符串提取次版本号（第二段），用于信任标志兼容性判断。
+   * 格式通常为 "0.79.4"，返回 79。
    */
-  private parseMajorVersion(version: string): number {
+  private parseMinorVersion(version: string): number {
     const match = version.match(/^(\d+)\.(\d+)/);
     if (match) return parseInt(match[2], 10);
-    // fallback：如果只有主版本号
+    // fallback：如果只有主版本号或裸数字
     const major = parseInt(version, 10);
     return Number.isFinite(major) ? major : 0;
   }

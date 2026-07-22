@@ -126,6 +126,7 @@ let previewSettings: AppSettings = {
 	lightBackground: "white",
 	language: "system",
 	piEnvironmentChecked: true,
+	enableGitManagement: true,
 	closeToTray: true,
 	enableNotifications: true,
 	// showThinking 由 pi agent 的 hideThinkingBlock 控制，运行时从主进程加载
@@ -169,6 +170,7 @@ let previewSettings: AppSettings = {
 	fontFamilyBaseCustom: "",
 	fontFamilyMono: "commit-mono",
 	fontFamilyMonoCustom: "",
+	disableUpdateCheck: false,
 };
 
 export function createPreviewApi(): PiDesktopApi {
@@ -226,6 +228,8 @@ export function createPreviewApi(): PiDesktopApi {
 			listRoot: async () => projects,
 			listWorktreeChildren: async () => [],
 			toggleWorktreeEnabled: async () => projects[0],
+			chooseChatPath: async () => null,
+			setChatPath: async () => projects[0],
 		},
 		projectResources: {
 			list: async () => ({ skills: [], extensions: [] }),
@@ -320,13 +324,23 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			// 预览环境无真实 Git，返回空原始内容，差异左侧显示为空。
 			originalContent: async () => "",
-			changedFiles: async () => [],
 			worktreeList: async () => [],
 			worktreeCreate: async (_projectId, branchName) => ({
 				path: `/tmp/worktree/${branchName}`,
 				branch: branchName,
 			}),
 			worktreeRemove: async () => true,
+				commitLog: async () => [],
+				refs: async () => [],
+				branchCompare: async () => ({ files: [], ahead: 0, behind: 0 }),
+				commitDetail: async () => null,
+				commitFileDiff: async () => null,
+				diffFileBetween: async () => "",
+				status: async () => ({ merge: [], index: [], workingTree: [], untracked: [] }),
+				workspaceFileDiff: async () => null,
+				stage: async () => {},
+				unstage: async () => {},
+				commit: async () => {},
 		},
 		logs: {
 			list: async () => [],
@@ -376,11 +390,22 @@ export function createPreviewApi(): PiDesktopApi {
 				version: "preview",
 			}),
 		},
+		wsl: {
+			listDistros: async () => ["Ubuntu", "Debian"],
+			validateConnection: async (_distro, _user) => ({
+				ok: true,
+				whoami: "preview",
+				piVersion: "preview",
+				error: "",
+			}),
+		},
 		app: {
 			info: async () => ({
 				version: "preview",
 				releasesUrl: "https://github.com/ayuayue/pi-desktop/releases",
+				platform: "win32" as NodeJS.Platform,
 			}),
+			preferredSystemLanguages: async () => navigator.languages?.length ? [...navigator.languages] : [navigator.language],
 			checkUpdate: async () => ({
 				currentVersion: "preview",
 				latestVersion: "preview",
@@ -396,6 +421,7 @@ export function createPreviewApi(): PiDesktopApi {
 			}),
 			installUpdate: async () => undefined,
 			onUpdateProgress: () => () => undefined,
+			onOpenInBrowser: () => () => undefined,
 			feedbackEnvironment: async () => ({
 				appVersion: "preview",
 				platform: "win32",
@@ -575,6 +601,11 @@ export function createPreviewApi(): PiDesktopApi {
 				type: "directory",
 			}),
 		},
+		skillHub: {
+			search: async () => ({ query: "", total: 0, items: [] }),
+			detail: async () => null,
+			install: async (slug) => ({ success: true, slug, installDir: "", message: "Preview install" }),
+		},
 		settings: {
 			get: async (): Promise<AppSettings> => ({ ...previewSettings }),
 			update: async (patch): Promise<AppSettings> => {
@@ -637,7 +668,7 @@ export function createPreviewApi(): PiDesktopApi {
 				return agent;
 			},
 			stop: async () => undefined,
-			prompt: async () => undefined,
+			prompt: async () => ({ accepted: true }),
 			abort: async () => undefined,
 			exportHtml: async () => ({ path: "preview.html" }),
 			getForkMessages: async () => [
@@ -683,6 +714,10 @@ export function createPreviewApi(): PiDesktopApi {
 				{ id: "preview", name: "Preview GPT", provider: "preview" },
 			],
 			setModel: async () => ({
+				modelName: "Preview GPT",
+				thinkingLevel: "low",
+			}),
+			refreshModels: async () => ({
 				modelName: "Preview GPT",
 				thinkingLevel: "low",
 			}),

@@ -37,6 +37,7 @@ const defaultSettings: AppSettings = {
   lightBackground: "white",
   language: "system",
   piEnvironmentChecked: false,
+  enableGitManagement: true,
   closeToTray: true,
   enableNotifications: true,
   showThinking: readPiAgentShowThinking() ?? true,
@@ -71,6 +72,9 @@ const defaultSettings: AppSettings = {
   // 巡游碰边后 idle 停顿默认 5 分钟
   petPatrolPauseMin: 5,
   favoriteModels: [],
+
+  // ── 更新检测：默认正常检测，用户可手动关闭忽略更新 ──
+  disableUpdateCheck: false,
 
   // 字体配置：默认值保证与历史版本行为一致，零回归
   fontSize: "default",

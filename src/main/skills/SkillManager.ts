@@ -26,10 +26,27 @@ const SKILL_FILE = "SKILL.md";
  * 第一版仅操作全局目录，不触碰项目级 .pi/.agents skills，避免误删项目资产或绕过 trusted project 规则。
  */
 export class SkillManager {
-	private readonly locations: PiSkillLocation[];
+	private locations: PiSkillLocation[];
 
-	constructor(home = homedir()) {
-		this.locations = [
+	constructor(home?: string) {
+		this.locations = this.buildLocations(home ?? homedir());
+	}
+
+	/**
+	 * 配置 WSL 模式：将 skill 目录指向 WSL 发行版内的路径（通过 \\wsl$ UNC 访问）。
+	 * 传入 null 恢复为本地 Windows home 目录。
+	 */
+	configureWsl(distro: string | null, user?: string) {
+		if (distro && user) {
+			const uncHome = `\\\\wsl$\\${distro}\\home\\${user}`;
+			this.locations = this.buildLocations(uncHome);
+		} else {
+			this.locations = this.buildLocations(homedir());
+		}
+	}
+
+	private buildLocations(home: string): PiSkillLocation[] {
+		return [
 			{
 				id: "pi-global",
 				label: "~/.pi/agent/skills",

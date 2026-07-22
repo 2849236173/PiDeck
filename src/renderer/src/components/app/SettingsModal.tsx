@@ -1,5 +1,5 @@
 // @ts-nocheck - extracted from AppParts, pre-existing type issues
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
 import {
 	Settings2,
 	Network,
@@ -24,6 +24,13 @@ const ZOOM_FACTOR_MAX = 1.5;
 const ZOOM_FACTOR_STEP = 0.05;
 
 type SettingsTabId = "base" | "proxy" | "web" | "dev" | "pet" | "storage";
+
+/** 代理设置草稿：未保存前不生效，用户点击保存后才提交。 */
+type ProxyDraft = Pick<
+	AppSettings,
+	"piProxyEnabled" | "piProxyUrl" | "piProxyBypass" |
+	"desktopProxyEnabled" | "desktopProxyUrl" | "desktopProxyBypass"
+>;
 
 function SettingsSection(props: {
 	title: string;
@@ -97,6 +104,60 @@ export function SettingsModal(props: {
 	onChange: (patch: Partial<AppSettings>) => void;
 }) {
 	const [activeTab, setActiveTab] = useState<SettingsTabId>("base");
+	// ── 代理设置草稿状态 ──
+	const [proxyDraft, setProxyDraft] = useState<ProxyDraft | null>(null);
+	// 进入代理设置页时初始化草稿，离开时丢弃草稿（未保存的更改不生效）
+	useEffect(() => {
+		if (activeTab === "proxy") {
+			setProxyDraft({
+				piProxyEnabled: props.settings.piProxyEnabled,
+				piProxyUrl: props.settings.piProxyUrl,
+				piProxyBypass: props.settings.piProxyBypass,
+				desktopProxyEnabled: props.settings.desktopProxyEnabled,
+				desktopProxyUrl: props.settings.desktopProxyUrl,
+				desktopProxyBypass: props.settings.desktopProxyBypass,
+			});
+		} else {
+			setProxyDraft(null);
+		}
+	}, [activeTab]);
+	// 检测代理草稿是否与已保存的设置不同
+	const proxyDirty = useMemo(() => {
+		if (!proxyDraft) return false;
+		return (
+			proxyDraft.piProxyEnabled !== props.settings.piProxyEnabled ||
+			proxyDraft.piProxyUrl !== props.settings.piProxyUrl ||
+			proxyDraft.piProxyBypass !== props.settings.piProxyBypass ||
+			proxyDraft.desktopProxyEnabled !== props.settings.desktopProxyEnabled ||
+			proxyDraft.desktopProxyUrl !== props.settings.desktopProxyUrl ||
+			proxyDraft.desktopProxyBypass !== props.settings.desktopProxyBypass
+		);
+	}, [proxyDraft, props.settings]);
+	// 应用代理设置：仅将变更的字段提交给父组件保存
+	const applyProxyChanges = () => {
+		if (!proxyDraft) return;
+		const patch: Partial<AppSettings> = {};
+		if (proxyDraft.piProxyEnabled !== props.settings.piProxyEnabled) patch.piProxyEnabled = proxyDraft.piProxyEnabled;
+		if (proxyDraft.piProxyUrl !== props.settings.piProxyUrl) patch.piProxyUrl = proxyDraft.piProxyUrl;
+		if (proxyDraft.piProxyBypass !== props.settings.piProxyBypass) patch.piProxyBypass = proxyDraft.piProxyBypass;
+		if (proxyDraft.desktopProxyEnabled !== props.settings.desktopProxyEnabled) patch.desktopProxyEnabled = proxyDraft.desktopProxyEnabled;
+		if (proxyDraft.desktopProxyUrl !== props.settings.desktopProxyUrl) patch.desktopProxyUrl = proxyDraft.desktopProxyUrl;
+		if (proxyDraft.desktopProxyBypass !== props.settings.desktopProxyBypass) patch.desktopProxyBypass = proxyDraft.desktopProxyBypass;
+		props.onChange(patch);
+		setProxyDraft({ ...proxyDraft });
+	};
+	// 取消代理设置：恢复为已保存的值
+	const cancelProxyChanges = () => {
+		setProxyDraft({
+			piProxyEnabled: props.settings.piProxyEnabled,
+			piProxyUrl: props.settings.piProxyUrl,
+			piProxyBypass: props.settings.piProxyBypass,
+			desktopProxyEnabled: props.settings.desktopProxyEnabled,
+			desktopProxyUrl: props.settings.desktopProxyUrl,
+			desktopProxyBypass: props.settings.desktopProxyBypass,
+		});
+	};
+
 	const [perAreaFontSize, setPerAreaFontSize] = useState(
 		props.settings.uiFontSize !== null ||
 			props.settings.chatFontSize !== null ||
@@ -135,6 +196,95 @@ export function SettingsModal(props: {
 	useEffect(() => {
 		setWebPortDraft(String(props.settings.webServicePort));
 	}, [props.settings.webServicePort]);
+
+	// ── WSL 配置草稿状态 ──
+	// WSL 的三个耦合字段（enabled/distro/user）不直接 onChange 落盘，
+	// 而是进入本地 draft，用户点击"应用"后原子保存，避免中间态导致功能异常。
+	const [wslDraft, setWslDraft] = useState({
+		enabled: props.settings.wslEnabled,
+		distro: props.settings.wslDistro,
+		user: props.settings.wslUser,
+	});
+	const [wslUserInput, setWslUserInput] = useState(props.settings.wslUser);
+	const [wslDistros, setWslDistros] = useState<string[]>([]);
+	const [wslDistrosLoading, setWslDistrosLoading] = useState(false);
+	/** 防止 listDistros 失败后无限重试：无论结果如何最多拉取一次 */
+	const [wslDistrosAttempted, setWslDistrosAttempted] = useState(false);
+	const [wslValidating, setWslValidating] = useState(false);
+	const [wslValidation, setWslValidation] = useState<{
+		ok: boolean;
+		whoami: string;
+		piVersion: string;
+		error: string;
+	} | null>(null);
+	// 外部 settings 变更时同步回 draft（如用户切换设置页 tab 后返回）
+	useEffect(() => {
+		setWslDraft({
+			enabled: props.settings.wslEnabled,
+			distro: props.settings.wslDistro,
+			user: props.settings.wslUser,
+		});
+		setWslUserInput(props.settings.wslUser);
+		setWslValidation(null);
+	}, [props.settings.wslEnabled, props.settings.wslDistro, props.settings.wslUser]);
+	// WSL 发行版列表懒加载（仅 Windows + WSL 开启时拉取，无论成败只拉一次）
+	useEffect(() => {
+		const isWin = props.appInfo.platform === "win32";
+		// 预加载脚本可能未更新（需重启应用），缺少 wsl API 时静默跳过
+		if (isWin && wslDraft.enabled && !wslDistrosAttempted && !wslDistrosLoading && window.piDesktop.wsl) {
+			setWslDistrosLoading(true);
+			window.piDesktop.wsl
+				.listDistros()
+				.then((list) => { setWslDistros(list); setWslDistrosAttempted(true); })
+				.catch(() => { setWslDistros([]); setWslDistrosAttempted(true); })
+				.finally(() => setWslDistrosLoading(false));
+		}
+	}, [wslDraft.enabled, wslDistrosAttempted, wslDistrosLoading, props.appInfo.platform]);
+	const distroOptions = wslDistros.length > 0
+		? wslDistros.map((d) => ({ value: d, label: d }))
+		: [{ value: wslDraft.distro, label: wslDraft.distro }];
+	const handleValidateWslUser = async () => {
+		if (!window.piDesktop.wsl) {
+			setWslValidation({ ok: false, whoami: "", piVersion: "", error: "WSL API 未就绪，请重启应用后再试" });
+			return;
+		}
+		setWslValidating(true);
+		setWslValidation(null);
+		try {
+			const result = await window.piDesktop.wsl.validateConnection(wslDraft.distro, wslUserInput);
+			setWslValidation(result);
+			if (result.ok) {
+				setWslDraft((prev) => ({ ...prev, user: wslUserInput }));
+			}
+		} catch (err) {
+			setWslValidation({ ok: false, whoami: "", piVersion: "", error: String(err) });
+		} finally {
+			setWslValidating(false);
+		}
+	};
+	const handleApplyWsl = () => {
+		// 原子保存三个 WSL 字段，触发主进程配置 SessionScanner 并刷新会话列表
+		props.onChange({
+			wslEnabled: wslDraft.enabled,
+			wslDistro: wslDraft.distro,
+			wslUser: wslDraft.user,
+		});
+	};
+	const handleCancelWsl = () => {
+		setWslDraft({
+			enabled: props.settings.wslEnabled,
+			distro: props.settings.wslDistro,
+			user: props.settings.wslUser,
+		});
+		setWslUserInput(props.settings.wslUser);
+		setWslValidation(null);
+	};
+	// 草稿已变更或用户已通过验证 → 允许应用
+	const wslCanApply =
+		wslDraft.enabled !== props.settings.wslEnabled ||
+		wslDraft.distro !== props.settings.wslDistro ||
+		wslDraft.user !== props.settings.wslUser ||
+		(wslValidation?.ok === true && wslDraft.user === wslUserInput);
 
 	// 宠物包列表：异步加载内置 + petdex 社区包，供选择下拉使用
 	const [petOptions, setPetOptions] = useState<{ value: string; label: string }[]>([]);
@@ -288,6 +438,14 @@ export function SettingsModal(props: {
 											props.onChange({
 												language: value as AppSettings["language"],
 											})
+										}
+									/>
+									<SettingSwitch
+										title={t("settings.gitManagement")}
+										description={t("settings.gitManagementDesc")}
+										checked={props.settings.enableGitManagement}
+										onChange={(checked) =>
+											props.onChange({ enableGitManagement: checked })
 										}
 									/>
 									<SettingSwitch
@@ -544,6 +702,14 @@ export function SettingsModal(props: {
 						)}
 						{activeTab === "proxy" && (
 							<>
+								{/* 未保存更改的提示横幅 */}
+								{proxyDirty && (
+									<div className="setting-proxy-unsaved-bar">
+										<span className="setting-proxy-unsaved-dot" />
+										<span>{t("settings.proxyUnsaved")}</span>
+										<small>{t("settings.proxyApplyHint")}</small>
+									</div>
+								)}
 								<SettingsSection
 									title={t("settings.piProxy")}
 									description={t("settings.piProxyDesc")}
@@ -551,30 +717,30 @@ export function SettingsModal(props: {
 									<SettingSwitch
 										title={t("settings.enablePiProxy")}
 										description={t("settings.settingTakesEffectAfterRestart")}
-										checked={props.settings.piProxyEnabled}
+										checked={proxyDraft?.piProxyEnabled ?? props.settings.piProxyEnabled}
 										onChange={(checked) =>
-											props.onChange({ piProxyEnabled: checked })
+											setProxyDraft((prev) => prev ? { ...prev, piProxyEnabled: checked } : null)
 										}
 									/>
-									{props.settings.piProxyEnabled && (
+									{(proxyDraft?.piProxyEnabled ?? props.settings.piProxyEnabled) && (
 										<div className="setting-proxy-panel">
 											<TextField
 												className="setting-field"
 												label={t("settings.proxyUrl")}
-												value={props.settings.piProxyUrl}
+												value={proxyDraft?.piProxyUrl ?? props.settings.piProxyUrl}
 												placeholder="http://127.0.0.1:7890"
 												onChange={(value) =>
-													props.onChange({ piProxyUrl: value })
+													setProxyDraft((prev) => prev ? { ...prev, piProxyUrl: value } : null)
 												}
 											/>
 											<TextField
 												className="setting-field"
 												label={t("settings.proxyBypass")}
-												value={props.settings.piProxyBypass}
+												value={proxyDraft?.piProxyBypass ?? props.settings.piProxyBypass}
 												placeholder="localhost,127.0.0.1,::1"
 												description={t("settings.noProxyHint")}
 												onChange={(value) =>
-													props.onChange({ piProxyBypass: value })
+													setProxyDraft((prev) => prev ? { ...prev, piProxyBypass: value } : null)
 												}
 											/>
 											<div className="setting-row">
@@ -606,35 +772,48 @@ export function SettingsModal(props: {
 									<SettingSwitch
 										title={t("settings.enableDesktopProxy")}
 										description={t("settings.desktopProxyDesc")}
-										checked={props.settings.desktopProxyEnabled}
+										checked={proxyDraft?.desktopProxyEnabled ?? props.settings.desktopProxyEnabled}
 										onChange={(checked) =>
-											props.onChange({ desktopProxyEnabled: checked })
+											setProxyDraft((prev) => prev ? { ...prev, desktopProxyEnabled: checked } : null)
 										}
 									/>
-									{props.settings.desktopProxyEnabled && (
+									{(proxyDraft?.desktopProxyEnabled ?? props.settings.desktopProxyEnabled) && (
 										<div className="setting-proxy-panel">
 											<TextField
 												className="setting-field"
 												label={t("settings.proxyUrl")}
-												value={props.settings.desktopProxyUrl}
+												value={proxyDraft?.desktopProxyUrl ?? props.settings.desktopProxyUrl}
 												placeholder="http://127.0.0.1:7890"
 												onChange={(value) =>
-													props.onChange({ desktopProxyUrl: value })
+													setProxyDraft((prev) => prev ? { ...prev, desktopProxyUrl: value } : null)
 												}
 											/>
 											<TextField
 												className="setting-field"
 												label={t("settings.proxyBypass")}
-												value={props.settings.desktopProxyBypass}
+												value={proxyDraft?.desktopProxyBypass ?? props.settings.desktopProxyBypass}
 												placeholder="localhost,127.0.0.1,::1"
 												description={t("settings.electronProxyHint")}
 												onChange={(value) =>
-													props.onChange({ desktopProxyBypass: value })
+													setProxyDraft((prev) => prev ? { ...prev, desktopProxyBypass: value } : null)
 												}
 											/>
 										</div>
 									)}
 								</SettingsSection>
+								{/* 保存/取消操作栏：点击保存后才将草稿中的代理设置提交生效 */}
+								<div className="setting-proxy-actions">
+									<Button onClick={applyProxyChanges} disabled={!proxyDirty} variant="primary">
+										{t("common.save")}
+									</Button>
+									<Button
+										onClick={cancelProxyChanges}
+										disabled={!proxyDirty}
+										variant="secondary"
+									>
+										{t("common.cancel")}
+									</Button>
+								</div>
 							</>
 						)}
 						{activeTab === "web" && (
@@ -792,62 +971,143 @@ export function SettingsModal(props: {
 											</small>
 										)}
 									</div>
+								{/* WSL pi 来源配置：仅 Windows 可见，使用局部 draft + 原子保存 */}
+								{props.appInfo.platform === "win32" && (
 								<div className="setting-pi-wsl-panel">
 									<SelectField
 										className="setting-field"
 										label={t("settings.piSource.label")}
 										description={t("settings.piSource.desc")}
-										value={props.settings.wslEnabled ? "wsl" : "windows"}
+										value={wslDraft.enabled ? "wsl" : "windows"}
 										options={[
 											{ value: "windows", label: t("settings.piSource.windows") },
 											{ value: "wsl", label: t("settings.piSource.wsl") },
 										]}
-										onChange={(value) => props.onChange({ wslEnabled: value === "wsl" })}
+										onChange={(value) => setWslDraft((prev) => ({ ...prev, enabled: value === "wsl" }))}
 									/>
-									{props.settings.wslEnabled && (
+									{wslDraft.enabled && (
 										<>
 											<div className="setting-wsl-fields">
-												<TextField
-													className="setting-field"
-													label={t("settings.wsl.distro")}
-													value={props.settings.wslDistro}
-													onChange={(value) => props.onChange({ wslDistro: value })}
-													placeholder="Ubuntu"
-												/>
-												<TextField
-													className="setting-field"
-													label={t("settings.wsl.user")}
-													value={props.settings.wslUser}
-													onChange={(value) => props.onChange({ wslUser: value })}
-													placeholder="root"
-												/>
-											</div>
-											<small className="setting-status info">
-												{t("settings.wsl.detectHint")}
-											</small>
-											<div className="setting-wsl-hints">
-												<div className="setting-wsl-hint">
-													<strong>{t("settings.wsl.howToGetDistro")}</strong>
-													<code>wsl -l -v</code>
+												{/* 发行版：自动检测到列表时用下拉，否则退化为手输 */}
+												{wslDistros.length > 0 ? (
+													<SelectField
+														className="setting-field"
+														label={t("settings.wsl.distro")}
+														value={wslDraft.distro}
+														options={distroOptions}
+														onChange={(value) => {
+															setWslDraft((prev) => ({ ...prev, distro: value }));
+															setWslValidation(null);
+														}}
+													/>
+												) : (
+													<TextField
+														className="setting-field"
+														label={t("settings.wsl.distro")}
+														value={wslDraft.distro}
+														onChange={(value) => {
+															setWslDraft((prev) => ({ ...prev, distro: value }));
+															setWslValidation(null);
+														}}
+														placeholder="Ubuntu"
+													/>
+												)}
+												{wslDistrosLoading && (
+													<small className="setting-status info">{t("settings.wsl.detectingDistros")}</small>
+												)}
+												<div className="setting-wsl-user-row">
+													<TextField
+														className="setting-field"
+														label={t("settings.wsl.user")}
+														value={wslUserInput}
+														onChange={(value) => {
+															setWslUserInput(value);
+															setWslValidation(null);
+														}}
+														placeholder="root"
+													/>
+													<Button
+														buttonSize="sm"
+														disabled={!wslUserInput.trim() || wslValidating}
+														loading={wslValidating}
+														onClick={handleValidateWslUser}
+													>
+														{t("settings.wsl.validateUser")}
+													</Button>
 												</div>
-												<div className="setting-wsl-hint">
-													<strong>{t("settings.wsl.howToGetUser")}</strong>
-													<code>wsl -d {props.settings.wslDistro || "Ubuntu"} -u {props.settings.wslUser || "root"} whoami</code>
-												</div>
 											</div>
-											<small className="setting-status warning">
-												{t("settings.wsl.warning")}
-											</small>
+											{/* 验证结果反馈 */}
+											{wslValidation && (
+												<div className={`setting-wsl-validation ${wslValidation.ok ? "success" : "error"}`}>
+													{wslValidation.ok ? (
+														<>
+															<small className="setting-status success">
+																{t("settings.wsl.validationOk", {
+																	user: wslValidation.whoami,
+																	distro: wslDraft.distro,
+																})}
+															</small>
+															{wslValidation.piVersion ? (
+																<small className="setting-status success">
+																	{t("settings.wsl.piDetected", { version: wslValidation.piVersion })}
+																</small>
+															) : (
+																<small className="setting-status warning">
+																	{wslValidation.error || t("settings.wsl.piNotInstalled")}
+																</small>
+															)}
+														</>
+													) : (
+														<small className="setting-status error">{wslValidation.error}</small>
+													)}
+												</div>
+											)}
 										</>
 									)}
+									{/* 应用/取消按钮：草稿变更时始终显示（包括从 WSL 切回 Windows 的场景，此时 wslDraft.enabled 已为 false，
+										但按钮仍需可见以让用户提交变更）。仅用 wslCanApply 控制可见性即可。 */}
+									{wslCanApply && (
+										<div className="setting-wsl-actions">
+											<Button
+												buttonSize="sm"
+												disabled={!wslCanApply}
+												onClick={handleApplyWsl}
+											>
+												{t("common.apply")}
+											</Button>
+											<Button
+												buttonSize="sm"
+												variant="secondary"
+												disabled={!wslCanApply}
+												onClick={handleCancelWsl}
+											>
+												{t("common.cancel")}
+											</Button>
+										</div>
+									)}
 								</div>
+								)}
+								<SettingSwitch
+									title={t("settings.disableUpdateCheck")}
+									description={t("settings.disableUpdateCheckDesc")}
+									checked={props.settings.disableUpdateCheck}
+									onChange={(checked) =>
+										props.onChange({ disableUpdateCheck: checked })
+									}
+								/>
 								<div className="setting-row">
 										<div>
 											<strong>{t("settings.currentVersion")}</strong>
 											<small>v{props.appInfo.version}</small>
 										</div>
-										<Button onClick={props.onCheckUpdate} loading={props.updateChecking}>
-											{t("settings.checkUpdate")}
+										<Button
+											onClick={props.onCheckUpdate}
+											loading={props.updateChecking}
+											disabled={props.settings.disableUpdateCheck}
+										>
+											{props.settings.disableUpdateCheck
+												? t("settings.updateCheckDisabled")
+												: t("settings.checkUpdate")}
 										</Button>
 									</div>
 									<div className="setting-row">
@@ -868,13 +1128,19 @@ export function SettingsModal(props: {
 											<Button
 												onClick={props.onCheckPiUpdate}
 												loading={props.piUpdateChecking}
+												disabled={props.settings.disableUpdateCheck}
 											>
-												{t("settings.checkPiUpdate")}
+												{props.settings.disableUpdateCheck
+													? t("settings.updateCheckDisabled")
+													: t("settings.checkPiUpdate")}
 											</Button>
 											<Button
 												onClick={props.onUpdatePi}
 												loading={props.piUpdating}
-												disabled={!props.piUpdateCheck?.hasUpdate}
+												disabled={
+													props.settings.disableUpdateCheck ||
+													!props.piUpdateCheck?.hasUpdate
+												}
 											>
 												{t("settings.updatePi")}
 											</Button>

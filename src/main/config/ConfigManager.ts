@@ -75,10 +75,22 @@ type TestRequest = {
  * 按照 pi 实际文件格式解析：models.json 是嵌套 providers 结构，auth.json 是对象映射。
  */
 export class ConfigManager {
-	private readonly configDir: string;
+	private configDir: string;
 
 	constructor(configDir?: string) {
 		this.configDir = configDir ?? PI_AGENT_DIR;
+	}
+
+	/**
+	 * 配置 WSL 模式：将配置目录指向 WSL 发行版内的 ~/.pi/agent/（通过 \\wsl$ UNC 访问）。
+	 * 传入 null 恢复为本地 Windows 配置目录。
+	 */
+	configureWsl(distro: string | null, user?: string) {
+		if (distro && user) {
+			this.configDir = join(`\\\\wsl$\\${distro}\\home\\${user}`, ".pi", "agent");
+		} else {
+			this.configDir = PI_AGENT_DIR;
+		}
 	}
 
 	// ── 读取 ──────────────────────────────────────────────

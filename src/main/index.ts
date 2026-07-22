@@ -128,7 +128,6 @@ import type { FeishuChatBinding } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
-let internalLinkWindow: BrowserWindow | null = null;
 /** 标记是否由用户主动退出（托盘菜单「退出」），区别于窗口关闭隐藏到托盘 */
 let isQuitting = false;
 let projectStore: ProjectStore;
@@ -497,42 +496,20 @@ async function openExternalUrl(url: string) {
 	if (!url.startsWith("http:") && !url.startsWith("https:")) return;
 	const settings = settingsStore.get();
 	if (settings.linkOpenMode === "internal") {
-		openInternalLinkWindow(url);
+		openInternalLinkInBrowserPanel(url);
 		return;
 	}
 	await shell.openExternal(url);
 }
 
-function openInternalLinkWindow(url: string) {
-	// 内部打开使用独立 BrowserWindow，避免外部网页导航污染主工作台，同时保留系统浏览器作为默认选项。
-	if (!internalLinkWindow || internalLinkWindow.isDestroyed()) {
-		internalLinkWindow = new BrowserWindow({
-			width: 1180,
-			height: 820,
-			minWidth: 760,
-			minHeight: 520,
-			title: "PiDeck",
-			parent: mainWindow ?? undefined,
-			webPreferences: {
-				nodeIntegration: false,
-				contextIsolation: true,
-				sandbox: true,
-			},
-		});
-		internalLinkWindow.on("closed", () => {
-			internalLinkWindow = null;
-		});
-		internalLinkWindow.webContents.setWindowOpenHandler(({ url: nextUrl }) => {
-			void openExternalUrl(nextUrl);
-			return { action: "deny" };
-		});
-	}
-	internalLinkWindow.loadURL(url).catch((error) => {
+function openInternalLinkInBrowserPanel(url: string) {
+	// 内部打开：将 URL 发送到渲染进程，由 BrowserPanel 在侧栏/弹框中加载，
+	// 替代之前的独立 BrowserWindow 方案，保持一致的浏览体验。
+	if (!mainWindow || mainWindow.isDestroyed()) {
 		void shell.openExternal(url);
-		console.warn("Failed to load internal link window, falling back to browser:", error);
-	});
-	internalLinkWindow.show();
-	internalLinkWindow.focus();
+		return;
+	}
+	mainWindow.webContents.send(ipcChannels.appOpenInBrowser, url);
 }
 
 function printStartupInfo() {
@@ -1080,7 +1057,17 @@ function registerFeishuIpc() {
 }
 
 function registerIpc() {
-	ipcMain.handle(ipcChannels.projectsList, () => projectStore.list());
+	// 获取当前环境过滤后的项目列表（WSL 模式只显示 WSL 项目，Chat 始终显示）
+	const getVisibleProjects = () => {
+		const settings = settingsStore.get();
+		const all = projectStore.list();
+		if (settings.wslEnabled) {
+			return all.filter((p) => p.kind === "chat" || p.environment === "wsl");
+		}
+		return all.filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
+	};
+
+	ipcMain.handle(ipcChannels.projectsList, () => getVisibleProjects());
 	ipcMain.handle(ipcChannels.editorsList, async () => listConfiguredExternalEditors(settingsStore.get()));
 	ipcMain.handle(ipcChannels.editorsChooseExecutable, async () => {
 		const options = {
@@ -1147,8 +1134,10 @@ function registerIpc() {
 		},
 	);
 	ipcMain.handle(ipcChannels.projectsAdd, async () => {
-		const project = await projectStore.chooseAndAdd();
-		void appLogger.info("project", "Project added", { projectId: project?.id, path: project?.path });
+		const settings = settingsStore.get();
+		const env = settings.wslEnabled ? "wsl" as const : "windows" as const;
+		const project = await projectStore.chooseAndAdd(env);
+		void appLogger.info("project", "Project added", { projectId: project?.id, path: project?.path, environment: env });
 		return project;
 	});
 	ipcMain.handle(ipcChannels.projectsRemove, async (_event, id: string) => {
@@ -1158,14 +1147,14 @@ function registerIpc() {
 		}
 		await projectStore.remove(id);
 		void appLogger.info("project", "Project removed", { projectId: id });
-		return projectStore.list();
+		return getVisibleProjects();
 	});
 	ipcMain.handle(
 		ipcChannels.projectsReorder,
 		async (_event, projectIds: string[]) => {
 			const result = await projectStore.reorder(projectIds);
 			void appLogger.info("project", "Projects reordered", { count: projectIds.length });
-			return result;
+			return getVisibleProjects();
 		},
 	);
 	ipcMain.handle(ipcChannels.projectResourcesList, async (_event, projectId: string) => {
@@ -1247,14 +1236,55 @@ function registerIpc() {
 		},
 	);
 
+	// ── 聊天项目目录设置 ──
+
+	ipcMain.handle(ipcChannels.projectsChooseChatPath, async () => {
+		// 系统文件选择器，默认定位到当前聊天目录，便于用户就地切换。
+		const result = await dialog.showOpenDialog({
+			title: "选择聊天记录目录",
+			defaultPath: projectStore.getChatProjectPath(),
+			properties: ["openDirectory"],
+		});
+		if (result.canceled || result.filePaths.length === 0) return null;
+		return result.filePaths[0];
+	});
+
+	ipcMain.handle(
+		ipcChannels.projectsSetChatPath,
+		async (_event, path: string) => {
+			if (typeof path !== "string" || path.length === 0) throw new Error("Invalid chat path");
+			const project = await projectStore.setChatProjectPath(path);
+			// 路径变更后广播项目列表变化，渲染端据此刷新聊天项目的会话。
+			mainWindow?.webContents.send(ipcChannels.projectsChanged, getVisibleProjects());
+			void appLogger.info("project", "Chat project path updated", { path });
+			return project;
+		},
+	);
+
 	ipcMain.handle(ipcChannels.filesList, async (_event, projectId: string) => {
 		const project = projectStore.get(projectId);
 		if (!project) throw new Error(`Project not found: ${projectId}`);
 		return fileSystemService.listTree(project.path);
 	});
 
+	// 将 WSL Linux 路径转为 Windows 可访问的路径（/mnt/c → C:\，/home/... → \\wsl$\<distro>\...）
+	const toWindowsPath = (linuxPath: string): string => {
+		if (!linuxPath || /^[A-Za-z]:/.test(linuxPath)) return linuxPath; // 已是 Windows 路径
+		// /mnt/c/Users/... → C:\Users\...
+		const mntMatch = linuxPath.match(/^\/mnt\/([a-z])\/(.*)/);
+		if (mntMatch) {
+			return `${mntMatch[1].toUpperCase()}:\\${mntMatch[2].replace(/\//g, '\\')}`;
+		}
+		// /home/user/... → \\wsl$\<distro>\home\user\...
+		const settings = settingsStore.get();
+		if (settings.wslEnabled && settings.wslDistro) {
+			return `\\\\wsl$\\${settings.wslDistro}\\${linuxPath.replace(/^\//, '').replace(/\//g, '\\')}`;
+		}
+		return linuxPath;
+	};
+
 	ipcMain.handle(ipcChannels.filesOpen, async (_event, path: string) => {
-		const error = await shell.openPath(path);
+		const error = await shell.openPath(toWindowsPath(path));
 		// Electron 通过返回字符串报告打开失败；显式抛出后前端才能提示路径不存在或系统无法打开。
 		if (error) throw new Error(error);
 	});
@@ -1266,7 +1296,7 @@ function registerIpc() {
 
 	ipcMain.handle(ipcChannels.filesReadContent, async (_event, path: string) => {
 		try {
-			return await readFile(path, "utf8");
+			return await readFile(toWindowsPath(path), "utf8");
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
 				return "";
@@ -1408,7 +1438,7 @@ function registerIpc() {
 	ipcMain.handle(
 		ipcChannels.filesShowInFolder,
 		async (_event, path: string) => {
-			shell.showItemInFolder(path);
+			shell.showItemInFolder(toWindowsPath(path));
 		},
 	);
 
@@ -1416,7 +1446,15 @@ function registerIpc() {
 		ipcChannels.sessionsList,
 		async (_event, projectId?: string) => {
 			const project = projectId ? projectStore.get(projectId) : undefined;
-			return sessionScanner.list(project?.path);
+			let projectPath = project?.path;
+			// WSL 模式：将 Windows 项目路径转为 WSL /mnt/ 格式，
+			// 使 WSL 会话（CWD = /mnt/c/...）能正确匹配到项目。
+			if (projectPath && settingsStore.get().wslEnabled && settingsStore.get().wslDistro) {
+				projectPath = projectPath
+					.replace(/^([A-Za-z]):\\/, (_: string, d: string) => `/mnt/${d.toLowerCase()}/`)
+					.replace(/\\/g, '/');
+			}
+			return sessionScanner.list(projectPath);
 		},
 	);
 	ipcMain.handle(
@@ -1536,17 +1574,8 @@ function registerIpc() {
 	ipcMain.handle(
 		ipcChannels.gitOriginalContent,
 		async (_event, filePath: string) => {
-			return gitService.getOriginalContent(filePath);
-		},
-	);
-
-	// 获取工作区中被 Git 跟踪的变更文件列表（对比 HEAD），返回到前端用于右侧文件面板。
-	ipcMain.handle(
-		ipcChannels.gitChangedFiles,
-		async (_event, projectId: string) => {
-			const project = projectStore.get(projectId);
-			if (!project) return [];
-			return gitService.getChangedFiles(project.path);
+			const maxBytes = Math.max(1, settingsStore.get().maxEditorFileSizeMB) * 1024 * 1024;
+			return gitService.getOriginalContent(filePath, maxBytes);
 		},
 	);
 
@@ -1600,6 +1629,109 @@ function registerIpc() {
 		},
 	);
 
+	// -- Git 增强：提交历史 / 分支对比 / Graph
+	ipcMain.handle(
+		ipcChannels.gitCommitLog,
+		async (_event, projectId: string, options?: { maxEntries?: number; ref?: string; path?: string; allBranches?: boolean }) => {
+			const project = projectStore.get(projectId);
+			if (!project) return [];
+			return gitService.getCommitLog(project.path, options);
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitRefs,
+		async (_event, projectId: string) => {
+			const project = projectStore.get(projectId);
+			if (!project) return [];
+			return gitService.getRefs(project.path);
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitBranchCompare,
+		async (_event, projectId: string, base: string, target: string) => {
+			const project = projectStore.get(projectId);
+			if (!project) throw new Error(`Project not found: ${projectId}`);
+			return gitService.compareBranches(project.path, base, target);
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitCommitDetail,
+		async (_event, projectId: string, ref: string) => {
+			const project = projectStore.get(projectId);
+			if (!project) return null;
+			return gitService.getCommitDetail(project.path, ref);
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitCommitFileDiff,
+		async (_event, projectId: string, ref: string, filePath: string, originalPath?: string) => {
+			const project = projectStore.get(projectId);
+			if (!project) return null;
+			const maxBytes = Math.max(1, settingsStore.get().maxEditorFileSizeMB) * 1024 * 1024;
+			return gitService.getCommitFileDiff(project.path, ref, filePath, originalPath, maxBytes);
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitDiffFileBetween,
+		async (_event, projectId: string, ref1: string, ref2: string, filePath: string) => {
+			const project = projectStore.get(projectId);
+			if (!project) return "";
+			return gitService.diffFileBetweenRefs(project.path, ref1, ref2, filePath);
+		},
+	);
+
+
+	// Git 工作区状态 + Stage/Unstage
+	ipcMain.handle(
+		ipcChannels.gitStatus,
+		async (_event, projectId: string) => {
+			const project = projectStore.get(projectId);
+			if (!project) return { merge: [], index: [], workingTree: [], untracked: [] };
+			return gitService.getStatus(project.path);
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitWorkspaceFileDiff,
+		async (_event, projectId: string, group: import("../shared/types").GitWorkspaceDiffGroup, filePath: string) => {
+			const project = projectStore.get(projectId);
+			if (!project) return null;
+			const maxBytes = Math.max(1, settingsStore.get().maxEditorFileSizeMB) * 1024 * 1024;
+			return gitService.getWorkspaceFileDiff(project.path, group, filePath, maxBytes);
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitStage,
+		async (_event, projectId: string, paths: string[]) => {
+			const project = projectStore.get(projectId);
+			if (!project) throw new Error(`Project not found: ${projectId}`);
+			await gitService.stageFiles(project.path, paths);
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitUnstage,
+		async (_event, projectId: string, paths: string[]) => {
+			const project = projectStore.get(projectId);
+			if (!project) throw new Error(`Project not found: ${projectId}`);
+			await gitService.unstageFiles(project.path, paths);
+		},
+	);
+
+	ipcMain.handle(
+		ipcChannels.gitCommit,
+		async (_event, projectId: string, message: string) => {
+			const project = projectStore.get(projectId);
+			if (!project) throw new Error(`Project not found: ${projectId}`);
+			await gitService.commit(project.path, message);
+		},
+	);
 	ipcMain.handle(ipcChannels.piCheck, async () => {
 		// 用户手动指定的路径优先于自动检测
 		const settings = settingsStore.get();
@@ -1611,6 +1743,80 @@ function registerIpc() {
 			error: status.error,
 		});
 		return status;
+	});
+	// 智能查找 wsl.exe：优先绝对路径（含 32-bit Sysnative 绕过），全部不存在时回退到 PATH
+	const wslExeResolved = (() => {
+		const root = process.env.SystemRoot || "C:\\Windows";
+		const candidates = process.arch === "ia32"
+			? [join(root, "Sysnative", "wsl.exe"), join(root, "System32", "wsl.exe")]
+			: [join(root, "System32", "wsl.exe")];
+		for (const candidate of candidates) {
+			if (existsSync(candidate)) return { command: candidate, shell: false };
+		}
+		return { command: "wsl", shell: true };
+	})();
+	const wslExePath = wslExeResolved.command;
+	const wslShell = wslExeResolved.shell;
+	// WSL: 列出已安装的发行版（仅 Windows 有效，其他平台返回空数组）
+	ipcMain.handle(ipcChannels.wslListDistros, async () => {
+		if (process.platform !== "win32") return [] as string[];
+		try {
+			const { execFile } = await import("node:child_process");
+			return new Promise<string[]>((resolve) => {
+				execFile(wslExePath, ["-l", "-q"], { encoding: "utf8", timeout: 10_000, windowsHide: true, shell: wslShell },
+					(err, stdout) => {
+						if (err) { resolve([]); return; }
+						// 过滤空行、\0 字符、Windows 文件后缀等非法发行版名
+						const distros = stdout.split(/\r?\n/)
+							.map((s) => s.trim())
+							.filter((s) => s.length > 0 && !s.includes("\\") && !s.includes("\x00"));
+						resolve(distros);
+					});
+			});
+		} catch { return [] as string[]; }
+	});
+	// WSL: 验证连接性 — 分步检查 distro+user 可达性 和 pi 可用性
+	ipcMain.handle(ipcChannels.wslValidateConnection, async (_event, distro: string, user: string) => {
+		if (process.platform !== "win32") {
+			return { ok: false, whoami: "", piVersion: "", error: "WSL 仅在 Windows 上可用" };
+		}
+		try {
+			const { execFile } = await import("node:child_process");
+			// Step 1: 验证 distro + user 可达
+			const whoami = await new Promise<string>((resolve, reject) => {
+				execFile(wslExePath, ["-d", distro, "-u", user, "whoami"],
+					{ encoding: "utf8", timeout: 10_000, windowsHide: true, shell: wslShell },
+					(err, stdout) => {
+						if (err) { reject(err); return; }
+						resolve(stdout.trim());
+					});
+			});
+			// Step 2: 检查 pi 是否已安装
+			let piVersion = "";
+			try {
+				piVersion = await new Promise<string>((resolve, reject) => {
+					execFile(wslExePath, ["-d", distro, "-u", user, "pi", "--version"],
+						{ encoding: "utf8", timeout: 10_000, windowsHide: true, shell: wslShell },
+						(err, stdout) => {
+							if (err) { reject(err); return; }
+							resolve(stdout.trim());
+						});
+				});
+			} catch { /* pi 未安装，piVersion 保持空 */ }
+			return {
+				ok: true,
+				whoami,
+				piVersion,
+				error: piVersion ? "" : "pi CLI 未安装 — 请在 WSL 中运行 npm i -g @earendil-works/pi",
+			};
+		} catch (err) {
+			return {
+				ok: false,
+				whoami: "",
+				piVersion: "",
+				error: `无法连接到 WSL 发行版 "${distro}" 用户 "${user}"：${err instanceof Error ? err.message : String(err)}`,
+			};
+		}
 	});
 	ipcMain.handle(ipcChannels.piUpdateCheck, async () => {
 		const result = await extensionManager.checkPiUpdate();
@@ -1765,7 +1971,17 @@ function registerIpc() {
 	ipcMain.handle(ipcChannels.appInfo, () => ({
 		version: app.getVersion(),
 		releasesUrl: RELEASES_URL,
+		platform: process.platform,
 	}));
+	ipcMain.handle(ipcChannels.appPreferredSystemLanguages, () => {
+		// Renderer navigator.language can reflect Chromium launch flags or a stale browser locale.
+		// Electron exposes the OS preference order directly; use it for the "follow system" setting.
+		try {
+			return app.getPreferredSystemLanguages();
+		} catch {
+			return [];
+		}
+	});
 	ipcMain.handle(ipcChannels.appCheckUpdate, () =>
 		checkForAppUpdate(settingsStore.get().installationType),
 	);
@@ -1919,12 +2135,22 @@ function registerIpc() {
 					throw error;
 				}
 			}
-			// WSL 设置变更时同步更新会话扫描器
+			// WSL 设置变更时同步更新会话扫描器和配置管理器
 			if ("wslEnabled" in patch || "wslDistro" in patch || "wslUser" in patch) {
 				if (settings.wslEnabled && settings.wslDistro && settings.wslUser) {
-					sessionScanner.configureWsl(settings.wslDistro, settings.wslUser);
+					await sessionScanner.configureWsl(settings.wslDistro, settings.wslUser);
+					skillManager.configureWsl(settings.wslDistro, settings.wslUser);
+					promptManager.configureWsl(settings.wslDistro, settings.wslUser);
+					extensionManager.configureWsl(settings.wslDistro, settings.wslUser);
+					if (configManager) configManager.configureWsl(settings.wslDistro, settings.wslUser);
+					if (yaoPromptManager) yaoPromptManager.configureWsl(settings.wslDistro, settings.wslUser);
 				} else {
 					sessionScanner.clearWsl();
+					skillManager.configureWsl(null);
+					promptManager.configureWsl(null);
+					extensionManager.configureWsl(null);
+					if (configManager) configManager.configureWsl(null);
+					if (yaoPromptManager) yaoPromptManager.configureWsl(null);
 				}
 			}
 			return settings;
@@ -2253,6 +2479,127 @@ function registerIpc() {
 		}
 	});
 
+	// ── SkillHub（skill.xfyun.cn / skillhub CLI） ────────────────────
+	/** 搜索 SkillHub（通过 skillhub CLI 查询 skill.xfyun.cn 注册中心） */
+	ipcMain.handle(ipcChannels.skillHubSearch, async (_event, query: string, _page: number = 1) => {
+		try {
+			const { execSync } = await import("node:child_process");
+			const cliPath = require.resolve("@astron-team/skillhub/dist/index.js");
+			const cmd = `node "${cliPath}" search "${query.replace(/"/g, "\\\"")}" --limit 50 --json`;
+			const output = execSync(cmd, {
+				encoding: "utf8",
+				timeout: 15_000,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			const result = JSON.parse(output);
+			if (!result.ok) throw new Error(result.message || "搜索失败");
+
+			const items = (result.items || []).map((item: Record<string, unknown>) => ({
+				slug: `${item.namespace as string}/${item.slug as string}`,
+				name: item.slug as string,
+				description: (item.summary as string) || "",
+				description_zh: "",
+				iconUrl: undefined,
+				stars: 0,
+				downloads: 0,
+				installs: 0,
+				category: "",
+				subCategories: undefined,
+				version: (item.latestVersion as string) || "",
+				ownerName: (item.namespace as string) || "",
+				namespace: { canonicalName: "", displayName: "", publicSlug: item.namespace as string || "" },
+				labels: undefined,
+				tags: undefined,
+				source: "skillhub-cli",
+				verified: false,
+				updatedAt: undefined,
+			}));
+			return { query, total: result.total ?? items.length, items };
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			throw new Error(`搜索 SkillHub 失败: ${message}`);
+		}
+	});
+
+	/** 获取 SkillHub skill 详情（通过 CLI JSON 输出） */
+	ipcMain.handle(ipcChannels.skillHubDetail, async (_event, slug: string) => {
+		// 从前端传入的 slug 是 "namespace/slug" 格式
+		const parts = slug.split("/");
+		const skillSlug = parts.length > 1 ? parts.slice(1).join("/") : slug;
+		const ns = parts.length > 1 ? parts[0] : "global";
+		try {
+			const { execSync } = await import("node:child_process");
+			const cliPath = require.resolve("@astron-team/skillhub/dist/index.js");
+			// 搜索该 skill 的详情（通过 search 精确匹配）
+			const cmd = `node "${cliPath}" search "${skillSlug}" --namespace "${ns}" --limit 1 --json`;
+			const output = execSync(cmd, {
+				encoding: "utf8",
+				timeout: 15_000,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			const result = JSON.parse(output);
+			if (!result.ok || !result.items || result.items.length === 0) return null;
+			const item = result.items[0] as Record<string, unknown>;
+			return {
+				skill: {
+					slug: skillSlug as string,
+					displayName: (item.slug as string) || skillSlug,
+					summary: (item.summary as string) || "",
+					summary_zh: "",
+					iconUrl: undefined,
+					stats: { comments: 0, downloads: 0, installs: 0, stars: 0, versions: 0 },
+					category: "",
+					subCategories: undefined,
+					labels: undefined,
+					createdAt: 0,
+					updatedAt: 0,
+					source: "skillhub-cli",
+					verified: false,
+				},
+				latestVersion: {
+					version: (item.latestVersion as string) || "",
+					changelog: undefined,
+					createdAt: 0,
+				},
+				owner: { displayName: (item.namespace as string) || "", handle: (item.namespace as string) || "", image: null },
+				namespace: { canonicalName: "", displayName: "", handle: (item.namespace as string) || "", publicSlug: (item.namespace as string) || "" },
+				securityReports: undefined,
+			} as import("../shared/types").SkillHubDetail;
+		} catch (err) {
+			return null;
+		}
+	});
+
+	/** 安装 SkillHub skill 到 pi agent skills 目录 */
+	ipcMain.handle(ipcChannels.skillHubInstall, async (_event, slug: string, _installDir: string) => {
+		const homedir = (await import("node:os")).homedir();
+		const targetDir = join(homedir, ".pi", "agent", "skills");
+		// slug 是 "namespace/slug" 格式
+		const parts = slug.split("/");
+		const skillSlug = parts.length > 1 ? parts.slice(1).join("/") : slug;
+		const ns = parts.length > 1 ? parts[0] : "global";
+		try {
+			const { execSync } = await import("node:child_process");
+			const cliPath = require.resolve("@astron-team/skillhub/dist/index.js");
+			const cmd = `node "${cliPath}" install "${skillSlug}" --namespace "${ns}" --dir "${targetDir}" --json`;
+			const output = execSync(cmd, {
+				encoding: "utf8",
+				timeout: 30_000,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			const result = JSON.parse(output);
+			if (result.ok) {
+				void appLogger.info("skill-hub", "Installed skill", { slug, targetDir });
+				return { success: true, slug, installDir: targetDir };
+			}
+			throw new Error(result.message || "安装失败");
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			void appLogger.warn("skill-hub", "Install failed", { slug, error: message });
+			return { success: false, slug, installDir: targetDir, error: message };
+		}
+	});
+
 	// ── Yao Open Prompts（中文提示词精选） ─────────────────────────────
 	ipcMain.handle(ipcChannels.yaoPromptsList, async () => {
 		try {
@@ -2301,13 +2648,12 @@ function registerIpc() {
 		return result;
 	});
 	ipcMain.handle(ipcChannels.extensionsToggle, async (_event, source: string, enabled: boolean) => {
-		// Built-in extensions: also deploy/remove the .ts file so pi actually stops/starts loading it
 		if (source.startsWith("pi-deck-") && source.endsWith(".ts")) {
 			if (enabled) {
+				// 启用：确保 .ts 文件存在（处理老版本误删文件的恢复场景）
 				await ensurePiDeckExtension(source);
-			} else {
-				await removeStalePiDeckExtension(source);
 			}
+			// 禁用时不删除 .ts 文件：通过 settings.json 的 disabledExtensions 控制 pi 加载即可
 		}
 		await extensionManager.setEnabled(source, enabled);
 		void appLogger.info("extension", "Extension toggled", { source, enabled });
@@ -2503,6 +2849,10 @@ function registerIpc() {
 			return result;
 		},
 	);
+	ipcMain.handle(ipcChannels.agentsRefreshModels, async (_event, agentId: string) => {
+		void appLogger.info("agent", "Agent model refresh requested", { agentId });
+		return agentManager.refreshModels(agentId);
+	});
 	ipcMain.handle(ipcChannels.agentsCycleThinking, (_event, agentId: string) =>
 		agentManager.cycleThinking(agentId),
 	);
@@ -2747,6 +3097,7 @@ app.whenReady().then(async () => {
 		cycleModel: (agentId) => agentManager.cycleModel(agentId),
 		availableModels: (agentId) => agentManager.getAvailableModels(agentId),
 		setModel: (agentId, provider, modelId) => agentManager.setModel(agentId, provider, modelId),
+		refreshModels: (agentId) => agentManager.refreshModels(agentId),
 		cycleThinking: (agentId) => agentManager.cycleThinking(agentId),
 		setThinking: (agentId, level) => agentManager.setThinking(agentId, level),
 	});
@@ -2758,43 +3109,66 @@ app.whenReady().then(async () => {
 	await settingsStore.load();
 
 	// 根据已加载的 WSL 设置配置会话扫描器，使其能同时扫描 WSL 中的 pi 会话目录
-	{
+	const syncWslConfig = async () => {
 		const { wslEnabled, wslDistro, wslUser } = settingsStore.get();
 		if (wslEnabled && wslDistro && wslUser) {
-			sessionScanner.configureWsl(wslDistro, wslUser);
+			await sessionScanner.configureWsl(wslDistro, wslUser);
+			skillManager.configureWsl(wslDistro, wslUser);
+			promptManager.configureWsl(wslDistro, wslUser);
+			extensionManager.configureWsl(wslDistro, wslUser);
+				if (configManager) configManager.configureWsl(wslDistro, wslUser);
+			if (yaoPromptManager) yaoPromptManager.configureWsl(wslDistro, wslUser);
 		} else {
 			sessionScanner.clearWsl();
+			skillManager.configureWsl(null);
+			promptManager.configureWsl(null);
+			extensionManager.configureWsl(null);
+			if (configManager) configManager.configureWsl(null);
+			if (yaoPromptManager) yaoPromptManager.configureWsl(null);
 		}
-	}
+	};
+	await syncWslConfig();
 
 	// 自动部署 PiDeck 内置扩展：这些扩展提供桌面端差异预览、提问卡片和 Plan Mode。
-	// 放到 pi 自动发现目录后，新建/重启的 RPC Agent 会自动加载；只在内容变更时覆盖，避免用户目录产生无意义写入。
-	// Read disabled extensions so disabled built-in extensions aren't re-deployed at startup
-	const disabledExtList: string[] = await readFile(join(app.getPath("home"), ".pi", "agent", "settings.json"), "utf-8")
-		.then((raw: string) => JSON.parse(raw).disabledExtensions ?? [])
-		.catch(() => [] as string[]);
-	const disabledBuiltIn = new Set<string>(disabledExtList);
-
-	for (const extensionName of [
-		"pi-deck-file-capture.ts",
-		"pi-deck-ask-question.ts",
-		"pi-deck-plan-mode.ts",
-		"pi-deck-todo.ts",
-	]) {
-		if (disabledBuiltIn.has(extensionName)) {
-			// 已禁用：确保 .ts 文件被移除，避免 pi 残余加载
-			await removeStalePiDeckExtension(extensionName).catch(() => {});
-			continue;
+	// Windows 和 WSL 环境各自部署一份，保证切换 pi 来源后扩展仍然可用。
+	const deployExtensionsTo = async (homeDir: string) => {
+		const extDisabledPath = join(homeDir, ".pi", "agent", "settings.json");
+		const disabledExtList: string[] = await readFile(extDisabledPath, "utf-8")
+			.then((raw: string) => JSON.parse(raw).disabledExtensions ?? [])
+			.catch(() => [] as string[]);
+		const disabledBuiltIn = new Set<string>(disabledExtList);
+		for (const extensionName of ["pi-deck-ask-question.ts", "pi-deck-nul-redirect-fix.ts", "pi-deck-plan-mode.ts", "pi-deck-todo.ts"]) {
+			if (disabledBuiltIn.has(extensionName)) continue;
+			await ensurePiDeckExtension(extensionName, homeDir).catch((error) => {
+				console.error(`Failed to install ${extensionName}:`, error);
+			});
 		}
-		await ensurePiDeckExtension(extensionName).catch((error) => {
-			console.error(`Failed to install ${extensionName}:`, error);
+	};
+	// 始终部署到 Windows 本地 home
+	await deployExtensionsTo(app.getPath("home"));
+	// WSL 启用时额外部署到 WSL 目录（通过 \\wsl$ UNC）
+	const wslSettings = settingsStore.get();
+	if (wslSettings.wslEnabled && wslSettings.wslDistro && wslSettings.wslUser) {
+		const wslUncHome = `\\\\wsl$\\${wslSettings.wslDistro}\\home\\${wslSettings.wslUser}`;
+		await deployExtensionsTo(wslUncHome).catch(() => {
+			console.warn('[PiDeck] Failed to deploy extensions to WSL, skipping');
 		});
 	}
+
+	// 补齐 pi settings.json 缺失的默认配置项，新安装或精简配置的用户无需手动添加。
+	await ensureAllPiSettingsDefaults().catch((error) => {
+		console.error("Failed to ensure pi settings defaults:", error);
+	});
 
 	// 清理已废弃的 pi-deck-project-trust 扩展：RPC 模式下 pi 的 project_trust 事件 hasUI 恒为 false，
 	// 该扩展无法弹窗，信任确认改由桌面端 AgentManager.ensureProjectTrust 自行处理，删除残留避免用户误解。
 	await removeStalePiDeckExtension("pi-deck-project-trust.ts").catch((error) => {
 		console.error("Failed to remove stale pi-deck-project-trust extension:", error);
+	});
+
+	// 清理已废弃的 pi-deck-file-capture 扩展：该扩展的功能已被 renderer 端的直接工具参数解析取代。
+	await removeStalePiDeckExtension("pi-deck-file-capture.ts").catch((error) => {
+		console.error("Failed to remove stale pi-deck-file-capture extension:", error);
 	});
 
 	await appLogger.info("app", "Application started", {
@@ -2838,9 +3212,13 @@ app.whenReady().then(async () => {
 	// 项目列表可能位于杀软/同步盘较慢的 userData；窗口先显示，随后异步加载，避免 packaged app 打开时白屏等待。
 	void projectStore
 		.load()
-		.then(() =>
-			mainWindow?.webContents.send("projects:changed", projectStore.list()),
-		)
+		.then(() => {
+			const s = settingsStore.get();
+			const visible = s.wslEnabled
+				? projectStore.list().filter((p) => p.kind === "chat" || p.environment === "wsl")
+				: projectStore.list().filter((p) => p.kind === "chat" || !p.environment || p.environment === "windows");
+			mainWindow?.webContents.send("projects:changed", visible);
+		})
 		.catch(() => undefined);
 
 	// 启动后异步检查 RPC 超时时间，如果小于 600 秒则自动修正为 600 秒
@@ -2868,9 +3246,9 @@ app.whenReady().then(async () => {
  * 将 PiDeck 内置的 pi 扩展部署到用户扩展目录，使 pi 自动加载。
  * 仅在目标文件不存在或内容不一致时覆盖写入，避免不必要的磁盘操作。
  */
-async function ensurePiDeckExtension(extensionName: string): Promise<void> {
-	const homedir = app.getPath("home");
-	const extensionsDir = join(homedir, ".pi", "agent", "extensions");
+async function ensurePiDeckExtension(extensionName: string, wslHome?: string): Promise<void> {
+	const home = wslHome ?? app.getPath("home");
+	const extensionsDir = join(home, ".pi", "agent", "extensions");
 	const targetPath = join(extensionsDir, extensionName);
 
 	// 获取源文件路径：开发模式下在 resources/ 目录，打包后通过 process.resourcesPath 访问
@@ -2903,6 +3281,67 @@ async function removeStalePiDeckExtension(extensionName: string): Promise<void> 
 	const targetPath = join(app.getPath("home"), ".pi", "agent", "extensions", extensionName);
 	await rm(targetPath, { force: true });
 	console.log(`[PiDeck] Removed stale extension: ${targetPath}`);
+}
+
+/**
+ * 补齐 pi 全局 settings.json 的推荐默认项。
+ * 仅添加缺失的 key，不覆盖用户已有配置。
+ * 适用于新安装 pi 或配置精简的用户。
+ */
+/** 补齐指定 configDir 下 settings.json 的缺失默认项 */
+async function ensurePiSettingsDefaults(configDir: string, piVersionHint?: string): Promise<void> {
+	const filePath = join(configDir, "settings.json");
+	let current: Record<string, unknown> = {};
+	try {
+		const raw = await readFile(filePath, "utf8");
+		current = JSON.parse(raw) as Record<string, unknown>;
+	} catch { /* 文件不存在或解析失败，使用空对象 */ }
+
+	let changed = false;
+	const defaults: Record<string, unknown> = {
+		theme: "dark",
+		hideThinkingBlock: false,
+		defaultProjectTrust: "ask",
+		compaction: { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 },
+		retry: { enabled: true, maxRetries: 3 },
+	};
+
+	if (piVersionHint && !current.lastChangelogVersion) {
+		current.lastChangelogVersion = piVersionHint;
+		changed = true;
+	}
+
+	for (const [key, defaultValue] of Object.entries(defaults)) {
+		if (!(key in current)) {
+			current[key] = defaultValue;
+			changed = true;
+		}
+	}
+
+	if (changed) {
+		await mkdir(configDir, { recursive: true });
+		await writeFile(filePath, JSON.stringify(current, null, 2), "utf8");
+		console.log('[PiDeck] Ensured pi settings defaults at:', filePath);
+	}
+}
+
+/** 对当前环境和 WSL 环境（如果启用）都补齐 settings.json 默认项 */
+async function ensureAllPiSettingsDefaults(): Promise<void> {
+	const s = settingsStore.get();
+	let piVersion = "";
+	if (piLocator) {
+		piVersion = (await piLocator.check(undefined, s.wslEnabled, s.wslDistro, s.wslUser).catch(() => null))?.version ?? "";
+	}
+
+	// Windows 本地
+	const winDir = join(app.getPath("home"), ".pi", "agent");
+	await ensurePiSettingsDefaults(winDir, piVersion).catch(() => {});
+
+	// WSL（如果已配置）
+	if (s.wslEnabled && s.wslDistro && s.wslUser) {
+		const wslDir = join(`\\\\wsl$\\${s.wslDistro}\\home\\${s.wslUser}`, ".pi", "agent");
+		await ensurePiSettingsDefaults(wslDir, piVersion).catch(() => {});
+	}
 }
 
 app.on("before-quit", () => {
